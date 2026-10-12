@@ -89,7 +89,7 @@ Forecast: ~2500 authored lines (scaffold, generated-like packaging and tests).
 - RED observed per package (collection ImportError) before GREEN; details in writer report.
 - Verification (parent spot check, `scripts/test_in_docker.ps1 -NoBuild`): 6 packages built, 86 tests, 0 failures; smoke 33/33; robot.launch.py phineas and ferb keep 6 processes alive.
 - Not verified: Webots runtime (plugin loading, wheel signs, /clock with two controllers), lgpio API names on the Pi, TCRT5000 active level.
-- Review: assessment pending after this commit.
+- Review: risk high, consent granted, START refused `lens_context_budget_exceeded` (96 files, 4223 lines); per-commit split unassessable. User chose to continue without this review (2026-10-12); next smaller candidates will be reviewed.
 
 ## Next step
 
