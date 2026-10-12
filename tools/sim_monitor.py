@@ -8,7 +8,9 @@ Writes one line every --period seconds (wall time) to stdout and <out>/monitor.l
 sim time, per robot state, pose, commanded velocity, front line flag and the closest cube
 of its own colors (cx_norm, cy_norm), cubes delivered, plus the distance between the robots and
 the holder of the delivery-square lease. Optionally saves
-the camera frames of --frames-robots (default phineas) as PNG every --frames-every seconds.
+the camera frames of --frames-robots (default phineas) as PNG every --frames-every seconds, and with
+--frames-on-delivery the frame of a robot right after each counted delivery (it has just reversed out
+of the square and faces it, so the frame shows where the cube was left).
 """
 
 import argparse
@@ -29,13 +31,15 @@ ROBOTS = {"phineas": {"red", "orange", "yellow"}, "ferb": {"green", "blue", "pur
 
 
 class SimMonitor(Node):
-    def __init__(self, out_dir: str, frames_every: float, frames_robots: list[str]):
+    def __init__(self, out_dir: str, frames_every: float, frames_robots: list[str], on_delivery: bool = False):
         super().__init__("sim_monitor")
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
         self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0, "scoop": ""} for r in ROBOTS}
         self.last_frame = {robot: 0.0 for robot in frames_robots}
+        self.on_delivery = on_delivery
+        self.pending_delivery = {robot: 0 for robot in ROBOTS}
         self.occupant = ""
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
         self.create_subscription(String, "/zone/occupant", self._on_occupant, 10)
@@ -45,7 +49,10 @@ class SimMonitor(Node):
             self.create_subscription(Twist, f"/{robot}/cmd_vel", self._setter(robot, "cmd", lambda m: (m.linear.x, m.linear.y, m.angular.z)), 10)
             self.create_subscription(Bool, f"/{robot}/line_front", self._setter(robot, "line", lambda m: m.data), 10)
             self.create_subscription(CubeDetectionArray, f"/{robot}/cubes", self._cubes_cb(robot), 10)
-        if frames_every > 0:
+        if on_delivery:
+            frames_robots = list(ROBOTS)
+            self.last_frame = {robot: 0.0 for robot in ROBOTS}
+        if frames_every > 0 or on_delivery:
             for robot in frames_robots:
                 self.create_subscription(Image, f"/{robot}/camera/image_raw", self._image_cb(robot), 1)
 
@@ -58,6 +65,8 @@ class SimMonitor(Node):
     def _state_cb(self, robot):
         def cb(msg: RobotState):
             self.data[robot]["state"] = msg.state
+            if msg.delivered > self.data[robot]["delivered"]:
+                self.pending_delivery[robot] = msg.delivered
             self.data[robot]["delivered"] = msg.delivered
         return cb
 
@@ -81,15 +90,21 @@ class SimMonitor(Node):
 
     def _on_image(self, robot: str, msg: Image):
         now = time.monotonic()
-        if now - self.last_frame[robot] < self.frames_every:
+        delivered = self.pending_delivery[robot]
+        if delivered:
+            self.pending_delivery[robot] = 0
+            name = f"{robot}_delivery_{delivered}_t{self.sim_time:06.1f}.png"
+        elif self.frames_every > 0 and now - self.last_frame[robot] >= self.frames_every:
+            self.last_frame[robot] = now
+            name = f"{robot}_cam_{self.sim_time:07.1f}.png"
+        else:
             return
-        self.last_frame[robot] = now
         import cv2
         import numpy as np
 
         channels = 4 if msg.encoding == "bgra8" else 3
         img = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape(msg.height, msg.width, channels)
-        cv2.imwrite(os.path.join(self.out_dir, f"{robot}_cam_{self.sim_time:07.1f}.png"), img[:, :, :3])
+        cv2.imwrite(os.path.join(self.out_dir, name), img[:, :, :3])
 
     def line(self) -> str:
         parts = [f"t={self.sim_time:6.1f}"]
@@ -112,11 +127,12 @@ def main():
     parser.add_argument("--out", default="/tmp/monitor")
     parser.add_argument("--frames-every", type=float, default=0.0)
     parser.add_argument("--frames-robots", default="phineas", help="comma separated, e.g. phineas,ferb")
+    parser.add_argument("--frames-on-delivery", action="store_true")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
     rclpy.init()
-    node = SimMonitor(args.out, args.frames_every, args.frames_robots.split(","))
+    node = SimMonitor(args.out, args.frames_every, args.frames_robots.split(","), args.frames_on_delivery)
     end = time.monotonic() + args.duration
     next_line = time.monotonic()
     with open(os.path.join(args.out, "monitor.log"), "w") as log:
