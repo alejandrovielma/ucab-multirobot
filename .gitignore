@@ -9,3 +9,5 @@ __pycache__/
 # Webots per-user GUI layout
 *.wbproj
 .atl/
+# Webots world thumbnails
+src/multirobot_sim/worlds/.*.jpg

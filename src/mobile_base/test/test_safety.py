@@ -134,12 +134,48 @@ def test_deadlock_robot_with_priority_waits():
     assert cmd[0] == pytest.approx(0.0)
 
 
-def test_deadlock_while_carrying_rotates_instead_of_reversing():
+def test_deadlock_while_carrying_holds_still():
+    # Reversing leaves the cube behind and spinning in place ejects it from the fixed scoop.
     params = SafetyParams(has_priority=False)
     cmd, reason = _run_deadlock(SafetyGate(params), 10.0, params.deadlock_time + 0.2, carrying=True)
-    assert cmd[0] >= 0.0
-    assert cmd[2] != 0.0
-    assert "rotate" in reason
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert "hold" in reason
+
+
+def test_carrying_turns_only_while_moving_forward():
+    params = SafetyParams()
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.0, 0.0, 0.5), carrying=True))
+    assert cmd[0] == pytest.approx(params.carry_min_forward)
+    assert cmd[2] == pytest.approx(0.5)
+    assert "arc" in reason
+
+
+def test_carrying_limits_turn_rate():
+    params = SafetyParams()
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(0.1, 0.0, -3.0), carrying=True))
+    assert cmd[2] == pytest.approx(-params.carry_max_turn)
+
+
+def test_carrying_never_strafes_even_to_avoid_peer():
+    params = SafetyParams()
+    cmd, _ = SafetyGate(params).filter(
+        make_input(cmd=(0.1, 0.05, 0.0), peer_pose=peer_at(0.4, 0.0), carrying=True)
+    )
+    assert cmd[1] == pytest.approx(0.0)
+
+
+def test_carrying_stops_turning_when_forward_is_blocked():
+    # With the line ahead the robot cannot advance, so an in-place spin would eject the cube.
+    cmd, reason = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.0, 0.0, 0.5), line_front=True, carrying=True)
+    )
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert "line ahead" in reason
+
+
+def test_not_carrying_keeps_in_place_rotation():
+    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.0, 0.0, 0.5)))
+    assert cmd == pytest.approx((0.0, 0.0, 0.5))
 
 
 def test_backoff_ends_after_backoff_time():

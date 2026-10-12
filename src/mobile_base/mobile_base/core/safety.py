@@ -42,7 +42,10 @@ class SafetyParams:
     deadlock_time: float = 3.0
     backoff_speed: float = 0.05
     backoff_time: float = 1.0
-    escape_turn_speed: float = 0.8  # rad/s, used instead of reversing while carrying
+    # The fixed scoop only retains a cube when it is pushed forward: in-place spins and strafes
+    # eject it (observed in Webots), and reversing leaves it behind.
+    carry_min_forward: float = 0.05  # m/s, forward speed forced while turning with a cube
+    carry_max_turn: float = 0.6  # rad/s, turn-rate limit with a cube
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,24 @@ class SafetyGate:
         escape = self._update_deadlock(blocked, inp, peer)
         if escape is not None:
             return escape
+        if inp.carrying:
+            if inp.line_front and "line ahead" not in reasons:
+                reasons.append("line ahead")
+            vx, vy, wz = self._carry_limits(vx, wz, blocked or inp.line_front, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
+
+    def _carry_limits(self, vx: float, wz: float, forward_blocked: bool, reasons: list[str]) -> Command:
+        p = self.params
+        vx = max(vx, 0.0)
+        wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz))
+        if wz != 0.0:
+            if forward_blocked:
+                reasons.append("carrying: no in-place turn")
+                return 0.0, 0.0, 0.0
+            if vx < p.carry_min_forward:
+                vx = p.carry_min_forward
+                reasons.append("carrying: turn in arc")
+        return vx, 0.0, wz
 
     def _is_fresh(self, pose: Pose2D | None, now: float) -> bool:
         return pose is not None and now - pose.stamp <= self.params.pose_timeout
@@ -131,10 +151,9 @@ class SafetyGate:
         if p.has_priority or inp.now - self._blocked_since < p.deadlock_time:
             return None
         if inp.carrying:
-            bearing = relative_bearing(inp.own_pose.x, inp.own_pose.y, inp.own_pose.theta, peer.x, peer.y)
-            turn = -p.escape_turn_speed if bearing >= 0.0 else p.escape_turn_speed
-            self._escape_cmd = (0.0, 0.0, turn)
-            self._escape_reason = "deadlock: rotate away (carrying)"
+            # Any escape maneuver would drop the cube: hold still and let the priority robot go around.
+            self._escape_cmd = STOP
+            self._escape_reason = "deadlock: hold still (carrying)"
         else:
             self._escape_cmd = (-p.backoff_speed, 0.0, 0.0)
             self._escape_reason = "deadlock: backoff"

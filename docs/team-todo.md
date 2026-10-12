@@ -17,6 +17,9 @@ Criterios de aceptación:
 - Llama a `/zone/release` con `delivered=true` y el color del cubo, publica `delivered` en `state` con
   el `delivered_total` devuelto y vuelve a `EXPLORE`.
 - `vx` nunca es negativo mientras `carrying` es verdadero (ya hay un test que lo comprueba; debe seguir pasando).
+- Con cubo, el robot gira solo en arco (avanzando) y nunca en el sitio ni de lado: en Webots, un giro en el
+  sitio a velocidad 0.36 expulsó el cubo de la pala fija a los ~45°. `safety_gate` ya lo impone
+  (`carry_min_forward`, `carry_max_turn`), pero la trayectoria de `CARRY` debe planearse con giros amplios.
 - Tests unitarios nuevos para cada transición, con el tiempo inyectado como en los tests existentes.
 
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
@@ -29,6 +32,8 @@ Criterios de aceptación:
   hace que Phineas se desplace hacia **su izquierda** sin girar; lo mismo con `linear.x` (avanza) y
   `angular.z` (gira antihorario).
 - Si alguna rueda gira al revés, se corrige solo `wheel_signs` (no la cinemática) y se documenta el valor final.
+- Estado (2026-10-12): con el control por teclado, el desplazamiento lateral funciona sin girar; falta repetir
+  la prueba por ROS 2 con `cmd_vel`.
 
 ## 3. Calibrar rangos HSV y `line_threshold`
 

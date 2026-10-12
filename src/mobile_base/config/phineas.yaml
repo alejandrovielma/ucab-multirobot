@@ -38,7 +38,8 @@
     deadlock_time: 3.0
     backoff_speed: 0.05
     backoff_time: 1.0
-    escape_turn_speed: 0.8
+    carry_min_forward: 0.05
+    carry_max_turn: 0.6
 
 /phineas/cube_detector:
   ros__parameters:
