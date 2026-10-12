@@ -17,14 +17,17 @@ def carrying_fsm(**overrides):
     fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_time=0.1, **overrides), rng=random.Random(1))
     fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)], line_front=False))
     fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)], line_front=False))
-    fsm.step(BehaviorInput(now=0.5, cubes=[], line_front=False))
+    fsm.step(BehaviorInput(now=0.5, cubes=[], line_front=False, scoop_color="red"))
     assert fsm.state is State.CARRY
     fsm.take_actions()
     return fsm
 
 
-def tick(fsm, now, pose, holds_zone=False, line_front=False):
-    return fsm.step(BehaviorInput(now=now, cubes=[], line_front=line_front, pose=pose, holds_zone=holds_zone))
+def tick(fsm, now, pose, holds_zone=False, line_front=False, scoop="red"):
+    """By default the camera keeps seeing the red cube in the scoop."""
+    return fsm.step(
+        BehaviorInput(now=now, cubes=[], line_front=line_front, pose=pose, holds_zone=holds_zone, scoop_color=scoop)
+    )
 
 
 def zone(fsm) -> DeliveryZone:
@@ -158,7 +161,7 @@ def test_exit_releases_lease_with_color_and_explores():
     z = zone(fsm)
     tick(fsm, 2.0, (z.x, z.entry_y, SOUTH), holds_zone=True)
     tick(fsm, 4.0, (z.x, z.drop_y - 0.001, SOUTH), holds_zone=True)
-    tick(fsm, 5.0, (z.x, z.exit_y + 0.001, SOUTH), holds_zone=True)
+    tick(fsm, 5.0, (z.x, z.exit_y + 0.001, SOUTH), holds_zone=True, scoop="")
     assert fsm.take_actions() == [ZoneAction("release", delivered=True, color="red")]
     assert fsm.state is State.EXPLORE
     assert not fsm.carrying
@@ -171,7 +174,7 @@ def test_reverse_times_out_and_still_releases():
     tick(fsm, 4.0, (z.x, z.drop_y - 0.001, SOUTH), holds_zone=True)
     tick(fsm, 6.0, (z.x, z.drop_y, SOUTH), holds_zone=True)  # stuck: the gate refused the reverse
     assert fsm.state is State.DELIVER
-    tick(fsm, 7.1, (z.x, z.drop_y, SOUTH), holds_zone=True)
+    tick(fsm, 7.1, (z.x, z.drop_y, SOUTH), holds_zone=True, scoop="")
     assert fsm.take_actions() == [ZoneAction("release", delivered=True, color="red")]
     assert fsm.state is State.EXPLORE
 

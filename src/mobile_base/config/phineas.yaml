@@ -18,9 +18,10 @@
     approach_speed: 0.10
     approach_min_scale: 0.3
     lost_timeout: 1.0
-    capture_cy: 0.85
+    capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
     capture_time: 1.0
+    scoop_lost_timeout: 1.0
     carry_speed: 0.08
     carry_min_speed: 0.05
     carry_max_turn: 0.6
@@ -87,6 +88,11 @@
     aspect_max: 1.6
     min_solidity: 0.8
     open_kernel: 5
+    # Window between the scoop walls (calibracion_pala.wbt): cube in the U 0.60, at the mouth 0.04.
+    scoop_x_half: 0.2
+    scoop_y_min: 0.74
+    scoop_y_max: 0.84
+    scoop_min_fill: 0.30
     # OpenCV hue (0-179) ranges as [lo1, hi1, lo2, hi2, ...]; calibrate with the real cubes.
     hue_ranges:
       red: [0, 8, 169, 179]

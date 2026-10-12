@@ -13,8 +13,8 @@ def make_fsm(**overrides):
     return BehaviorFSM(params, rng=random.Random(42))
 
 
-def tick(fsm, now, cubes=(), line_front=False):
-    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=line_front))
+def tick(fsm, now, cubes=(), line_front=False, scoop=""):
+    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=line_front, scoop_color=scoop))
 
 
 def test_starts_exploring_forward():
@@ -97,7 +97,7 @@ def test_close_cube_triggers_capture_then_carry():
     assert cmd[0] == pytest.approx(fsm.params.capture_speed)
     tick(fsm, 0.6)
     assert fsm.state is State.CAPTURE
-    tick(fsm, 1.2)
+    tick(fsm, 1.2, scoop="red")
     assert fsm.state is State.CARRY
     assert fsm.carrying
 
@@ -106,10 +106,10 @@ def test_carry_never_reverses():
     fsm = make_fsm(capture_time=0.1)
     tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
-    tick(fsm, 0.5)
+    tick(fsm, 0.5, scoop="red")
     assert fsm.state is State.CARRY
     for i in range(50):
-        cmd = tick(fsm, 1.0 + i * 0.1, cubes=[Cube("blue", 0.0, 0.9, 900.0)], line_front=i % 2 == 0)
+        cmd = tick(fsm, 1.0 + i * 0.1, cubes=[Cube("blue", 0.0, 0.9, 900.0)], scoop="red")
         assert cmd[0] >= 0.0
         assert fsm.state is State.CARRY
 

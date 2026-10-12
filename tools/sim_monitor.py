@@ -34,7 +34,7 @@ class SimMonitor(Node):
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
-        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0} for r in ROBOTS}
+        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0, "scoop": ""} for r in ROBOTS}
         self.last_frame = {robot: 0.0 for robot in frames_robots}
         self.occupant = ""
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
@@ -71,6 +71,7 @@ class SimMonitor(Node):
             mine = [c for c in msg.cubes if c.color in ROBOTS[robot]]
             best = max(mine, key=lambda c: c.area_px, default=None)
             self.data[robot]["cube"] = None if best is None else (best.color, best.cx_norm, best.cy_norm)
+            self.data[robot]["scoop"] = msg.scoop_color
         return cb
 
     def _image_cb(self, robot):
@@ -96,7 +97,7 @@ class SimMonitor(Node):
             pose = "pose=----" if d["pose"] is None else f"pose=({d['pose'][0]:+.2f},{d['pose'][1]:+.2f},{math.degrees(d['pose'][2]):+4.0f})"
             cmd = "cmd=----" if d["cmd"] is None else f"cmd=({d['cmd'][0]:+.2f},{d['cmd'][1]:+.2f},{d['cmd'][2]:+.2f})"
             cube = "cube=-" if d["cube"] is None else f"cube={d['cube'][0]}@({d['cube'][1]:+.2f},{d['cube'][2]:.2f})"
-            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} n={d['delivered']}")
+            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} scoop={d['scoop'] or '-'} n={d['delivered']}")
         p, f = self.data["phineas"]["pose"], self.data["ferb"]["pose"]
         if p and f:
             parts.append(f"| dist={math.hypot(p[0] - f[0], p[1] - f[1]):.2f}")

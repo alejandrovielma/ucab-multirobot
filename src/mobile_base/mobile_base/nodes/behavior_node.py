@@ -30,6 +30,7 @@ class BehaviorNode(Node):
 
         self._cubes: list[Cube] = []
         self._cubes_time = 0.0
+        self._scoop_color = ""
         self._line_front = False
         self._pose = None
         self._zone_occupant = ""
@@ -48,6 +49,7 @@ class BehaviorNode(Node):
 
     def _on_cubes(self, msg: CubeDetectionArray):
         self._cubes = [Cube(c.color, c.cx_norm, c.cy_norm, c.area_px) for c in msg.cubes]
+        self._scoop_color = msg.scoop_color
         self._cubes_time = now_sec(self)
 
     def _on_line(self, msg: Bool):
@@ -61,12 +63,21 @@ class BehaviorNode(Node):
 
     def _tick(self):
         now = now_sec(self)
-        cubes = self._cubes if now - self._cubes_time <= self._cube_timeout else []
+        fresh = now - self._cubes_time <= self._cube_timeout
+        cubes = self._cubes if fresh else []
+        scoop_color = self._scoop_color if fresh else ""
         pose = (self._pose.x, self._pose.y, self._pose.theta) if self._pose else None
         previous = self.fsm.state
         holds_zone = self._zone_occupant == self.robot
         vx, vy, wz = self.fsm.step(
-            BehaviorInput(now=now, cubes=cubes, line_front=self._line_front, pose=pose, holds_zone=holds_zone)
+            BehaviorInput(
+                now=now,
+                cubes=cubes,
+                line_front=self._line_front,
+                pose=pose,
+                holds_zone=holds_zone,
+                scoop_color=scoop_color,
+            )
         )
         if self.fsm.state is not previous:
             self.get_logger().info(f"{previous.value} -> {self.fsm.state.value}")

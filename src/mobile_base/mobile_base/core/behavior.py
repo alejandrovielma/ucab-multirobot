@@ -3,7 +3,8 @@
 EXPLORE  -> drive forward; on the border line turn in place a random 135-225 deg (measured with the
             overhead pose; a random time when there is no pose).
 APPROACH -> steer toward the largest (closest) cube of my colors.
-CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop.
+CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop; it counts only if the
+            camera then sees a cube of my color inside the U (scoop_color), otherwise APPROACH again.
 CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point north of the delivery
             square (overhead pose); without it, wait at this robot's own waiting point, away from
             the entry so the robot holding the lease can get through. Reaching the border line
@@ -11,6 +12,9 @@ CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point no
 DELIVER  -> with the lease: drive south across the square's tape until the cube is inside,
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
+
+While carrying, a cube not seen in the scoop for scoop_lost_timeout ends the transport (lease
+released with delivered=false), and a delivery counts only if the cube left the scoop after reversing.
 
 Geofence (with the overhead pose and a track polygon): the front point outside the track counts as
 the border line in every state but DELIVER, and with the center already outside the robot drops
@@ -73,9 +77,10 @@ class BehaviorParams:
     approach_speed: float = 0.10  # m/s
     approach_min_scale: float = 0.3  # forward scale when the cube is at the image edge
     lost_timeout: float = 1.0  # s
-    capture_cy: float = 0.85  # cube this low in the image is right in front of the scoop
+    capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
     capture_time: float = 1.0  # s
+    scoop_lost_timeout: float = 1.0  # s without seeing the cube in the scoop while carrying
     # Transport: arcs only (the gate enforces the same limits).
     carry_speed: float = 0.08  # m/s
     carry_min_speed: float = 0.05  # m/s
@@ -110,6 +115,7 @@ class BehaviorInput:
     line_front: bool
     pose: tuple[float, float, float] | None = None
     holds_zone: bool = False  # /zone/occupant == this robot
+    scoop_color: str = ""  # color seen inside the scoop by the camera ("" = empty or unknown)
 
 
 class BehaviorFSM:
@@ -130,6 +136,7 @@ class BehaviorFSM:
         self._dropping = False
         self._drop_until = 0.0
         self._last_request: float | None = None
+        self._scoop_seen = 0.0
         self._actions: list[ZoneAction] = []
 
     @property
@@ -172,6 +179,17 @@ class BehaviorFSM:
         if abs(err) > 0.3:
             return (0.0, 0.0, math.copysign(self.params.turn_speed, err))
         return (self.params.explore_speed, 0.0, 0.0)
+
+    def _still_holding(self, inp: BehaviorInput) -> bool:
+        if is_mine(inp.scoop_color, self.params.my_colors):
+            self._scoop_seen = inp.now
+        return inp.now - self._scoop_seen <= self.params.scoop_lost_timeout
+
+    def _abandon_transport(self, inp: BehaviorInput) -> Command:
+        self._give_up_cube(inp)
+        self.state = State.EXPLORE
+        self._start_turn(inp.now, inp.pose)
+        return self._explore(inp)
 
     def _give_up_cube(self, inp: BehaviorInput) -> None:
         if inp.holds_zone:
@@ -242,8 +260,14 @@ class BehaviorFSM:
 
     def _capture(self, inp: BehaviorInput) -> Command:
         if inp.now >= self._capture_until:
+            if not is_mine(inp.scoop_color, self.params.my_colors):
+                # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again.
+                self.state = State.APPROACH
+                self._last_seen = inp.now
+                return self._approach(inp)
             self.state = State.CARRY
-            self._carried_color = self._target_color
+            self._carried_color = inp.scoop_color
+            self._scoop_seen = inp.now
             self._last_request = None
             return self._carry(inp)
         return (self.params.capture_speed, 0.0, 0.0)
@@ -271,10 +295,9 @@ class BehaviorFSM:
         z = self._zone
         if inp.line_front:
             # The gate turns in place at the line and the turn drops the cube: stop carrying.
-            self._give_up_cube(inp)
-            self.state = State.EXPLORE
-            self._start_turn(inp.now, inp.pose)
-            return self._explore(inp)
+            return self._abandon_transport(inp)
+        if not self._still_holding(inp):
+            return self._abandon_transport(inp)  # the camera no longer sees the cube in the U
         x, y, _ = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone:
@@ -296,6 +319,8 @@ class BehaviorFSM:
         if not inp.holds_zone:
             self._ask_lease(inp)  # lease expired mid-maneuver: the gate blocks the tape and the reverse
         if not self._dropping:
+            if not self._still_holding(inp):
+                return self._abandon_transport(inp)
             if y > z.drop_y:
                 # The square's north tape is crossed on purpose here: line_front is ignored.
                 carrot_y = max(y - p.enter_lookahead, z.drop_y - p.enter_lookahead)
@@ -305,7 +330,9 @@ class BehaviorFSM:
             self._drop_until = inp.now + p.drop_timeout
         if y < z.exit_y and inp.now < self._drop_until:
             return (-p.reverse_speed, 0.0, 0.0)
-        self._actions.append(ZoneAction("release", delivered=True, color=self._carried_color))
+        # Counted only if the cube stayed in the square: it must have left the scoop.
+        left_behind = not is_mine(inp.scoop_color, self.params.my_colors)
+        self._actions.append(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
         self._carried_color = ""
         self.state = State.EXPLORE
