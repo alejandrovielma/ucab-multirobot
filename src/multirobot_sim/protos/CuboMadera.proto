@@ -1,0 +1,40 @@
+#VRML_SIM R2025a utf8
+# Cubo de madera pintado de la pista UCAB.
+# Medidas estimadas de las fotos: ~2.5 cm de lado; madera ~600 kg/m3 -> ~9.4 g.
+# template language: javascript
+
+PROTO CuboMadera [
+  field SFVec3f    translation 0 0 0.0125
+  field SFRotation rotation    0 0 1 0
+  field SFString   name        "cubo"
+  field SFColor    color       0.78 0.12 0.10
+  field SFVec3f    size        0.025 0.025 0.025
+  field SFFloat    mass        0.0094
+]
+{
+  Solid {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    model "cubo"
+    children [
+      Shape {
+        appearance PBRAppearance {
+          baseColor IS color
+          roughness 0.7
+          metalness 0
+        }
+        geometry Box {
+          size IS size
+        }
+      }
+    ]
+    boundingObject Box {
+      size IS size
+    }
+    physics Physics {
+      density -1
+      mass IS mass
+    }
+  }
+}
