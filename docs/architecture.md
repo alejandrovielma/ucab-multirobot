@@ -97,7 +97,7 @@ En este orden, en cada ciclo de 20 Hz:
    frente manda la línea (no avanza y puede girar en el sitio aunque el cubo se caiga; en Webots, salir
    de la línea en arco con el cubo sacó al robot del tablero), y con otro robot al costado (a 25° o más
    del frente y a 0,30 m o más) se aleja en arco en vez de quedarse congelado. Al llegar a la línea con
-   cubo,  da el transporte por perdido, devuelve la llave si la tenía y vuelve a explorar.
+   cubo, `behavior` da el transporte por perdido, devuelve la llave si la tenía y vuelve a explorar.
 
 **Excepción de entrega.** Mientras el robot tiene la llave del cuadro (`/zone/occupant` igual a su
 nombre) y su propia pose cenital está dentro del pasillo de entrega mirando al sur (±60°), puede
