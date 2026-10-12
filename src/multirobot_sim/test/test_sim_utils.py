@@ -76,3 +76,19 @@ def test_world_robots_are_extern_and_have_sim_sensors():
     assert 'EXTERNPROTO "../protos/RecolectorUCAB.proto"' in world
     assert (PKG / "protos" / "RecolectorUCAB.proto").is_file()
     assert (PKG / "worlds" / "textures" / "pista_ucab.png").is_file()
+
+
+def test_scoop_color_is_never_classified_as_a_cube_color():
+    # In Webots the orange scoop wings were detected as an orange cube, so Phineas chased its
+    # own scoop forever. The scoop must stay unsaturated (gray/black) for the HSV classifier.
+    import colorsys
+    import re
+
+    from mobile_base.core.colors import classify
+
+    proto = (PKG / "protos" / "RecolectorUCAB.proto").read_text()
+    match = re.search(r"DEF PLA_AP PBRAppearance \{ baseColor ([\d.]+) ([\d.]+) ([\d.]+)", proto)
+    assert match, "scoop appearance PLA_AP not found"
+    r, g, b = (float(v) for v in match.groups())
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    assert classify(h * 179, s * 255, v * 255) is None
