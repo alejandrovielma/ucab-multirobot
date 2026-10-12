@@ -42,7 +42,7 @@
     body_half_width: 0.082
     escape_angle: 1.5708  # 90 deg arc that must fit after a capture
     skip_time: 3.0
-    backoff_time: 1.0
+    backoff_time: 3.0
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
     # Keep these equal in behavior and safety_gate.
     zone_x: -0.13

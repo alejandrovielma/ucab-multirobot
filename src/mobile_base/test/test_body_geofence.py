@@ -158,6 +158,19 @@ def test_explore_backs_off_when_there_is_no_room_to_turn():
     f = fsm()
     cmd = step(f, 0.0, (2.0 - 0.01 - FP.front, 1.0, 0.0), line_front=True)
     assert cmd == pytest.approx((-f.params.reverse_speed, 0.0, 0.0))
+    # Still too close after a while: keep backing off; with room, the spin starts.
+    assert step(f, 0.5, (2.0 - 0.115, 1.0, 0.0))[0] < 0.0
+    cmd = step(f, 1.0, (2.0 - FP.sweep_radius - 0.001, 1.0, 0.0))
+    assert cmd[0] == 0.0 and cmd[2] != 0.0
+
+
+def test_spin_room_is_the_full_sweep_circle_not_the_next_instant():
+    # Webots run 12: 0.3 s of rotation fitted, the whole turn did not, and the robot rocked in a corner.
+    f = fsm()
+    pose = (2.0 - 0.115, 1.0, math.pi / 2)  # parallel to the wall: 20 deg fit, a full spin does not
+    assert path_inside(ARENA, FP, pose, 0.0, 1.2, 0.3)
+    cmd = step(f, 0.0, pose, line_front=True)
+    assert cmd[0] < 0.0
 
 
 def test_capture_skipped_when_no_arc_could_leave_the_tape_afterwards():

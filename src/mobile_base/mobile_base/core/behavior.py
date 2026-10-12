@@ -106,7 +106,7 @@ class BehaviorParams:
     body_half_width: float = 0.082
     escape_angle: float = math.radians(90.0)  # arc that must fit after a capture
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
-    backoff_time: float = 1.0  # s, reverse when there is no room to spin
+    backoff_time: float = 3.0  # s, longest reverse looking for room to spin
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
     zone_square_y: float = DeliveryZone.square_y
@@ -251,13 +251,19 @@ class BehaviorFSM:
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
         self._check_turn_room(now, pose)
 
+    def _room_to_spin(self, pose) -> bool:
+        """The whole 135-225 deg turn fits: the corners sweep a circle of sweep_radius.
+
+        Checking only the next 0.3 s let a turn start and get stuck halfway (Webots run 12: Phineas
+        rocked left and right in a corner for a minute)."""
+        if pose is None or not self._track.enabled:
+            return True
+        return self._track.distance_to_edge(pose[0], pose[1]) >= self._body.sweep_radius
+
     def _check_turn_room(self, now: float, pose) -> None:
-        """Spin only where the body corners stay inside; else the other way, else back off first."""
+        """No room for the full spin: back off (pose-checked reverse) until there is, at most backoff_time."""
         p = self.params
-        if self._fits(pose, 0.0, self._turn_dir * p.turn_speed, carrying=False):
-            return
-        if self._fits(pose, 0.0, -self._turn_dir * p.turn_speed, carrying=False):
-            self._turn_dir = -self._turn_dir
+        if self._room_to_spin(pose):
             return
         self._backoff_until = now + p.backoff_time
         self._turn_until = max(self._turn_until, self._backoff_until + 2.0 * (self._turn_goal or 0.0) / p.turn_speed)
@@ -272,11 +278,10 @@ class BehaviorFSM:
 
     def _explore(self, inp: BehaviorInput) -> Command:
         p = self.params
-        if self._backoff_until is not None and inp.now >= self._backoff_until:
-            self._backoff_until = None
-            if self._turn_until is not None and inp.pose is not None:
+        if self._backoff_until is not None and (inp.now >= self._backoff_until or self._room_to_spin(inp.pose)):
+            self._backoff_until = None  # room found (or gave up backing off): spin now
+            if inp.pose is not None:
                 self._turn_prev_theta = inp.pose[2]
-                self._check_turn_room(inp.now, inp.pose)
         if self._turn_until is not None and self._turn_done(inp):
             self._turn_until = None
         if self._turn_until is None:
