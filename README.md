@@ -33,9 +33,9 @@ El diseño completo (hardware, pines, decisiones y alternativas) está en
 
 | Parte | Estado |
 |---|---|
-| Lógica pura: cinemática mecanum, filtro de seguridad, colores, máquina de estados, llave del cuadro | Implementada, 99 pruebas pasando |
+| Lógica pura: cinemática mecanum, filtro de seguridad, colores, máquina de estados, llave del cuadro | Implementada, con pruebas |
 | Simulación en Webots con los dos robots | **Funciona**: exploran, giran ante el borde, capturan cubos de su color y se esquivan |
-| Transporte y entrega del cubo en el cuadro (estado `CARRY`) | **Pendiente**: hoy el robot se detiene al capturar |
+| Transporte y entrega del cubo en el cuadro (`CARRY` y `DELIVER`) | Implementado y probado en lógica pura; validación en Webots en curso |
 | Nodos del robot real (HAT, sensor de línea, cámara) | Escritos; arrancan sin hardware, **sin probar en la Pi 5** |
 | Localizador con cámara cenital | Esqueleto y homografía con pruebas; falta la captura real |
 
@@ -76,7 +76,9 @@ flowchart LR
    por tener poca saturación.
 2. **`behavior`** es una máquina de estados:
    `EXPLORE` (avanza y gira al ver el borde) → `APPROACH` (se orienta hacia el cubo propio más grande)
-   → `CAPTURE` (empuja para meterlo en la pala) → `CARRY` (pendiente). Publica un comando *deseado*.
+   → `CAPTURE` (empuja para meterlo en la pala) → `CARRY` (va en arco al punto de entrada del cuadro y
+   pide la llave) → `DELIVER` (entra al cuadro, retrocede dejando el cubo y devuelve la llave).
+   Publica un comando *deseado*.
 3. **`safety_gate`** es el único nodo que escribe en los motores. Recibe el comando deseado y lo recorta
    según las reglas de seguridad. Así ninguna lógica nueva puede saltárselas (patrón *safety filter*).
 4. **`zone_arbiter`** (en la Pi de Perry) presta la llave del cuadro con caducidad de 60 s, publica un
@@ -90,9 +92,10 @@ flowchart LR
 | Pose propia con más de 0,5 s → parada | La evasión depende de saber dónde están los dos |
 | Solo traslación hacia adelante (sin desplazamiento lateral ni reversa) | Hay un único sensor de línea, delantero: moverse de lado o atrás es ciego al borde |
 | Línea negra al frente → no avanza, puede girar | No salir de la pista |
+| Excepción: con la llave del cuadro y dentro del pasillo de entrega, cruza la cinta del cuadro y retrocede a ≤ 0,05 m/s sin cubo | Es la única forma de dejar el cubo con una pala fija; el filtro lo verifica con su propia pose y la llave |
 | Otro robot a menos de 0,60 m al frente → frena y gira alejándose; a 0,40 m se detiene | Las palas se tocan a unos 0,38 m entre centros |
 | Bloqueo mutuo de más de 3 s → Ferb gira para salir, Phineas espera | Una regla asimétrica evita que los dos cedan a la vez (*livelock*) |
-| Con cubo: solo giros en arco | Girar en el sitio expulsa el cubo de la pala fija |
+| Con cubo: solo giros en arco; con la línea al frente, sale de ella en arco lento | Girar en el sitio expulsa el cubo de la pala fija; quedarse quieto en el borde bloquearía al robot para siempre |
 
 Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
 
@@ -306,4 +309,4 @@ El registro completo con evidencias está en [odd/tasks/phineas-repo-base.md](od
 - Antes de subir: `powershell -File scripts/test_in_docker.ps1 -NoBuild` debe terminar en
   `all checks passed`.
 - Las tareas pendientes, con criterios de aceptación, están en [docs/team-todo.md](docs/team-todo.md).
-  La siguiente es la entrega del cubo en el cuadro (`CARRY`).
+  Las siguientes están en [docs/team-todo.md](docs/team-todo.md).

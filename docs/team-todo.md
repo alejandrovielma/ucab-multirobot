@@ -3,7 +3,12 @@
 Cada tarea es acotada y tiene un criterio de aceptación verificable. Antes de dar una tarea por
 terminada, `powershell -File scripts/test_in_docker.ps1` debe seguir pasando.
 
-## 1. Comportamiento de transporte y entrega (`CARRY`)
+## 1. Comportamiento de transporte y entrega (`CARRY`) — implementado
+
+Estado: implementado en la rama `feat/carry-delivery` (ver [odd/tasks/carry-delivery.md](../odd/tasks/carry-delivery.md)).
+Se eligió la reversa acotada bajo la llave del cuadro. Quedan pendientes: medir el cuadro real y
+ajustar `zone_*` en los YAML, y validar la entrada al cuadro con la cámara cenital real.
+Criterios originales:
 
 Dónde: `BehaviorFSM._carry` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py)
 y el nodo `behavior_node.py` (clientes de servicio).
