@@ -5,9 +5,32 @@ from pathlib import Path
 
 import pytest
 
-from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs
+from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs, read_camera_image
 
 PKG = Path(__file__).resolve().parents[1]
+
+
+class _FakeCamera:
+    def __init__(self, result):
+        self._result = result
+
+    def getImage(self):
+        if isinstance(self._result, Exception):
+            raise self._result
+        return self._result
+
+
+def test_read_camera_image_returns_bytes_when_available():
+    assert read_camera_image(_FakeCamera(b"\x01\x02")) == b"\x01\x02"
+
+
+def test_read_camera_image_tolerates_null_image_before_first_frame():
+    # Webots' Python wrapper dereferences a NULL pointer until the first frame exists.
+    assert read_camera_image(_FakeCamera(ValueError("NULL pointer access"))) is None
+
+
+def test_read_camera_image_treats_empty_as_missing():
+    assert read_camera_image(_FakeCamera(b"")) is None
 
 
 def test_parse_wheel_signs():

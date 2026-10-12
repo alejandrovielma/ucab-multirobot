@@ -26,11 +26,12 @@ from std_msgs.msg import Bool
 
 from mobile_base.core.kinematics import MecanumGeometry, normalize, wheel_speeds
 from multirobot_interfaces.msg import RobotPose
-from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs
+from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs, read_camera_image
 
 MOTORS = ("motor_fl", "motor_fr", "motor_rl", "motor_rr")
 MAX_MOTOR_SPEED = 10.5  # rad/s, velMaxMotor of RecolectorUCAB.proto
 CAMERA_PERIOD_MS = 64
+CAMERA_MISSING_WARN_S = 5.0  # warn if the camera still has no frame after this sim time
 POSE_PERIOD_S = 0.1
 CMD_TIMEOUT_S = 0.5
 
@@ -104,8 +105,12 @@ class RecolectorDriver:
             motor.setVelocity(speed * sign)
 
     def _publish_image(self, now: float):
-        data = self._camera.getImage()
-        if not data:
+        data = read_camera_image(self._camera)
+        if data is None:
+            if now > CAMERA_MISSING_WARN_S:
+                self._node.get_logger().warn(
+                    f"camera has produced no image after {now:.1f} s", throttle_duration_sec=5.0
+                )
             return
         msg = Image()
         msg.header.stamp = _sim_time(now)

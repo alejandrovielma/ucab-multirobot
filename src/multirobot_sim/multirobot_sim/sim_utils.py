@@ -18,6 +18,19 @@ def is_black(raw_value: float, threshold: float) -> bool:
     return raw_value < threshold
 
 
+def read_camera_image(camera) -> bytes | None:
+    """Return the latest camera frame, or None if Webots has not produced one yet.
+
+    Webots' Python Camera.getImage() dereferences the C pointer without a NULL check, so it
+    raises ValueError until the first frame exists (and over a remote extern connection).
+    """
+    try:
+        data = camera.getImage()
+    except ValueError:
+        return None
+    return data or None
+
+
 def noisy_pose(
     x: float, y: float, theta: float, sigma_xy: float, sigma_theta: float, rng: random.Random
 ) -> tuple[float, float, float]:
