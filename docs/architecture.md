@@ -109,7 +109,7 @@ cuadro están en `zone_*` de los YAML; un test exige que coincidan entre `behavi
 ```mermaid
 stateDiagram-v2
     CAPTURE --> CARRY: cubo en la pala
-    CARRY --> CARRY: arco hacia el punto de entrada; a 0,40 m pide /zone/request (cada 1 s)
+    CARRY --> CARRY: pide /zone/request cada 1 s; sin llave va a su punto de espera, con llave al de entrada
     CARRY --> DELIVER: en el punto de entrada y con la llave
     DELIVER --> DELIVER: avanza al sur cruzando la cinta hasta drop_y (cubo dentro)
     DELIVER --> DELIVER: retrocede hasta exit_y (la U abierta deja el cubo)
@@ -118,7 +118,9 @@ stateDiagram-v2
 
 El punto de entrada está al norte del cuadro (`zone_entry_y`); el robot entra mirando al sur y se
 detiene cuando su centro llega a `zone_drop_y`, que deja el cubo (0,155 m delante del centro) en el
-centro del cuadro. Si el otro robot tiene la llave, espera quieto en el punto de entrada. El nodo
+centro del cuadro. Si el otro robot tiene la llave, espera quieto en su propio punto de espera
+(`wait_x`, `wait_y`: Phineas al oeste, Ferb al este), lejos de la entrada: en Webots, esperar en la
+entrada bloqueó al robot que tenía la llave hasta que esta caducó. El nodo
 `behavior` convierte las acciones de la máquina de estados en llamadas asíncronas a los servicios y
 toma el conteo oficial (`delivered_total`) de la respuesta de `/zone/release`.
 

@@ -1,10 +1,12 @@
 """Behavior finite state machine of a collector robot (pure logic, time passed in).
 
-EXPLORE  -> drive forward; on the border line turn in place for a random time.
+EXPLORE  -> drive forward; on the border line turn in place a random 135-225 deg (measured with the
+            overhead pose; a random time when there is no pose).
 APPROACH -> steer toward the largest (closest) cube of my colors.
 CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop.
-CARRY    -> drive in arcs to the entry point north of the delivery square (overhead pose),
-            ask for the zone lease when close and wait there until it is granted.
+CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point north of the delivery
+            square (overhead pose); without it, wait at this robot's own waiting point, away from
+            the entry so the robot holding the lease can get through.
 DELIVER  -> with the lease: drive south across the square's tape until the cube is inside,
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
@@ -21,7 +23,7 @@ from enum import Enum
 
 from mobile_base.core.colors import is_mine
 from mobile_base.core.delivery import DeliveryZone, zone_from
-from mobile_base.core.geometry import distance, relative_bearing
+from mobile_base.core.geometry import distance, relative_bearing, wrap_angle
 
 Command = tuple[float, float, float]
 ZERO: Command = (0.0, 0.0, 0.0)
@@ -58,6 +60,8 @@ class BehaviorParams:
     turn_speed: float = 1.2  # rad/s
     turn_min: float = 0.8  # s
     turn_max: float = 2.0  # s
+    turn_angle_min: float = math.radians(135.0)  # border turn with pose: face back into the track
+    turn_angle_max: float = math.radians(225.0)
     k_turn: float = 1.5  # rad/s per unit of cx_norm
     approach_speed: float = 0.10  # m/s
     approach_min_scale: float = 0.3  # forward scale when the cube is at the image edge
@@ -71,7 +75,8 @@ class BehaviorParams:
     carry_max_turn: float = 0.6  # rad/s
     k_heading: float = 1.5  # rad/s per rad of heading error
     arrive_radius: float = 0.10  # m, entry point reached (> turning radius, or the robot orbits it)
-    request_radius: float = 0.40  # m, ask for the lease when this close to the entry point
+    wait_x: float = -0.45  # m, waiting point while the other robot holds the lease (per robot)
+    wait_y: float = 0.05
     request_period: float = 1.0  # s, retry while denied
     enter_speed: float = 0.05  # m/s
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
@@ -107,6 +112,8 @@ class BehaviorFSM:
         self.state = State.EXPLORE
         self._turn_until: float | None = None
         self._turn_dir = 1.0
+        self._turn_goal: float | None = None  # rad still to turn (pose mode)
+        self._turn_prev_theta = 0.0
         self._last_seen = 0.0
         self._capture_until = 0.0
         self._target_color = ""
@@ -143,18 +150,34 @@ class BehaviorFSM:
         mine = [c for c in cubes if is_mine(c.color, self.params.my_colors)]
         return max(mine, key=lambda c: c.area_px, default=None)
 
-    def _start_turn(self, now: float) -> None:
+    def _start_turn(self, now: float, pose) -> None:
         p = self.params
-        self._turn_until = now + self._rng.uniform(p.turn_min, p.turn_max)
         self._turn_dir = self._rng.choice((-1.0, 1.0))
+        if pose is None:
+            self._turn_goal = None
+            self._turn_until = now + self._rng.uniform(p.turn_min, p.turn_max)
+            return
+        # A timed turn can stop with the front sensor already beyond the tape (it then reads white
+        # and the robot drives off the track): turn a measured angle that points back inside.
+        self._turn_goal = self._rng.uniform(p.turn_angle_min, p.turn_angle_max)
+        self._turn_prev_theta = pose[2]
+        self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
+
+    def _turn_done(self, inp: BehaviorInput) -> bool:
+        if self._turn_goal is not None and inp.pose is not None:
+            self._turn_goal -= abs(wrap_angle(inp.pose[2] - self._turn_prev_theta))
+            self._turn_prev_theta = inp.pose[2]
+            if self._turn_goal <= 0.0:
+                return True
+        return inp.now >= self._turn_until
 
     def _explore(self, inp: BehaviorInput) -> Command:
         p = self.params
-        if self._turn_until is not None and inp.now >= self._turn_until:
+        if self._turn_until is not None and self._turn_done(inp):
             self._turn_until = None
         if self._turn_until is None:
             if inp.line_front:
-                self._start_turn(inp.now)
+                self._start_turn(inp.now, inp.pose)
             elif self._target(inp.cubes) is not None:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
@@ -180,7 +203,7 @@ class BehaviorFSM:
         if inp.line_front:
             # Cube beyond the border: give up and turn away from the line.
             self.state = State.EXPLORE
-            self._start_turn(inp.now)
+            self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         scale = max(p.approach_min_scale, 1.0 - abs(target.cx_norm))
         return (p.approach_speed * scale, 0.0, -p.k_turn * target.cx_norm)
@@ -212,15 +235,16 @@ class BehaviorFSM:
     def _carry(self, inp: BehaviorInput) -> Command:
         if inp.pose is None:
             return ZERO  # without the overhead pose the robot cannot find the square
+        p = self.params
         z = self._zone
         x, y, _ = inp.pose
-        d = distance(x, y, z.x, z.entry_y)
-        if d <= self.params.request_radius:
-            self._ask_lease(inp)
-        if d > self.params.arrive_radius:
-            return self._steer(inp.pose, z.x, z.entry_y, self.params.carry_speed)
+        self._ask_lease(inp)
         if not inp.holds_zone:
-            return ZERO  # wait at the entry point; the other robot is using the square
+            if distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
+                return ZERO  # the other robot is using the square
+            return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
+        if distance(x, y, z.x, z.entry_y) > p.arrive_radius:
+            return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
         self.state = State.DELIVER
         self._dropping = False
         return self._deliver(inp)
@@ -247,5 +271,5 @@ class BehaviorFSM:
         self._dropping = False
         self._carried_color = ""
         self.state = State.EXPLORE
-        self._start_turn(inp.now)  # facing the square's tape: turn away before exploring
+        self._start_turn(inp.now, inp.pose)  # facing the square's tape: turn away before exploring
         return self._explore(inp)

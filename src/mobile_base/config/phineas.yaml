@@ -12,6 +12,8 @@
     turn_speed: 1.2
     turn_min: 0.8
     turn_max: 2.0
+    turn_angle_min: 2.356  # 135 deg
+    turn_angle_max: 3.927  # 225 deg
     k_turn: 1.5
     approach_speed: 0.10
     approach_min_scale: 0.3
@@ -24,7 +26,8 @@
     carry_max_turn: 0.6
     k_heading: 1.5
     arrive_radius: 0.10
-    request_radius: 0.40
+    wait_x: -0.45  # waiting point while the other robot holds the lease
+    wait_y: 0.05
     request_period: 1.0
     enter_speed: 0.05
     enter_lookahead: 0.10
@@ -59,6 +62,7 @@
     escape_time: 1.5
     carry_min_forward: 0.05
     carry_max_turn: 0.6
+    carry_arc_away_bearing: 25.0
     max_reverse: 0.05
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
     # Keep these equal in behavior and safety_gate.

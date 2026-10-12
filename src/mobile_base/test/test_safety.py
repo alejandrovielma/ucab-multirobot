@@ -266,3 +266,19 @@ def test_square_tape_blocks_without_lease():
         make_input(cmd=(0.05, 0.0, 0.0), line_front=True, own_pose=IN_CORRIDOR, holds_zone=False)
     )
     assert cmd[0] == pytest.approx(0.0)
+
+
+def test_carrying_arcs_away_from_a_peer_beside_it():
+    # Webots run 4: Ferb (carrying) froze for minutes next to a robot 38 deg to its left at 0.36 m.
+    params = SafetyParams()
+    peer = peer_at(0.36 * math.cos(math.radians(38)), 0.36 * math.sin(math.radians(38)), theta=math.pi / 2)
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer, carrying=True))
+    assert cmd == pytest.approx((params.carry_min_forward, 0.0, -params.carry_max_turn))
+    assert "arc away" in reason
+
+
+def test_carrying_still_stops_for_a_peer_dead_ahead():
+    cmd, _ = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer_at(0.35, 0.02), carrying=True)
+    )
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))

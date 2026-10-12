@@ -53,34 +53,46 @@ def test_carry_turns_toward_entry_when_it_is_behind():
     assert abs(wz) == pytest.approx(fsm.params.carry_max_turn)
 
 
-def test_requests_lease_only_near_the_entry_and_retries_periodically():
+def test_requests_lease_while_carrying_and_retries_periodically():
     fsm = carrying_fsm(request_period=1.0)
-    z = zone(fsm)
-    tick(fsm, 1.0, (-0.7, 0.0, 0.0))
-    assert fsm.take_actions() == []
-    near = (z.x - 0.2, z.entry_y, 0.0)
-    tick(fsm, 2.0, near)
+    pose = (-0.7, 0.0, 0.0)
+    tick(fsm, 1.0, pose)
     assert fsm.take_actions() == [ZoneAction("request")]
-    tick(fsm, 2.5, near)
+    tick(fsm, 1.5, pose)
     assert fsm.take_actions() == []
-    tick(fsm, 3.1, near)
+    tick(fsm, 2.1, pose)
     assert fsm.take_actions() == [ZoneAction("request")]
 
 
-def test_holds_lease_request_stops_once_granted():
+def test_no_request_once_granted():
     fsm = carrying_fsm()
-    z = zone(fsm)
-    tick(fsm, 2.0, (z.x - 0.2, z.entry_y, 0.0), holds_zone=True)
+    tick(fsm, 2.0, (-0.7, 0.0, 0.0), holds_zone=True)
     assert fsm.take_actions() == []
 
 
-def test_waits_at_entry_without_lease():
-    fsm = carrying_fsm()
-    z = zone(fsm)
-    cmd = tick(fsm, 2.0, (z.x, z.entry_y, SOUTH))
+def test_without_lease_goes_to_its_waiting_point_not_the_entry():
+    # Webots run 4: waiting AT the entry blocked the robot holding the lease until it expired (60 s).
+    fsm = carrying_fsm(wait_x=-0.45, wait_y=0.05)
+    _, _, wz_to_wait = tick(fsm, 1.0, (-0.13, 0.30, SOUTH))  # facing south, straight at the entry
+    _, _, wz_to_entry = tick(fsm, 1.1, (-0.13, 0.30, SOUTH), holds_zone=True)
+    assert wz_to_wait < 0.0  # the waiting point is south-west: turn right
+    assert wz_to_entry == pytest.approx(0.0)
+
+
+def test_holds_still_at_waiting_point_without_lease():
+    fsm = carrying_fsm(wait_x=-0.45, wait_y=0.05)
+    cmd = tick(fsm, 2.0, (-0.45, 0.06, 0.0))
     assert cmd == (0.0, 0.0, 0.0)
     assert fsm.state is State.CARRY
     assert fsm.carrying
+
+
+def test_entry_without_lease_is_not_a_place_to_stop():
+    fsm = carrying_fsm(wait_x=-0.45, wait_y=0.05)
+    z = zone(fsm)
+    vx, _, _ = tick(fsm, 2.0, (z.x, z.entry_y, SOUTH))
+    assert vx > 0.0
+    assert fsm.state is State.CARRY
 
 
 def test_enters_square_with_lease_and_keeps_cube():
