@@ -19,6 +19,25 @@
     capture_cy: 0.85
     capture_speed: 0.08
     capture_time: 1.0
+    carry_speed: 0.08
+    carry_min_speed: 0.05
+    carry_max_turn: 0.6
+    k_heading: 1.5
+    arrive_radius: 0.10
+    request_radius: 0.40
+    request_period: 1.0
+    enter_speed: 0.05
+    enter_lookahead: 0.10
+    reverse_speed: 0.04
+    drop_timeout: 6.0
+    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Keep these equal in behavior and safety_gate.
+    zone_x: -0.13
+    zone_square_y: -0.284
+    zone_entry_y: 0.08
+    zone_drop_y: -0.125
+    zone_exit_y: 0.02
+    zone_corridor_half_width: 0.10
 
 /phineas/safety_gate:
   ros__parameters:
@@ -40,6 +59,15 @@
     escape_time: 1.5
     carry_min_forward: 0.05
     carry_max_turn: 0.6
+    max_reverse: 0.05
+    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Keep these equal in behavior and safety_gate.
+    zone_x: -0.13
+    zone_square_y: -0.284
+    zone_entry_y: 0.08
+    zone_drop_y: -0.125
+    zone_exit_y: 0.02
+    zone_corridor_half_width: 0.10
 
 /phineas/cube_detector:
   ros__parameters:

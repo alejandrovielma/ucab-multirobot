@@ -1,13 +1,18 @@
-"""Behavior node: runs the BehaviorFSM and publishes the desired command on cmd_vel_nav."""
+"""Behavior node: runs the BehaviorFSM and publishes the desired command on cmd_vel_nav.
+
+It also performs the FSM's zone actions as asynchronous calls to /zone/request and
+/zone/release; the lease itself is read from /zone/occupant (holds_zone = occupant is me).
+"""
 
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
-from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube
+from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, ZoneAction
 from mobile_base.core.colors import DEFAULT_ROBOT_COLORS
 from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
+from multirobot_interfaces.srv import ReleaseZone, RequestZone
 
 
 class BehaviorNode(Node):
@@ -18,7 +23,7 @@ class BehaviorNode(Node):
         my_colors = self.declare_parameter("my_colors", default_colors).value
         rate_hz = self.declare_parameter("rate_hz", 10.0).value
         cube_timeout = self.declare_parameter("cube_timeout", 0.5).value
-        peer_topic = self.declare_parameter("peer_pose_topic", "/ferb/pose").value
+        self.declare_parameter("peer_pose_topic", "/ferb/pose")  # still in the YAML; avoidance lives in the gate
         values = declare_dataclass(self, BehaviorParams, skip=("my_colors",))
         self.fsm = BehaviorFSM(BehaviorParams(my_colors=tuple(my_colors), **values))
         self._cube_timeout = cube_timeout
@@ -27,16 +32,17 @@ class BehaviorNode(Node):
         self._cubes_time = 0.0
         self._line_front = False
         self._pose = None
-        self._peer_pose = None  # kept for the CARRY implementation (TODO team)
         self._zone_occupant = ""
+        self._delivered = 0
 
         self.create_subscription(CubeDetectionArray, "cubes", self._on_cubes, 10)
         self.create_subscription(Bool, "line_front", self._on_line, 10)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
-        self.create_subscription(RobotPose, peer_topic, self._on_peer_pose, 10)
         self.create_subscription(String, "/zone/occupant", self._on_zone, ZONE_OCCUPANT_QOS)
         self._cmd_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
         self._state_pub = self.create_publisher(RobotState, "state", 10)
+        self._request_client = self.create_client(RequestZone, "/zone/request")
+        self._release_client = self.create_client(ReleaseZone, "/zone/release")
         self.create_timer(1.0 / rate_hz, self._tick)
         self.get_logger().info(f"{self.robot}: my colors {list(my_colors)}")
 
@@ -50,9 +56,6 @@ class BehaviorNode(Node):
     def _on_pose(self, msg: RobotPose):
         self._pose = pose_from_msg(msg)
 
-    def _on_peer_pose(self, msg: RobotPose):
-        self._peer_pose = pose_from_msg(msg)
-
     def _on_zone(self, msg: String):
         self._zone_occupant = msg.data
 
@@ -61,9 +64,14 @@ class BehaviorNode(Node):
         cubes = self._cubes if now - self._cubes_time <= self._cube_timeout else []
         pose = (self._pose.x, self._pose.y, self._pose.theta) if self._pose else None
         previous = self.fsm.state
-        vx, vy, wz = self.fsm.step(BehaviorInput(now=now, cubes=cubes, line_front=self._line_front, pose=pose))
+        holds_zone = self._zone_occupant == self.robot
+        vx, vy, wz = self.fsm.step(
+            BehaviorInput(now=now, cubes=cubes, line_front=self._line_front, pose=pose, holds_zone=holds_zone)
+        )
         if self.fsm.state is not previous:
             self.get_logger().info(f"{previous.value} -> {self.fsm.state.value}")
+        for action in self.fsm.take_actions():
+            self._perform(action)
         self._cmd_pub.publish(twist(vx, vy, wz))
 
         state = RobotState()
@@ -71,8 +79,28 @@ class BehaviorNode(Node):
         state.robot = self.robot
         state.state = self.fsm.state.value
         state.carrying = self.fsm.carrying
-        state.delivered = 0  # TODO(team): take delivered_total from /zone/release responses
+        state.delivered = self._delivered
         self._state_pub.publish(state)
+
+    def _perform(self, action: ZoneAction):
+        # Fire and forget: the lease is observed on /zone/occupant and the FSM retries requests.
+        if action.kind == "request":
+            if self._request_client.service_is_ready():
+                self._request_client.call_async(RequestZone.Request(robot=self.robot))
+            else:
+                self.get_logger().warn("/zone/request not available")
+            return
+        if not self._release_client.service_is_ready():
+            self.get_logger().error("/zone/release not available: the lease will only expire by timeout")
+            return
+        request = ReleaseZone.Request(robot=self.robot, delivered=action.delivered, color=action.color)
+        self._release_client.call_async(request).add_done_callback(self._on_released)
+
+    def _on_released(self, future):
+        response = future.result()
+        if response is not None and response.ok:
+            self._delivered = response.delivered_total
+            self.get_logger().info(f"delivered: total {self._delivered}")
 
 
 def main(args=None):

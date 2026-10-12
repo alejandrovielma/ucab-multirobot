@@ -6,7 +6,8 @@ Usage (after sourcing ROS 2 and the workspace):
 
 Writes one line every --period seconds (wall time) to stdout and <out>/monitor.log:
 sim time, per robot state, pose, commanded velocity, front line flag and the closest cube
-of its own colors (cx_norm, cy_norm), plus the distance between the robots. Optionally saves
+of its own colors (cx_norm, cy_norm), cubes delivered, plus the distance between the robots and
+the holder of the delivery-square lease. Optionally saves
 Phineas' camera frames as PNG every --frames-every seconds.
 """
 
@@ -20,7 +21,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
 
@@ -33,11 +34,13 @@ class SimMonitor(Node):
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
-        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None} for r in ROBOTS}
+        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0} for r in ROBOTS}
         self.last_frame = 0.0
+        self.occupant = ""
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
+        self.create_subscription(String, "/zone/occupant", self._on_occupant, 10)
         for robot in ROBOTS:
-            self.create_subscription(RobotState, f"/{robot}/state", self._setter(robot, "state", lambda m: m.state), 10)
+            self.create_subscription(RobotState, f"/{robot}/state", self._state_cb(robot), 10)
             self.create_subscription(RobotPose, f"/{robot}/pose", self._setter(robot, "pose", lambda m: (m.x, m.y, m.theta)), 10)
             self.create_subscription(Twist, f"/{robot}/cmd_vel", self._setter(robot, "cmd", lambda m: (m.linear.x, m.linear.y, m.angular.z)), 10)
             self.create_subscription(Bool, f"/{robot}/line_front", self._setter(robot, "line", lambda m: m.data), 10)
@@ -47,6 +50,15 @@ class SimMonitor(Node):
 
     def _on_clock(self, msg: Clock):
         self.sim_time = msg.clock.sec + msg.clock.nanosec * 1e-9
+
+    def _on_occupant(self, msg: String):
+        self.occupant = msg.data
+
+    def _state_cb(self, robot):
+        def cb(msg: RobotState):
+            self.data[robot]["state"] = msg.state
+            self.data[robot]["delivered"] = msg.delivered
+        return cb
 
     def _setter(self, robot, key, extract):
         def cb(msg):
@@ -78,10 +90,11 @@ class SimMonitor(Node):
             pose = "pose=----" if d["pose"] is None else f"pose=({d['pose'][0]:+.2f},{d['pose'][1]:+.2f},{math.degrees(d['pose'][2]):+4.0f})"
             cmd = "cmd=----" if d["cmd"] is None else f"cmd=({d['cmd'][0]:+.2f},{d['cmd'][1]:+.2f},{d['cmd'][2]:+.2f})"
             cube = "cube=-" if d["cube"] is None else f"cube={d['cube'][0]}@({d['cube'][1]:+.2f},{d['cube'][2]:.2f})"
-            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube}")
+            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} n={d['delivered']}")
         p, f = self.data["phineas"]["pose"], self.data["ferb"]["pose"]
         if p and f:
             parts.append(f"| dist={math.hypot(p[0] - f[0], p[1] - f[1]):.2f}")
+        parts.append(f"| zone={self.occupant or '-'}")
         return " ".join(parts)
 
 
