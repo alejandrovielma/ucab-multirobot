@@ -66,7 +66,7 @@ def gate_input(pose, cmd=(0.1, 0.0, 0.0), **kw):
 
 def test_gate_blocks_forward_when_the_front_leaves_the_track():
     gate = SafetyGate(SafetyParams(), track=SQUARE)
-    cmd, reason = gate.filter(gate_input(Pose2D(0.85, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3)))
+    cmd, reason = gate.filter(gate_input(Pose2D(0.872, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3)))
     assert cmd == pytest.approx((0.0, 0.0, 0.3))
     assert "track edge" in reason
 
@@ -98,7 +98,7 @@ def make_fsm(seed=1):
 
 def test_behavior_treats_track_edge_as_line():
     fsm = make_fsm()
-    cmd = fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False, pose=(0.85, 0.5, 0.0)))
+    cmd = fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False, pose=(0.872, 0.5, 0.0)))
     assert cmd[0] == 0.0 and cmd[2] != 0.0
     assert fsm.state is State.EXPLORE
 

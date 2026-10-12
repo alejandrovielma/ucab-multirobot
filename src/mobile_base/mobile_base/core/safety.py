@@ -23,9 +23,9 @@ Body geofence (last rule, needs the overhead pose and a track polygon). Rule of 
 scoop may step on the tape, the robot body may never cross it. The final command is simulated for
 track_horizon seconds and every corner of the body rectangle (wheels included, scoop excluded) must
 stay inside the polygon:
-- without a cube, forward motion must also leave room to spin afterwards (center at least the
-  corner sweep radius from the edge), so the robot can always turn away in place;
-- an in-place spin that would swing a corner over the tape tries the other direction, else stops;
+- an in-place spin that would swing a corner over the tape tries the other direction, else stops
+  (the behavior then backs off: reverse is allowed with the pose). Requiring room to spin before
+  every forward move was tried and pinned the robots: the track is at most 0.24 m from its edge;
 - with a cube (arcs only), a blocked arc tries the other direction, else the robot stops and the
   behavior drops the cube by backing off.
 With the robot center already outside, forward motion is allowed only toward the track centroid,
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing
-from mobile_base.core.track import Footprint, Track, path_inside, predict
+from mobile_base.core.track import Footprint, Track, path_inside
 
 Command = tuple[float, float, float]
 STOP: Command = (0.0, 0.0, 0.0)
@@ -80,7 +80,6 @@ class SafetyParams:
     carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
     max_reverse: float = 0.05  # m/s: delivery corridor with the lease, or anywhere the pose shows room behind
     track_horizon: float = 0.3  # s, body geofence prediction
-    track_margin: float = 0.01  # m, extra clearance on top of the spin sweep radius
     body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
     body_rear: float = 0.095
     body_half_width: float = 0.082
@@ -180,15 +179,9 @@ class SafetyGate:
         return returning, not returning
 
     def _body_fits(self, pose: Pose2D, vx: float, wz: float, carrying: bool) -> bool:
-        """Body inside along the prediction; without a cube, forward also keeps room to spin."""
-        p = self.params
+        """Every body corner stays inside the track along the predicted motion."""
         start = (pose.x, pose.y, pose.theta)
-        if not path_inside(self._track, self._body, start, vx, wz, p.track_horizon):
-            return False
-        if vx > 0.0 and not carrying:
-            end = predict(start, vx, wz, p.track_horizon)
-            return self._track.distance_to_edge(end[0], end[1]) >= self._body.sweep_radius + p.track_margin
-        return True
+        return path_inside(self._track, self._body, start, vx, wz, self.params.track_horizon)
 
     def _body_geofence(self, pose: Pose2D, vx: float, wz: float, carrying: bool, reasons: list[str]):
         if vx == 0.0 and wz == 0.0:

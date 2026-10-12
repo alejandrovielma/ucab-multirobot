@@ -72,14 +72,14 @@ def gate_input(pose, cmd, **kw):
     return SafetyInput(**values)
 
 
-def test_gate_forward_needs_room_to_turn_in_place_afterwards():
+def test_gate_forward_stops_before_the_body_crosses():
     gate = SafetyGate(SafetyParams(), track=ARENA)
-    near = (2.0 - FP.sweep_radius - 0.02, 1.0, 0.0)  # body inside, but stopping there leaves no room to spin
+    near = (2.0 - 0.02 - FP.front, 1.0, 0.0)  # front 2 cm from the edge; 0.3 s at 0.12 m/s is 3.6 cm
     cmd, reason = gate.filter(gate_input(near, (0.12, 0.0, 0.0)))
     assert cmd[0] == pytest.approx(0.0)
     assert "track edge" in reason
-    far = (1.0, 1.0, 0.0)
-    assert gate.filter(gate_input(far, (0.12, 0.0, 0.0)))[0][0] == pytest.approx(0.12)
+    close_but_ok = (2.0 - 0.05 - FP.front, 1.0, 0.0)  # 5 cm: no spin room needed to go on
+    assert gate.filter(gate_input(close_but_ok, (0.12, 0.0, 0.0)))[0][0] == pytest.approx(0.12)
 
 
 def test_gate_in_place_spin_that_would_cross_the_tape_is_refused():
@@ -150,7 +150,7 @@ def step(f, now, pose, cubes=(), scoop="", line_front=False, holds_zone=False):
 
 def test_explore_turns_before_the_body_reaches_the_tape():
     f = fsm()
-    cmd = step(f, 0.0, (2.0 - FP.sweep_radius - 0.02, 1.0, 0.0))
+    cmd = step(f, 0.0, (2.0 - 0.128, 1.0, 0.0))  # 3.6 cm ahead would cross; spin radius 12.55 cm fits
     assert cmd[0] == 0.0 and cmd[2] != 0.0
 
 

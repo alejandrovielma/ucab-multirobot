@@ -37,7 +37,6 @@
     reverse_speed: 0.04
     drop_timeout: 6.0
     track_horizon: 0.3  # body geofence (keep equal to safety_gate)
-    track_margin: 0.01
     body_front: 0.095
     body_rear: 0.095
     body_half_width: 0.082
@@ -77,7 +76,6 @@
     carry_arc_away_min_distance: 0.30
     max_reverse: 0.05
     track_horizon: 0.3
-    track_margin: 0.01
     body_front: 0.095  # body without the scoop: the scoop may step on the tape, the body may not
     body_rear: 0.095
     body_half_width: 0.082

@@ -101,7 +101,6 @@ class BehaviorParams:
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
     # Body geofence (keep equal to the gate): see core/track.py.
     track_horizon: float = 0.3  # s
-    track_margin: float = 0.01  # m
     body_front: float = 0.095  # m
     body_rear: float = 0.095
     body_half_width: float = 0.082
@@ -187,16 +186,10 @@ class BehaviorFSM:
         return handler(inp)
 
     def _fits(self, pose, vx: float, wz: float, carrying: bool) -> bool:
-        """Same test as SafetyGate._body_fits."""
-        p = self.params
+        """Same test as SafetyGate._body_fits (carrying kept for symmetry with the gate)."""
         if pose is None or not self._track.enabled:
             return True
-        if not path_inside(self._track, self._body, pose, vx, wz, p.track_horizon):
-            return False
-        if vx > 0.0 and not carrying:
-            end = predict(pose, vx, wz, p.track_horizon)
-            return self._track.distance_to_edge(end[0], end[1]) >= self._body.sweep_radius + p.track_margin
-        return True
+        return path_inside(self._track, self._body, pose, vx, wz, self.params.track_horizon)
 
     def _escape_fits(self, pose) -> bool:
         """After the capture push, can an arc turn escape_angle with the body inside the track?"""
