@@ -106,13 +106,31 @@ El filtro lo decide con entradas que lee él mismo (pose y llave), no con lo que
 que un error en el comportamiento no habilita la reversa en otra parte de la pista. El pasillo y el
 cuadro están en `zone_*` de los YAML; un test exige que coincidan entre `behavior` y `safety_gate`.
 
+## Verificación de la captura con la cámara
+
+`cube_detector` publica, junto con los cubos, `scoop_color` y `scoop_fill`: la fracción de una ventana
+fija entre las paredes de la pala (x ±0,2, y 0,74 a 0,84 de la imagen) que tiene un color de cubo.
+Un cubo dentro de la U se ve desde arriba como una franja ancha y baja que el detector de cubos
+descarta por forma, así que no sirve buscarlo entre las detecciones. En Webots, con la cámara
+IMX219-120 (FOV horizontal 1,60 rad), la ventana mide 0,60 con un cubo dentro y 0,04 con el cubo en
+la boca de la pala; el umbral es 0,30. Lo usa `behavior`:
+
+- `CAPTURE` pasa a `CARRY` solo si ve un cubo propio en la pala; si no, vuelve a `APPROACH`.
+- Con cubo, si deja de verlo más de 1 s (`scoop_lost_timeout`), abandona el transporte y devuelve la llave.
+- Al terminar de retroceder, la entrega cuenta (`delivered=true`) solo si la pala quedó vacía.
+
+El mundo [calibracion_pala.wbt](../src/multirobot_sim/worlds/calibracion_pala.wbt) deja un cubo dentro
+de la U de Phineas y otro en la boca de la de Ferb para volver a medir la ventana; las imágenes medidas
+están en `mobile_base/test/fixtures/` como prueba de regresión.
+
 ## Entrega del cubo
 
 ```mermaid
 stateDiagram-v2
     CAPTURE --> CARRY: cubo en la pala
     CARRY --> CARRY: pide /zone/request cada 1 s; sin llave va a su punto de espera, con llave al de entrada
-    CARRY --> DELIVER: en el punto de entrada y con la llave
+    CARRY --> DELIVER: con la llave, dentro del pasillo y mirando al sur (±60°)
+    DELIVER --> CARRY: si se sale del pasillo antes de soltar el cubo
     DELIVER --> DELIVER: avanza al sur cruzando la cinta hasta drop_y (cubo dentro)
     DELIVER --> DELIVER: retrocede hasta exit_y (la U abierta deja el cubo)
     DELIVER --> EXPLORE: /zone/release delivered=true con el color

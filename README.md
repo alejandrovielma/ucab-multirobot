@@ -35,7 +35,7 @@ El diseño completo (hardware, pines, decisiones y alternativas) está en
 |---|---|
 | Lógica pura: cinemática mecanum, filtro de seguridad, colores, máquina de estados, llave del cuadro | Implementada, con pruebas |
 | Simulación en Webots con los dos robots | **Funciona**: exploran, giran ante el borde, capturan cubos de su color y se esquivan |
-| Transporte y entrega del cubo en el cuadro (`CARRY` y `DELIVER`) | **Funciona en Webots** (7 min sin salir de la pista, 5 entregas registradas), pero **la captura no se verifica**: de 5 entregas contadas solo 1 cubo quedó en el cuadro. Ver tarea 9 de [docs/team-todo.md](docs/team-todo.md) |
+| Transporte y entrega del cubo en el cuadro (`CARRY` y `DELIVER`) | **Funciona en Webots** con la captura verificada por la cámara: en la corrida 10, 2 entregas contadas = 2 cubos rojos dentro del cuadro (imagen tomada al soltar cada uno). Los cubos capturados mirando al borde todavía se pierden (tarea 12 de [docs/team-todo.md](docs/team-todo.md)) |
 | Cerca virtual (*geofence*) con la pose cenital | Implementada con el polígono de la pista de Webots ([config/track.yaml](src/mobile_base/config/track.yaml)); falta medir la pista real |
 | Nodos del robot real (HAT, sensor de línea, cámara) | Escritos; arrancan sin hardware, **sin probar en la Pi 5** |
 | Localizador con cámara cenital | Esqueleto y homografía con pruebas; falta la captura real |
@@ -94,6 +94,7 @@ flowchart LR
 | Solo traslación hacia adelante (sin desplazamiento lateral ni reversa) | Hay un único sensor de línea, delantero: moverse de lado o atrás es ciego al borde |
 | Línea negra al frente → no avanza, puede girar | No salir de la pista |
 | Punto delantero fuera del polígono de la pista (pose cenital) → cuenta como línea; con el centro ya fuera, solo avanza hacia adentro | Un único sensor no distingue el blanco de adentro del de afuera: en Webots el sensor quedó pasado la cinta tras un giro y el robot salió del tablero |
+| (comportamiento) La captura cuenta solo si la cámara ve un cubo propio en la ventana entre las paredes de la pala; una entrega cuenta solo si el cubo salió de la pala al retroceder | Empujar 1 s y suponer éxito contó 5 entregas con 1 cubo en el cuadro (corrida 7) |
 | Excepción: con la llave del cuadro y dentro del pasillo de entrega, cruza la cinta del cuadro y retrocede a ≤ 0,05 m/s sin cubo | Es la única forma de dejar el cubo con una pala fija; el filtro lo verifica con su propia pose y la llave |
 | Otro robot a menos de 0,60 m al frente → frena y gira alejándose; a 0,40 m se detiene | Las palas se tocan a unos 0,38 m entre centros |
 | Bloqueo mutuo de más de 3 s → Ferb gira para salir, Phineas espera | Una regla asimétrica evita que los dos cedan a la vez (*livelock*) |

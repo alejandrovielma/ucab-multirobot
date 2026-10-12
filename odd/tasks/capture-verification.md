@@ -17,15 +17,33 @@ Webots run 7: 5 deliveries counted, 1 cube in the square. CAPTURE pushes for 1 s
   topic or message: behavior already receives `cubes`.
 
 ## Tasks
-- [ ] T1 Webots camera FOV 1.60 rad; measure in frames where a cube in the U and a cube at the funnel
+- [x] T1 Webots camera FOV 1.60 rad; measure in frames where a cube in the U and a cube at the funnel
       mouth appear (cy, cx, area); set capture_cy and the scoop window from measurements.
-- [ ] T2 Behavior: CAPTURE -> CARRY only if the cube is seen in the scoop; CARRY/DELIVER give up when
+- [x] T2 Behavior: CAPTURE -> CARRY only if the cube is seen in the scoop; CARRY/DELIVER give up when
       it is not seen for scoop_lost_timeout; release delivered=true only if the cube left the scoop. Tests first.
-- [ ] T3 Webots 7 min run: counted deliveries == cubes inside the square (final screenshot).
-- [ ] T4 Docs: README status, architecture, team-todo #7 and #9.
+- [x] T3 Webots 7 min run: counted deliveries == cubes inside the square (final screenshot).
+- [x] T2b Fixes from run 8: border before capture; DELIVER only aligned in the corridor; lead-in.
+- [x] T4 Docs: README status, architecture, team-todo #7 and #9.
 
 ## Acceptance criteria
 Deliveries counted equal cubes in the square at the end of a 7 min Webots run; all Docker tests pass.
 
+## Routes
+All tasks inline in the parent (design and measurements already in context); deviation from the
+2+ files writer trigger recorded here.
+
 ## Progress / evidence
-(pending)
+- 8fb51b9 plan; 38cecec IMX219 FOV + calibration world + world arg; ad3ea7a scoop verification;
+  b7db40e run-8 fixes; 9f0489f monitor frames on delivery.
+- Calibration (calibracion_pala.wbt): window fill 0.60 with a cube in the U, 0.04 with a cube at the
+  mouth; mouth cube center at cy 0.655 (pinhole prediction 0.65).
+- Docker after b7db40e: 163 tests, 0 failures; import smoke 35/35; launch smoke both robots OK.
+- Webots run 8: verification worked (scoop colors reported) but two 5-minute lockups -> T2b.
+- Webots run 9 (7 min): both inside the track, Phineas n=3, Ferb n=0.
+- Webots run 10 (7 min): both inside the track (min center distance 0.24 m); Phineas n=2 and its
+  delivery frames show 1 and then 2 red cubes inside the square: counted == delivered. Ferb n=0:
+  7 captures near the north border lost by the geofence while arcing (team-todo #12).
+- Native review: not run.
+
+## Next step
+Rules decision for cubes captured facing the border (team-todo #12).
