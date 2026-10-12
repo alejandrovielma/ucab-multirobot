@@ -42,3 +42,36 @@ def test_tiny_blob_is_rejected():
 def test_blank_board_has_no_detections():
     img = np.full((480, 640, 3), 255, dtype=np.uint8)
     assert detect_cubes(img, VisionParams()) == []
+
+
+def _raw(img, channels):
+    h, w = img.shape[:2]
+    padded = np.zeros((h, w * channels + 8), dtype=np.uint8)  # row padding exercises `step`
+    padded[:, : w * channels] = img.reshape(h, w * channels)
+    return h, w, w * channels + 8, padded.tobytes()
+
+
+def test_image_to_bgr_handles_encodings_and_step():
+    from mobile_base.vision import image_to_bgr
+
+    bgr = np.zeros((4, 6, 3), dtype=np.uint8)
+    bgr[..., 0], bgr[..., 1], bgr[..., 2] = 10, 20, 30
+    h, w, step, data = _raw(bgr, 3)
+    assert np.array_equal(image_to_bgr(h, w, "bgr8", step, data), bgr)
+
+    rgb = bgr[..., ::-1].copy()
+    h, w, step, data = _raw(rgb, 3)
+    assert np.array_equal(image_to_bgr(h, w, "rgb8", step, data), bgr)
+
+    bgra = np.dstack([bgr, np.full((4, 6), 255, np.uint8)])
+    h, w, step, data = _raw(bgra, 4)
+    assert np.array_equal(image_to_bgr(h, w, "bgra8", step, data), bgr)
+
+
+def test_image_to_bgr_rejects_unknown_encoding():
+    import pytest
+
+    from mobile_base.vision import image_to_bgr
+
+    with pytest.raises(ValueError):
+        image_to_bgr(1, 1, "mono16", 2, b"\x00\x00")

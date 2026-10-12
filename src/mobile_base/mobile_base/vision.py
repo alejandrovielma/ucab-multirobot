@@ -81,3 +81,19 @@ def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list
             Detection(color, (cx / width) * 2.0 - 1.0, cy / height, float(area))
         )
     return detections
+
+
+_CHANNELS = {"bgr8": 3, "rgb8": 3, "bgra8": 4, "rgba8": 4}
+_TO_BGR = {"rgb8": cv2.COLOR_RGB2BGR, "bgra8": cv2.COLOR_BGRA2BGR, "rgba8": cv2.COLOR_RGBA2BGR}
+
+
+def image_to_bgr(height: int, width: int, encoding: str, step: int, data: bytes) -> np.ndarray:
+    """Convert raw sensor_msgs/Image fields to a BGR array (avoids the cv_bridge dependency)."""
+    if encoding not in _CHANNELS:
+        raise ValueError(f"unsupported image encoding {encoding!r}")
+    channels = _CHANNELS[encoding]
+    rows = np.frombuffer(data, dtype=np.uint8).reshape(height, step)
+    img = rows[:, : width * channels].reshape(height, width, channels)
+    if encoding == "bgr8":
+        return img.copy()
+    return cv2.cvtColor(img, _TO_BGR[encoding])

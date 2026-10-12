@@ -42,6 +42,7 @@ set -u
 echo "== import smoke test"
 python3 - "${COMPILE_ONLY_PACKAGES[@]}" <<'PY'
 import importlib
+import importlib.util
 import pathlib
 import py_compile
 import sys
@@ -74,6 +75,11 @@ for setup_py in sorted(pathlib.Path("src").glob("*/setup.py")):
 for launch_file in sorted(pathlib.Path("src").glob("*/launch/*.py")):
     try:
         py_compile.compile(str(launch_file), doraise=True)
+        if "webots_ros2_driver" not in launch_file.read_text():
+            spec = importlib.util.spec_from_file_location(launch_file.stem.replace(".", "_"), launch_file)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.generate_launch_description()
         checked += 1
         print(f"ok   {launch_file}")
     except Exception as exc:  # noqa: BLE001
@@ -83,5 +89,23 @@ for launch_file in sorted(pathlib.Path("src").glob("*/launch/*.py")):
 print(f"smoke test: {checked} ok, {len(failures)} failed")
 sys.exit(1 if failures else 0)
 PY
+
+# Start each real-robot stack for a few seconds without hardware (lgpio absent -> GPIO dry run,
+# no camera -> logged error). Any node crash fails the check.
+for robot in phineas ferb; do
+  echo "== launch smoke test: robot.launch.py robot:=${robot}"
+  log_file="/tmp/launch_${robot}.log"
+  set +e
+  timeout --foreground -s INT 6 ros2 launch bringup robot.launch.py "robot:=${robot}" >"${log_file}" 2>&1
+  set -e
+  # Only the window before the Ctrl-C is judged: a crash there is a real startup failure.
+  if sed '/user interrupted/q' "${log_file}" | grep -qE "process has died|Traceback"; then
+    tail -n 40 "${log_file}"
+    echo "FAIL launch ${robot}"
+    exit 1
+  fi
+  started=$(grep -c "process started" "${log_file}" || true)
+  echo "ok   ${started} processes started and stayed alive"
+done
 
 echo "== all checks passed"

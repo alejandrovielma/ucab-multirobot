@@ -20,5 +20,14 @@ setup(
     description="Shared behavior, safety, vision and hardware nodes for the collector robots.",
     license="MIT",
     tests_require=["pytest"],
-    entry_points={"console_scripts": []},
+    entry_points={
+        "console_scripts": [
+            "behavior = mobile_base.nodes.behavior_node:main",
+            "safety_gate = mobile_base.nodes.safety_gate_node:main",
+            "cube_detector = mobile_base.nodes.cube_detector_node:main",
+            "hat_motor_driver = mobile_base.nodes.hat_motor_driver_node:main",
+            "line_sensor = mobile_base.nodes.line_sensor_node:main",
+            "camera = mobile_base.nodes.camera_node:main",
+        ]
+    },
 )

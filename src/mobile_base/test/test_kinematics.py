@@ -63,3 +63,12 @@ def test_to_duty_maps_and_clamps():
     assert duties[1] == pytest.approx(-0.35)
     assert duties[2] == pytest.approx(0.0)
     assert duties[3] == pytest.approx(0.7)
+
+
+def test_hbridge_pwm_fast_decay_mapping():
+    from mobile_base.core.kinematics import hbridge_pwm
+
+    assert hbridge_pwm(0.5) == pytest.approx((50.0, 0.0))  # forward: PWM on IN1, IN2 low
+    assert hbridge_pwm(-0.25) == pytest.approx((0.0, 25.0))  # reverse: IN1 low, PWM on IN2
+    assert hbridge_pwm(0.0) == (0.0, 0.0)
+    assert hbridge_pwm(2.0) == pytest.approx((100.0, 0.0))

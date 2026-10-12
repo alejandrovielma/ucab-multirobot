@@ -53,3 +53,13 @@ def to_duty(speeds: WheelSpeeds, max_wheel_speed: float, duty_cap: float) -> Whe
         return max(-duty_cap, min(duty_cap, duty))
 
     return tuple(one(s) for s in speeds)
+
+
+def hbridge_pwm(duty: float) -> tuple[float, float]:
+    """DRV8833 fast-decay drive: (IN1 %, IN2 %). Forward = PWM on IN1 with IN2 low."""
+    percent = min(1.0, abs(duty)) * 100.0
+    if duty > 0.0:
+        return (percent, 0.0)
+    if duty < 0.0:
+        return (0.0, percent)
+    return (0.0, 0.0)

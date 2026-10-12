@@ -46,3 +46,10 @@ def ranges_from_flat(flat: Mapping[str, Sequence[int]]) -> dict[str, list[tuple[
 
 def is_mine(color: str | None, my_colors: Iterable[str]) -> bool:
     return color is not None and color in set(my_colors)
+
+
+# Color ownership from the team plan; the YAML config is the source of truth at runtime.
+DEFAULT_ROBOT_COLORS: dict[str, list[str]] = {
+    "phineas": ["red", "orange", "yellow"],
+    "ferb": ["green", "blue", "purple"],
+}

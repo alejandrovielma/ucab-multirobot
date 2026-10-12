@@ -1,0 +1,95 @@
+# Parameters for Ferb (namespace /ferb). Phineas uses config/phineas.yaml with the same keys.
+# Floats must keep their decimal point: ROS 2 rejects an int for a double parameter.
+
+/ferb/behavior:
+  ros__parameters:
+    robot: ferb
+    my_colors: [green, blue, purple]
+    peer_pose_topic: /phineas/pose
+    rate_hz: 10.0
+    cube_timeout: 0.5
+    explore_speed: 0.12
+    turn_speed: 1.2
+    turn_min: 0.8
+    turn_max: 2.0
+    k_turn: 1.5
+    approach_speed: 0.10
+    approach_min_scale: 0.3
+    lost_timeout: 1.0
+    capture_cy: 0.85
+    capture_speed: 0.08
+    capture_time: 1.0
+
+/ferb/safety_gate:
+  ros__parameters:
+    peer_pose_topic: /phineas/pose
+    rate_hz: 20.0
+    cmd_timeout: 0.5
+    require_heartbeat: true
+    heartbeat_timeout: 2.0
+    require_pose: true
+    pose_timeout: 0.5
+    front_cone_deg: 60.0
+    stop_distance: 0.25
+    slow_distance: 0.50
+    avoid_distance: 0.50
+    avoid_strafe: 0.05
+    has_priority: false  # Phineas has right of way; Ferb backs off in a deadlock
+    deadlock_time: 3.0
+    backoff_speed: 0.05
+    backoff_time: 1.0
+    escape_turn_speed: 0.8
+
+/ferb/cube_detector:
+  ros__parameters:
+    s_min: 80
+    v_min: 50
+    min_area: 150.0
+    max_area: 60000.0
+    aspect_min: 0.6
+    aspect_max: 1.6
+    min_solidity: 0.8
+    open_kernel: 5
+    # OpenCV hue (0-179) ranges as [lo1, hi1, lo2, hi2, ...]; calibrate with the real cubes.
+    hue_ranges:
+      red: [0, 8, 169, 179]
+      orange: [9, 18]
+      yellow: [19, 34]
+      green: [35, 89]
+      blue: [90, 124]
+      purple: [125, 168]
+
+/ferb/hat_motor_driver:
+  ros__parameters:
+    wheel_radius: 0.0325
+    lx: 0.0605
+    ly: 0.0655
+    max_wheel_speed: 10.5
+    battery_voltage: 8.4
+    motor_max_voltage: 6.0
+    pwm_frequency: 1000.0
+    watchdog_timeout: 0.3
+    wheel_signs: [1, 1, 1, 1]
+    nsleep_pins: [12, 13]
+    pins_fl: [17, 27]
+    pins_fr: [24, 25]
+    pins_rl: [22, 23]
+    pins_rr: [26, 16]
+    gpio_chip: 4  # verify with `gpioinfo` on the Pi 5 (RP1 header chip)
+    dry_run: false
+
+/ferb/line_sensor:
+  ros__parameters:
+    pin: 5
+    active_level: 1
+    rate_hz: 50.0
+    gpio_chip: 4
+    dry_run: false
+
+/ferb/camera:
+  ros__parameters:
+    device: "0"
+    width: 640
+    height: 480
+    fps: 15.0
+    frame_id: ferb_camera

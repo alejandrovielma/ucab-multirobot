@@ -17,5 +17,5 @@ setup(
     description="Delivery-square zone arbiter.",
     license="MIT",
     tests_require=["pytest"],
-    entry_points={"console_scripts": []},
+    entry_points={"console_scripts": ["zone_arbiter = coordinator.zone_arbiter_node:main"]},
 )
