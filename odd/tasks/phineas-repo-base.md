@@ -95,6 +95,7 @@ Forecast: ~2500 authored lines (scaffold, generated-like packaging and tests).
   - 14884c8 measured 3 cm cubes, scoop U widened to 40 mm.
   - b6891b7 carry rules in safety_gate (arc turns only, no strafe, hold still on deadlock) + U depth 48 mm. RED 4 failures -> GREEN 91 tests, 0 failures.
   - Review assess (base 4dde89f): medium, under_budget (148 lines), pending in slice.
+  - Validated by user in Webots teleop (2026-10-12): arc turn (W+Q) keeps the cube in the 48 mm pocket; in-place spin still ejects it, as the carry rule assumes.
   - Webots world saved accidentally from Webots: stashed as `stash@{0}`, not committed.
 
 ## Next step
