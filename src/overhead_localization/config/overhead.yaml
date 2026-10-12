@@ -1,0 +1,7 @@
+# Overhead localizer on Perry's Pi. Replace `homography` with the calibrated pixel->table matrix (row major).
+aruco_localizer:
+  ros__parameters:
+    rate_hz: 10.0
+    homography: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    marker_ids: [1, 2]
+    marker_robots: [phineas, ferb]

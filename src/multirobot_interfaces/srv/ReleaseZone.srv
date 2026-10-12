@@ -1,0 +1,7 @@
+# Leave the delivery square. delivered=true increments the official count.
+string robot
+bool delivered
+string color
+---
+bool ok
+uint32 delivered_total

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!-- Loaded by WebotsController(robot_name='Ferb') in bringup/launch/sim.launch.py. -->
+<robot name="Ferb">
+  <webots>
+    <plugin type="multirobot_sim.recolector_driver.RecolectorDriver">
+      <robot>ferb</robot>
+      <!-- Raw linea_frente value below which the floor is black (white ~240, tape 0-30). -->
+      <line_threshold>120</line_threshold>
+      <!-- Gaussian noise of the emulated overhead pose (m, rad). -->
+      <pose_noise_xy>0.005</pose_noise_xy>
+      <pose_noise_theta>0.02</pose_noise_theta>
+      <!-- Per-wheel velocity sign FL,FR,RL,RR. Validate with the strafe test. -->
+      <wheel_signs>1,1,1,1</wheel_signs>
+    </plugin>
+  </webots>
+</robot>

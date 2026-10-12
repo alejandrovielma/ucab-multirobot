@@ -6,3 +6,8 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 ~$*
+# Webots per-user GUI layout
+*.wbproj
+.atl/
+# Webots world thumbnails
+src/multirobot_sim/worlds/.*.jpg

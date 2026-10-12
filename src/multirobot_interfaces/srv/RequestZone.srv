@@ -1,0 +1,6 @@
+# Ask the coordinator for exclusive access to the delivery square.
+string robot
+---
+bool granted
+string holder
+float32 lease_seconds
