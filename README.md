@@ -1,117 +1,309 @@
-# Robotica Phineas: robots recolectores Phineas y Ferb (ROS 2 Jazzy)
+# UCAB Multirobot: Phineas y Ferb (ROS 2 Jazzy + Webots)
 
-Monorepo ROS 2 Jazzy de los dos robots recolectores idénticos del equipo UCAB Robótica.
-Phineas recoge cubos rojos, naranjas y amarillos; Ferb recoge verdes, azules y morados.
-Ambos ejecutan **el mismo código**: solo cambia el archivo de parámetros (`config/<robot>.yaml`) y el
-espacio de nombres (`/phineas` o `/ferb`).
+Software de los robots recolectores del proyecto de Robótica de la UCAB. Dos robots móviles con ruedas
+mecanum, **Phineas** y **Ferb**, comparten una pista blanca delimitada por una línea negra, buscan cubos
+de 3 cm de sus colores y los llevan a una zona de transferencia, donde el brazo **Perry** los clasifica.
 
-La idea central es que los nodos de decisión (visión, comportamiento, seguridad) sean idénticos en
-Webots y en el robot real; lo único que se intercambia es la capa de hardware: en simulación la
-reemplaza un plugin de `webots_ros2`, en el robot real la reemplazan los nodos que hablan con el HAT,
-el sensor de línea y la cámara. Detalle completo en [docs/architecture.md](docs/architecture.md).
+- Phineas recoge cubos **rojos, naranjas y amarillos**; Ferb, **verdes, azules y morados**.
+- Los dos robots ejecutan **el mismo código**. Solo cambian su archivo de parámetros
+  (`config/phineas.yaml` o `config/ferb.yaml`) y su espacio de nombres (`/phineas` o `/ferb`).
+- Los nodos que deciden (visión, comportamiento, seguridad) son idénticos en Webots y en el robot real.
+  Lo único que se intercambia es la capa de hardware.
 
-## Estado
+![Vista cenital del mundo de Webots](docs/img/vista_cenital.png)
+
+El diseño completo (hardware, pines, decisiones y alternativas) está en
+[Phineas_Documento_Tecnico.pdf](Phineas_Documento_Tecnico.pdf). La arquitectura del software está en
+[docs/architecture.md](docs/architecture.md) y las tareas pendientes en [docs/team-todo.md](docs/team-todo.md).
+
+## Contenido
+
+- [Estado del proyecto](#estado-del-proyecto)
+- [Cómo funciona](#cómo-funciona)
+- [Estructura del repositorio](#estructura-del-repositorio)
+- [Instalación](#instalación)
+- [Ejecutar la simulación](#ejecutar-la-simulación)
+- [Pruebas automáticas](#pruebas-automáticas)
+- [Robot real](#robot-real)
+- [Problemas conocidos y soluciones](#problemas-conocidos-y-soluciones)
+- [Lecciones de las pruebas en Webots](#lecciones-de-las-pruebas-en-webots)
+- [Cómo contribuir](#cómo-contribuir)
+
+## Estado del proyecto
 
 | Parte | Estado |
 |---|---|
-| Interfaces, lógica pura (cinemática, seguridad, colores, FSM, arbitraje de zona) | Implementado y con tests |
-| Nodos ROS 2 y launch del robot real | Implementado; arrancan sin hardware (modo *dry run*) |
-| Paquete de Webots (mundo, plugin, URDF, launch) | Implementado; **no probado en Webots** (no había Webots en el entorno de desarrollo) |
-| Transporte y entrega del cubo (estado `CARRY`) | Pendiente del equipo |
-| Cámara real en Pi 5, localizador cenital real, prueba del HAT | Pendiente del equipo |
+| Lógica pura: cinemática mecanum, filtro de seguridad, colores, máquina de estados, llave del cuadro | Implementada, 99 pruebas pasando |
+| Simulación en Webots con los dos robots | **Funciona**: exploran, giran ante el borde, capturan cubos de su color y se esquivan |
+| Transporte y entrega del cubo en el cuadro (estado `CARRY`) | **Pendiente**: hoy el robot se detiene al capturar |
+| Nodos del robot real (HAT, sensor de línea, cámara) | Escritos; arrancan sin hardware, **sin probar en la Pi 5** |
+| Localizador con cámara cenital | Esqueleto y homografía con pruebas; falta la captura real |
 
-La lista de tareas pendientes con criterios de aceptación está en [docs/team-todo.md](docs/team-todo.md).
+## Cómo funciona
 
-## Mapa de paquetes
+### Flujo de datos de un robot
 
-| Paquete | Tipo | Contenido |
+```mermaid
+flowchart LR
+  subgraph HW["Capa de hardware: Webots o robot real"]
+    CAM[Cámara]
+    LINE[Sensor de línea delantero]
+    MOT[Motores]
+  end
+  subgraph LOGIC["Lógica de cada robot (igual en sim y real)"]
+    DET[cube_detector]
+    BEH[behavior]
+    GATE[safety_gate]
+  end
+  subgraph PERRY["Pi de Perry"]
+    LOC[Localizador cenital<br/>en sim: GPS + IMU]
+    ARB[zone_arbiter]
+  end
+  CAM -- camera/image_raw --> DET
+  DET -- cubes --> BEH
+  LINE -- line_front --> BEH
+  LINE -- line_front --> GATE
+  LOC -- pose de ambos robots --> BEH
+  LOC -- pose de ambos robots --> GATE
+  ARB -- /zone/occupant (latido) --> GATE
+  BEH -- /zone/request, /zone/release --> ARB
+  BEH -- cmd_vel_nav --> GATE
+  GATE -- cmd_vel --> MOT
+```
+
+1. **`cube_detector`** convierte la imagen a HSV y busca manchas saturadas con forma de cubo. A cada una
+   le asigna un color según su tono. El fondo blanco, la línea negra y la pala gris quedan descartados
+   por tener poca saturación.
+2. **`behavior`** es una máquina de estados:
+   `EXPLORE` (avanza y gira al ver el borde) → `APPROACH` (se orienta hacia el cubo propio más grande)
+   → `CAPTURE` (empuja para meterlo en la pala) → `CARRY` (pendiente). Publica un comando *deseado*.
+3. **`safety_gate`** es el único nodo que escribe en los motores. Recibe el comando deseado y lo recorta
+   según las reglas de seguridad. Así ninguna lógica nueva puede saltárselas (patrón *safety filter*).
+4. **`zone_arbiter`** (en la Pi de Perry) presta la llave del cuadro con caducidad de 60 s, publica un
+   latido a 2 Hz y lleva el conteo oficial de cubos entregados.
+
+### Reglas del filtro de seguridad
+
+| Regla | Por qué |
+|---|---|
+| Sin latido del árbitro en 2 s → parada | Si se cae la red, ningún robot sigue moviéndose a ciegas |
+| Pose propia con más de 0,5 s → parada | La evasión depende de saber dónde están los dos |
+| Solo traslación hacia adelante (sin desplazamiento lateral ni reversa) | Hay un único sensor de línea, delantero: moverse de lado o atrás es ciego al borde |
+| Línea negra al frente → no avanza, puede girar | No salir de la pista |
+| Otro robot a menos de 0,60 m al frente → frena y gira alejándose; a 0,40 m se detiene | Las palas se tocan a unos 0,38 m entre centros |
+| Bloqueo mutuo de más de 3 s → Ferb gira para salir, Phineas espera | Una regla asimétrica evita que los dos cedan a la vez (*livelock*) |
+| Con cubo: solo giros en arco | Girar en el sitio expulsa el cubo de la pala fija |
+
+Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
+
+### Simulación frente a robot real
+
+| Función | Webots | Robot real |
 |---|---|---|
-| [`multirobot_interfaces`](src/multirobot_interfaces) | ament_cmake | `RobotPose`, `RobotState`, `CubeDetection(Array)`, servicios `RequestZone` y `ReleaseZone` |
-| [`mobile_base`](src/mobile_base) | ament_python | `core/` lógica pura sin ROS; `vision.py`; nodos `behavior`, `safety_gate`, `cube_detector`, `hat_motor_driver`, `line_sensor`, `camera`; `config/phineas.yaml`, `config/ferb.yaml` |
-| [`coordinator`](src/coordinator) | ament_python | `zone_arbiter`: préstamo exclusivo (*lease*) del cuadrado de entrega y conteo oficial de cubos |
-| [`overhead_localization`](src/overhead_localization) | ament_python | Esqueleto del localizador ArUco cenital y homografía píxel → mesa (con tests) |
-| [`multirobot_sim`](src/multirobot_sim) | ament_python | Mundo `pista_ucab.wbt`, protos, plugin `RecolectorDriver`, URDF por robot, controlador de teclado |
-| [`bringup`](src/bringup) | ament_python | `sim.launch.py`, `robot.launch.py`, `robot_logic.launch.py`, `perry.launch.py` |
+| Motores | plugin `RecolectorDriver` | `hat_motor_driver` (HAT Cokoino, PWM con `lgpio`) |
+| Sensor de línea | `DistanceSensor "linea_frente"` | TCRT5000 en GPIO5 |
+| Cámara | `Camera "camara"` | IMX219 120° por CSI |
+| Posición | GPS + InertialUnit con ruido (imita la cámara cenital) | ArUco cenital (id 1 Phineas, id 2 Ferb) |
+| Pala | U fija de 40 × 48 mm, gris | pala impresa en 3D, fija, gris |
 
-El módulo `mobile_base/core/` no importa `rclpy`, OpenCV ni `lgpio`: es lógica pura con el tiempo
-pasado como argumento, por eso se prueba con `pytest` sin ROS corriendo.
+## Estructura del repositorio
 
-## Ejecutar los tests (Windows + Docker)
+```text
+src/
+  multirobot_interfaces/   mensajes y servicios compartidos (RobotPose, RobotState, CubeDetection, zona)
+  mobile_base/             código común de Phineas y Ferb
+    mobile_base/core/      lógica pura sin ROS: kinematics, safety, colors, behavior, geometry
+    mobile_base/vision.py  detección de cubos con OpenCV
+    mobile_base/nodes/     nodos ROS 2 (lógica y hardware real)
+    config/                phineas.yaml, ferb.yaml (colores, prioridad, umbrales)
+    test/                  pruebas de la lógica
+  coordinator/             árbitro de la llave del cuadro y conteo oficial
+  overhead_localization/   localizador cenital con ArUco y homografía píxel → mesa
+  multirobot_sim/          mundo de Webots, protos, plugin RecolectorDriver, URDF, control por teclado
+  bringup/                 launch: sim.launch.py, robot.launch.py, robot_logic.launch.py, perry.launch.py
+docker/, scripts/          entorno de pruebas con Docker (sin instalar ROS 2 en Windows)
+tools/sim_monitor.py       monitor en vivo de los dos robots para depurar corridas
+docs/                      arquitectura, tareas pendientes, imágenes
+odd/tasks/                 bitácora de la implementación con evidencias de cada paso
+figuras/                   figuras del documento técnico
+```
+
+`mobile_base/core/` no importa `rclpy`, OpenCV ni `lgpio`: es lógica pura con el tiempo pasado como
+argumento. Por eso se prueba con `pytest` en segundos y sin robot. Si el robot hace algo raro, lo primero
+es reproducirlo con una prueba de `core/`.
+
+## Instalación
+
+La simulación usa **Webots en Windows** y **ROS 2 dentro de WSL2**. Webots no corre bien dentro de WSL
+porque necesita la tarjeta gráfica.
+
+### 1. Webots
+
+Instalar [Webots R2025a](https://cyberbotics.com) en Windows, en la ruta por defecto
+`C:\Program Files\Webots`.
+
+### 2. Ubuntu 24.04 en WSL2
+
+En PowerShell como administrador:
+
+```powershell
+wsl --install -d Ubuntu-24.04
+```
+
+Comprobar con `wsl -l -v` que aparece `Ubuntu-24.04` con `VERSION 2`. La distribución `docker-desktop`
+no sirve para esto.
+
+### 3. ROS 2 Jazzy dentro de Ubuntu
+
+Seguir la [guía oficial](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) hasta
+instalar los paquetes, y luego:
+
+```bash
+sudo apt install ros-jazzy-ros-base ros-dev-tools ros-jazzy-webots-ros2 python3-opencv
+echo 'source /opt/ros/jazzy/setup.bash' >> ~/.bashrc
+echo 'export WEBOTS_HOME=/mnt/c/Program\ Files/Webots' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### 4. Red entre WSL y Webots
+
+Crear el archivo `C:\Users\<usuario>\.wslconfig` con este contenido y reiniciar WSL con `wsl --shutdown`
+desde PowerShell:
+
+```ini
+[wsl2]
+dnsTunneling=false
+```
+
+Sin esto los controladores se quedan en `Cannot connect to Webots instance`. La explicación está en
+[Problemas conocidos](#problemas-conocidos-y-soluciones).
+
+### 5. Clonar y compilar
+
+```bash
+mkdir -p ~/ws/src && cd ~/ws/src
+git clone https://github.com/alejandrovielma/ucab-multirobot.git
+cd ~/ws && colcon build --symlink-install
+echo 'source ~/ws/install/setup.bash' >> ~/.bashrc && source ~/.bashrc
+```
+
+Clonar dentro de Ubuntu (`~/ws`), no en `/mnt/c`: compilar sobre el disco de Windows es lento y rompe
+los enlaces simbólicos de `--symlink-install`.
+
+Para actualizar después:
+
+```bash
+cd ~/ws/src/ucab-multirobot && git pull && cd ~/ws && colcon build --symlink-install
+```
+
+## Ejecutar la simulación
+
+Con Webots **cerrado** (el launch lo abre solo):
+
+```bash
+ros2 launch bringup sim.launch.py
+```
+
+El launch abre Webots, conecta los dos robots (`controller "<extern>"`) con el plugin `RecolectorDriver`,
+inicia `Ros2Supervisor` (que publica el reloj `/clock` de la simulación), la lógica de cada robot y el
+árbitro. Al cerrar Webots se cierra todo.
+
+### Ver qué está pasando
+
+En otra terminal de Ubuntu:
+
+```bash
+ros2 topic echo /phineas/state                     # estado de la máquina de estados
+ros2 topic echo /phineas/cubes                     # cubos detectados por la cámara
+python3 ~/ws/src/ucab-multirobot/tools/sim_monitor.py --duration 120 --out /tmp/monitor --frames-every 10
+```
+
+El monitor imprime cada medio segundo el estado, la pose, el comando a los motores, la línea, el cubo
+objetivo de cada robot y la distancia entre ellos. Con `--frames-every` guarda además imágenes de la
+cámara de Phineas. Es la forma más rápida de diagnosticar un comportamiento extraño.
+
+### Pruebas manuales
+
+Solo Webots y los drivers, sin la lógica, para mover un robot a mano:
+
+```bash
+ros2 launch bringup sim.launch.py logic:=false
+ros2 topic pub --rate 10 /phineas/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.1}}"
+```
+
+Control por teclado sin ROS: abrir `src/multirobot_sim/worlds/pista_ucab.wbt` en Webots y cambiar el
+campo `controller` del robot a `recolector_teleop` (y el del otro a `<none>`). Teclas: W/S avanzar y
+retroceder, A/D lateral, Q/E girar, +/− velocidad. **No guardar el mundo** al cerrar: el launch necesita
+los dos robots en `<extern>` (hay una prueba automática que lo verifica).
+
+## Pruebas automáticas
 
 Requisito: Docker Desktop encendido. No hace falta ROS 2 en Windows.
 
 ```powershell
 powershell -File scripts/test_in_docker.ps1          # construye la imagen y corre todo
-powershell -File scripts/test_in_docker.ps1 -NoBuild # reutiliza la imagen ya construida
+powershell -File scripts/test_in_docker.ps1 -NoBuild # reutiliza la imagen
 ```
 
-El script ([scripts/test_in_docker.sh](scripts/test_in_docker.sh)) copia `src/` a un workspace dentro
-del contenedor (para no escribir `build/` ni `install/` en el disco de Windows) y ejecuta:
+El script compila los 6 paquetes, ejecuta `colcon test` (99 pruebas), importa cada módulo y arranca
+`robot.launch.py` de Phineas y Ferb sin hardware para comprobar que ningún nodo se cae. Desde Ubuntu
+también se puede correr `colcon test` directamente en `~/ws`.
 
-1. `colcon build --symlink-install` de los 6 paquetes.
-2. `colcon test` y `colcon test-result --verbose` (falla si algún test falla).
-3. Importación de cada módulo Python (los de `multirobot_sim` y `sim.launch.py` solo se compilan,
-   porque `webots_ros2_driver` no está instalado en la imagen).
-4. `ros2 launch bringup robot.launch.py` para Phineas y Ferb durante unos segundos, sin hardware:
-   falla si algún nodo se cae al arrancar.
+## Robot real
 
-Desde Linux o WSL: `docker run --rm -v "$PWD:/ws:ro" -w /ws ros:jazzy-ros-base bash ./scripts/test_in_docker.sh`
-(instala OpenCV con apt si falta).
-
-## Ejecutar la simulación (Webots en Windows + ROS 2 en WSL2)
-
-Configuración prevista; **no verificada todavía en una máquina del equipo**.
-
-1. Instalar [Webots R2025a](https://cyberbotics.com) en Windows.
-2. Instalar WSL2 con Ubuntu 24.04 y ROS 2 Jazzy dentro de WSL
-   ([guía oficial de ROS 2 para Webots en Windows](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Simulators/Webots/Installation-Windows.html)).
-3. En WSL:
-
-   ```bash
-   sudo apt install ros-jazzy-webots-ros2 python3-opencv
-   export WEBOTS_HOME=/mnt/c/Program\ Files/Webots
-   cd ~/ws && git clone <este repo> src/robotica-phineas   # o enlazar la carpeta del repo
-   source /opt/ros/jazzy/setup.bash
-   colcon build --symlink-install
-   source install/setup.bash
-   ros2 launch bringup sim.launch.py
-   ```
-
-`sim.launch.py` abre el mundo, conecta los dos robots (`controller "<extern>"`) con el plugin
-`multirobot_sim.recolector_driver.RecolectorDriver`, arranca la lógica de cada robot y el
-coordinador. Al cerrar Webots se cierra todo el launch. Con `logic:=false` solo arrancan Webots y
-los plugins, útil para mandar `cmd_vel` a mano.
-
-Problema conocido: en WSL2 a veces los controladores no logran conectarse con Webots en Windows; ver
-[cyberbotics/webots_ros2#1031](https://github.com/cyberbotics/webots_ros2/issues/1031).
-
-Para mover un robot a mano sin ROS, cambiar su campo `controller` a `"recolector_teleop"` en el
-mundo (las teclas están en la cabecera de
-[recolector_teleop.py](src/multirobot_sim/controllers/recolector_teleop/recolector_teleop.py)).
-
-![Vista cenital del mundo](docs/img/vista_cenital.png)
-
-## Ejecutar en el robot real
-
-En la Pi 5 de cada robot (Ubuntu 24.04 + ROS 2 Jazzy + `python3-lgpio`):
+En la Pi 5 de cada robot (Ubuntu 24.04, ROS 2 Jazzy y `python3-lgpio`):
 
 ```bash
 ros2 launch bringup robot.launch.py robot:=phineas   # o robot:=ferb
 ```
 
-En la Pi de Perry (coordinador y cámara cenital):
+En la Pi de Perry (árbitro y cámara cenital):
 
 ```bash
 ros2 launch bringup perry.launch.py
 ```
 
-Las tres Pi deben compartir el mismo `ROS_DOMAIN_ID` en la misma red y tener los relojes sincronizados
-(chrony/NTP): el `safety_gate` descarta poses con más de 0,5 s de antigüedad usando la marca de tiempo
-del localizador.
+- Las tres Pi deben estar en la misma red, con el mismo `ROS_DOMAIN_ID` y los relojes sincronizados
+  (chrony): el filtro de seguridad descarta poses con más de 0,5 s de antigüedad.
+- Por seguridad el robot **no se mueve** sin pose cenital ni latido del árbitro. Para una prueba en banco
+  sin ellos: `robot.launch.py robot:=phineas require_pose:=false require_heartbeat:=false`.
+- Hardware: Raspberry Pi 5, HAT Cokoino 4WD (2 × DRV8833), 4 motores TT 1:120 con ruedas mecanum,
+  cámara IMX219 de 120°, un sensor de línea delantero y pala fija impresa en 3D. Usar **solo batería 2S**:
+  el DRV8833 admite como máximo 11,8 V. Pines en [docs/architecture.md](docs/architecture.md).
 
-Por seguridad el robot **no se mueve** si no recibe su pose cenital o el latido de `/zone/occupant`.
-Para una prueba en banco sin cámara cenital ni coordinador:
+## Problemas conocidos y soluciones
 
-```bash
-ros2 launch bringup robot.launch.py robot:=phineas require_pose:=false require_heartbeat:=false
-```
+| Síntoma | Causa | Solución |
+|---|---|---|
+| `fatal: detected dubious ownership` al clonar desde `/mnt/c` | Git rechaza repositorios cuyo dueño es otro usuario (los archivos de Windows aparecen así desde WSL) | `git config --global --add safe.directory <ruta>/.git` |
+| `Cannot connect to Webots instance` en bucle | Con *DNS tunneling*, `/etc/resolv.conf` apunta a `10.255.255.254` y `webots_ros2` usa esa IP como la de Windows ([webots_ros2#1031](https://github.com/cyberbotics/webots_ros2/issues/1031)) | `.wslconfig` con `dnsTunneling=false` y `wsl --shutdown` |
+| `ValueError: NULL pointer access` en `getImage()` | La cámara de Webots aún no tiene imagen en los primeros pasos | Corregido en el driver (`read_camera_image`) |
+| Los robots no se mueven y no hay errores | Sin `/clock`, los nodos con tiempo de simulación no avanzan | Corregido: `sim.launch.py` inicia `Ros2Supervisor` |
+| La cámara publica a ~6 Hz | Las imágenes viajan por la red entre Windows y WSL | No afecta la lógica: todo corre en tiempo de simulación |
+| Aviso `PointLight ... attenuation` en Webots | Iluminación del mundo | Inofensivo |
+
+## Lecciones de las pruebas en Webots
+
+Errores que solo aparecieron al correr la simulación completa, y cómo se resolvieron:
+
+1. **La pala fija suelta el cubo al girar en el sitio.** Comprobado con el teclado: en arco el cubo se
+   mantiene, en el sitio sale a unos 45°. Solución: con cubo, solo giros en arco, y la U se hizo más
+   profunda (48 mm).
+2. **Phineas perseguía su propia pala.** Las alas naranjas aparecían en la cámara y el detector las tomaba
+   por un cubo naranja. Solución: pala gris (en Webots y en la impresión real), con una prueba que impide
+   volver a pintarla de un color de cubo.
+3. **El esquive lateral sacaba a los robots de la pista.** Con un solo sensor delantero, moverse de lado
+   es ciego. Solución: solo avanzar o girar; para esquivar, frenar y girar alejándose.
+4. **Los robots se tocaban.** La distancia de parada no contaba el largo de la pala. Solución: 0,40 m.
+
+El registro completo con evidencias está en [odd/tasks/phineas-repo-base.md](odd/tasks/phineas-repo-base.md).
+
+## Cómo contribuir
+
+- Trabajar en una rama (`feat/...`, `fix/...`) y abrir un *pull request* hacia `main`.
+- Mensajes de commit con el formato `tipo(área): qué cambió`, por ejemplo `fix(safety): ...`.
+- Toda lógica nueva va en `core/` con su prueba, y se valida primero en Webots y después en la pista.
+- Antes de subir: `powershell -File scripts/test_in_docker.ps1 -NoBuild` debe terminar en
+  `all checks passed`.
+- Las tareas pendientes, con criterios de aceptación, están en [docs/team-todo.md](docs/team-todo.md).
+  La siguiente es la entrega del cubo en el cuadro (`CARRY`).

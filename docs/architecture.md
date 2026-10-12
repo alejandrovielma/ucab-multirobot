@@ -84,11 +84,16 @@ En este orden, en cada ciclo de 20 Hz:
 
 1. Sin latido de `/zone/occupant` durante más de 2 s: parada total.
 2. Pose propia con más de 0,5 s de antigüedad: parada total.
-3. Línea negra al frente: se anula el avance; girar y desplazarse de lado siguen permitidos.
-4. Otro robot dentro de un cono frontal de 60°: frena linealmente entre 0,50 m y 0,25 m, se detiene
-   por debajo de 0,25 m y se desplaza a su derecha. Si los dos quedan bloqueados de frente más de 3 s,
-   el robot **sin prioridad** (Ferb) retrocede 1 s; si lleva un cubo, gira en vez de retroceder,
-   porque la pala fija soltaría el cubo.
+3. Solo traslación hacia adelante: se eliminan `vy` y `vx` negativo. El robot tiene un único sensor
+   de línea delantero, así que desplazarse de lado o retroceder es ciego al borde (en Webots, el
+   esquive lateral sacó a los dos robots del tablero). Girar en el sitio sí está permitido.
+4. Línea negra al frente: se anula el avance; girar sigue permitido.
+5. Otro robot dentro de un cono frontal de 60°: frena linealmente entre 0,60 m y 0,40 m, se detiene
+   por debajo de 0,40 m (las palas se tocan a unos 0,38 m entre centros) y gira alejándose de él.
+   Si los dos quedan bloqueados de frente más de 3 s, el robot **sin prioridad** (Ferb) gira 1,5 s
+   para salir; si lleva un cubo se queda quieto, porque cualquier maniobra lo sacaría de la pala.
+6. Con cubo en la pala: solo giros en arco (avance mínimo 0,05 m/s, giro máximo 0,6 rad/s). Girar en
+   el sitio expulsa el cubo de la pala fija (comprobado en Webots).
 
 ## Pines del HAT Cokoino (BCM)
 

@@ -21,6 +21,13 @@ Criterios de aceptación:
   sitio a velocidad 0.36 expulsó el cubo de la pala fija a los ~45°. `safety_gate` ya lo impone
   (`carry_min_forward`, `carry_max_turn`), pero la trayectoria de `CARRY` debe planearse con giros amplios.
 - Tests unitarios nuevos para cada transición, con el tiempo inyectado como en los tests existentes.
+- **Conflicto a resolver:** desde el commit `493c167`, `safety_gate` elimina todo `vx` negativo (solo hay
+  un sensor de línea delantero y retroceder es ciego al borde). Para soltar el cubo hay que retroceder,
+  así que la entrega necesita una excepción acotada en `safety_gate`: permitir reversa lenta y corta
+  (por ejemplo 0,03 m/s durante ≤ 1 s) **solo** mientras el robot tiene la llave del cuadro
+  (`/zone/occupant` = su nombre) y `carrying` acaba de pasar a falso, con un test que lo cubra.
+  Alternativa sin reversa: salir del cuadro girando en arco hacia adelante, si el cuadro y la
+  pala lo permiten sin arrastrar el cubo.
 
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
 
