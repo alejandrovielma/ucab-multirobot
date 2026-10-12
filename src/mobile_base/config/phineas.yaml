@@ -27,6 +27,8 @@
     carry_max_turn: 0.6
     k_heading: 1.5
     arrive_radius: 0.10
+    lead_in: 0.10
+    lead_in_width: 0.20
     wait_x: -0.45  # waiting point while the other robot holds the lease
     wait_y: 0.05
     request_period: 1.0

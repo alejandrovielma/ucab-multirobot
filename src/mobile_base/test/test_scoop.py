@@ -113,3 +113,61 @@ def test_capture_starts_only_when_the_cube_reaches_the_mouth(cy):
     assert fsm.state is State.APPROACH
     tick(fsm, 0.2, cubes=[Cube("red", 0.0, 0.66, 3000.0)])  # measured mouth position (IMX219-120)
     assert fsm.state is State.CAPTURE
+
+
+# ---- Webots run 8: two 5-minute lockups
+
+
+def test_border_wins_over_a_cube_at_the_mouth():
+    # Phineas looped APPROACH <-> CAPTURE on a cube just beyond the track edge.
+    fsm = make_fsm()
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.7, 3000.0)], line_front=True)
+    assert fsm.state is State.EXPLORE
+
+
+def test_border_during_capture_gives_up():
+    fsm = make_fsm()
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.7, 3000.0)])
+    assert fsm.state is State.CAPTURE
+    tick(fsm, 0.5, line_front=True)
+    assert fsm.state is State.EXPLORE
+
+
+def carrying(fsm):
+    capture(fsm, scoop_at_end="red")
+    fsm.take_actions()
+    assert fsm.state is State.CARRY
+
+
+def test_deliver_starts_only_facing_the_square():
+    # Ferb reached the entry facing north and started DELIVER, then wandered off the corridor.
+    fsm = make_fsm()
+    carrying(fsm)
+    z = fsm.params.zone
+    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, math.pi / 2), holds_zone=True)
+    assert fsm.state is State.CARRY
+    tick(fsm, 1.4, scoop="red", pose=(z.x, z.entry_y, SOUTH + 0.2), holds_zone=True)
+    assert fsm.state is State.DELIVER
+
+
+def test_carry_near_the_axis_aims_south_of_the_entry_to_arrive_turned():
+    fsm = make_fsm()
+    carrying(fsm)
+    z = fsm.params.zone
+    # Coming from the east facing west, level with the entry: aiming at the entry itself gives wz=0;
+    # the lead-in point south of it makes the robot start turning left (toward south) already.
+    _, _, wz = tick(fsm, 1.3, scoop="red", pose=(z.x + 0.05, z.entry_y, math.pi), holds_zone=True)
+    assert wz > 0.0
+
+
+def test_deliver_leaving_the_corridor_goes_back_to_carry():
+    fsm = make_fsm()
+    carrying(fsm)
+    z = fsm.params.zone
+    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, SOUTH), holds_zone=True)
+    assert fsm.state is State.DELIVER
+    tick(fsm, 1.4, scoop="red", pose=(z.x + 0.3, 0.0, SOUTH), holds_zone=True)
+    assert fsm.state is State.CARRY
+    assert fsm.carrying

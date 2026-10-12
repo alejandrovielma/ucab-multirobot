@@ -86,7 +86,9 @@ class BehaviorParams:
     carry_min_speed: float = 0.05  # m/s
     carry_max_turn: float = 0.6  # rad/s
     k_heading: float = 1.5  # rad/s per rad of heading error
-    arrive_radius: float = 0.10  # m, entry point reached (> turning radius, or the robot orbits it)
+    arrive_radius: float = 0.10  # m, waiting point reached (> turning radius, or the robot orbits it)
+    lead_in: float = 0.10  # m, aim this far south of the entry when close to the square axis
+    lead_in_width: float = 0.20  # m, "close to the axis"
     wait_x: float = -0.45  # m, waiting point while the other robot holds the lease (per robot)
     wait_y: float = 0.05
     request_period: float = 1.0  # s, retry while denied
@@ -246,19 +248,24 @@ class BehaviorFSM:
             return ZERO
         self._last_seen = inp.now
         self._target_color = target.color
+        if inp.line_front:
+            # Cube on or beyond the border: give up and turn away. Checked before the capture
+            # (Webots run 8: a cube just past the edge looped APPROACH <-> CAPTURE for minutes).
+            self.state = State.EXPLORE
+            self._start_turn(inp.now, inp.pose)
+            return self._explore(inp)
         if target.cy_norm > p.capture_cy:
             self.state = State.CAPTURE
             self._capture_until = inp.now + p.capture_time
             return self._capture(inp)
-        if inp.line_front:
-            # Cube beyond the border: give up and turn away from the line.
-            self.state = State.EXPLORE
-            self._start_turn(inp.now, inp.pose)
-            return self._explore(inp)
         scale = max(p.approach_min_scale, 1.0 - abs(target.cx_norm))
         return (p.approach_speed * scale, 0.0, -p.k_turn * target.cx_norm)
 
     def _capture(self, inp: BehaviorInput) -> Command:
+        if inp.line_front:
+            self.state = State.EXPLORE
+            self._start_turn(inp.now, inp.pose)
+            return self._explore(inp)
         if inp.now >= self._capture_until:
             if not is_mine(inp.scoop_color, self.params.my_colors):
                 # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again.
@@ -298,17 +305,21 @@ class BehaviorFSM:
             return self._abandon_transport(inp)
         if not self._still_holding(inp):
             return self._abandon_transport(inp)  # the camera no longer sees the cube in the U
-        x, y, _ = inp.pose
+        x, y, theta = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone:
             if distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
                 return ZERO  # the other robot is using the square
             return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
-        if distance(x, y, z.x, z.entry_y) > p.arrive_radius:
-            return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
-        self.state = State.DELIVER
-        self._dropping = False
-        return self._deliver(inp)
+        if z.in_corridor(x, y) and z.aligned(theta):
+            self.state = State.DELIVER
+            self._dropping = False
+            return self._deliver(inp)
+        if abs(x - z.x) <= p.lead_in_width:
+            # Near the axis: aim a bit south of the entry so the arc ends facing the square
+            # (Webots run 8: arriving at the entry facing north and entering anyway went wrong).
+            return self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed)
+        return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
 
     def _deliver(self, inp: BehaviorInput) -> Command:
         p = self.params
@@ -321,6 +332,9 @@ class BehaviorFSM:
         if not self._dropping:
             if not self._still_holding(inp):
                 return self._abandon_transport(inp)
+            if not z.in_corridor(x, y):
+                self.state = State.CARRY  # drifted out of the corridor: line up again
+                return self._carry(inp)
             if y > z.drop_y:
                 # The square's north tape is crossed on purpose here: line_front is ignored.
                 carrot_y = max(y - p.enter_lookahead, z.drop_y - p.enter_lookahead)
