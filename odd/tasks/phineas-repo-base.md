@@ -98,6 +98,11 @@ Forecast: ~2500 authored lines (scaffold, generated-like packaging and tests).
   - Validated by user in Webots teleop (2026-10-12): arc turn (W+Q) keeps the cube in the 48 mm pocket; in-place spin still ejects it, as the carry rule assumes.
   - Webots world saved accidentally from Webots: stashed as `stash@{0}`, not committed.
 
+- First full autonomous run observed by the agent in Webots (2026-10-12), via tools/sim_monitor.py + window captures:
+  - Run 2 defects: Phineas chased its own orange scoop wings (false orange cube at cx=+/-0.48, cy=0.81) -> never captured; peer-avoid strafes drove both robots off the board (single front line sensor is blind sideways); robots touched (center distance 0.22 m < 0.25 stop).
+  - Fixes: 493c167 forward-only translation + turn-away avoidance, stop 0.40 m; 8e83732 gray scoop + regression test; ddaf6af monitor tool. RED 7 failures -> GREEN 99 tests.
+  - Run 3: both robots captured a cube of their own color (Phineas: yellow inside the scoop, camera frame), peer avoidance kept min distance 0.48 m, no line crossing; both then stop in CARRY (delivery not implemented). Motion phase only ~13 s, so long-run track keeping is still unverified.
+
 ## Next step
 
 Team runs `ros2 launch bringup sim.launch.py` in WSL2 with Webots R2025a, validates wheel signs (docs/team-todo.md item 2), then implements CARRY/delivery (item 1).
