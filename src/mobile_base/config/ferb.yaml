@@ -47,6 +47,7 @@
     entry_heading_tolerance: 0.524  # 30 deg
     skip_time: 3.0
     backoff_time: 3.0
+    open_probe_distance: 0.5
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
     # Keep these equal in behavior and safety_gate.
     zone_x: -0.13

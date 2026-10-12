@@ -80,7 +80,9 @@ class BehaviorNode(Node):
             )
         )
         if self.fsm.state is not previous:
-            self.get_logger().info(f"{previous.value} -> {self.fsm.state.value}")
+            note = f" ({self.fsm.note})" if self.fsm.note else ""
+            self.get_logger().info(f"{previous.value} -> {self.fsm.state.value}{note}")
+            self.fsm.note = ""
         for action in self.fsm.take_actions():
             self._perform(action)
         self._cmd_pub.publish(twist(vx, vy, wz))

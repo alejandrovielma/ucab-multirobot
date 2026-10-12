@@ -114,6 +114,7 @@ class BehaviorParams:
     entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
+    open_probe_distance: float = 0.5  # m, straight free distance probed per heading after the border
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
     zone_square_y: float = DeliveryZone.square_y
@@ -151,6 +152,7 @@ class BehaviorFSM:
         self._zone = params.zone
         self._rng = rng or random.Random()
         self.state = State.EXPLORE
+        self.note = ""  # why the last transition happened (logged by the node)
         self._turn_until: float | None = None
         self._turn_dir = 1.0
         self._turn_goal: float | None = None  # rad still to turn (pose mode)
@@ -272,7 +274,8 @@ class BehaviorFSM:
             self._scoop_seen = inp.now
         return inp.now - self._scoop_seen <= self.params.scoop_lost_timeout
 
-    def _abandon_transport(self, inp: BehaviorInput) -> Command:
+    def _abandon_transport(self, inp: BehaviorInput, why: str) -> Command:
+        self.note = why
         self.plan = None
         self._give_up_cube(inp)
         self.state = State.EXPLORE
@@ -300,9 +303,39 @@ class BehaviorFSM:
         # A timed turn can stop with the front sensor already beyond the tape (it then reads white
         # and the robot drives off the track): turn a measured angle that points back inside.
         self._turn_goal = self._rng.uniform(p.turn_angle_min, p.turn_angle_max)
+        open_heading = self._open_heading(pose)
+        if open_heading is not None:
+            # With the track polygon, aim at open space: a random angle in the narrow waist often
+            # pointed at the tape again (kinematic harness: 16 s spinning in place).
+            diff = math.remainder(open_heading - pose[2], 2.0 * math.pi)
+            self._turn_dir = 1.0 if diff >= 0.0 else -1.0
+            self._turn_goal = max(abs(diff), 0.05)
         self._turn_prev_theta = pose[2]
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
         self._check_turn_room(now, pose)
+
+    def _free_distance(self, pose, heading: float) -> float:
+        """How far the body can go straight along heading and stay inside the track."""
+        p = self.params
+        x, y, _ = pose
+        free = 0.0
+        while free < p.open_probe_distance:
+            nxt = free + 0.02
+            corners = self._body.corners(x + nxt * math.cos(heading), y + nxt * math.sin(heading), heading)
+            if not all(self._track.contains(cx, cy) for cx, cy in corners):
+                break
+            free = nxt
+        return free
+
+    def _open_heading(self, pose) -> float | None:
+        """A heading (random among the most open of 12) to explore after the border, or None."""
+        if pose is None or not self._track.enabled:
+            return None
+        scored = [(self._free_distance(pose, k * math.pi / 6.0), k * math.pi / 6.0) for k in range(12)]
+        best = max(free for free, _ in scored)
+        if best <= 0.0:
+            return None
+        return self._rng.choice([h for free, h in scored if free >= 0.6 * best])
 
     def _room_to_spin(self, pose) -> bool:
         """The whole 135-225 deg turn fits: the corners sweep a circle of sweep_radius.
@@ -356,6 +389,7 @@ class BehaviorFSM:
         if target is None:
             if inp.now - self._last_seen > p.lost_timeout:
                 self.state = State.EXPLORE
+                self.note = "target lost"
                 return self._explore(inp)
             return ZERO
         self._last_seen = inp.now
@@ -364,6 +398,7 @@ class BehaviorFSM:
             # Cube on or beyond the border: give up and turn away. Checked before the capture
             # (Webots run 8: a cube just past the edge looped APPROACH <-> CAPTURE for minutes).
             self.state = State.EXPLORE
+            self.note = "border before the cube"
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
@@ -371,6 +406,7 @@ class BehaviorFSM:
                 # Captured here, the robot would face the tape with no arc that keeps its body in.
                 self._ignore_until = inp.now + p.skip_time
                 self.state = State.EXPLORE
+                self.note = "capture skipped: no plan to the square from there"
                 self._start_turn(inp.now, inp.pose)
                 return self._explore(inp)
             self.state = State.CAPTURE
@@ -382,12 +418,14 @@ class BehaviorFSM:
     def _capture(self, inp: BehaviorInput) -> Command:
         if inp.line_front:
             self.state = State.EXPLORE
+            self.note = "border during capture"
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         if inp.now >= self._capture_until:
             if not is_mine(inp.scoop_color, self.params.my_colors):
                 # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again.
                 self.state = State.APPROACH
+                self.note = "capture failed: scoop empty"
                 self._last_seen = inp.now
                 return self._approach(inp)
             self.state = State.CARRY
@@ -420,9 +458,9 @@ class BehaviorFSM:
         z = self._zone
         if inp.line_front:
             # The gate turns in place at the line and the turn drops the cube: stop carrying.
-            return self._abandon_transport(inp)
+            return self._abandon_transport(inp, "line while carrying")
         if not self._still_holding(inp):
-            return self._abandon_transport(inp)  # the camera no longer sees the cube in the U
+            return self._abandon_transport(inp, "cube lost from the scoop")
         x, y, theta = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
@@ -438,7 +476,7 @@ class BehaviorFSM:
                 return cmd
             if kind == "wait":
                 return ZERO  # cannot reach the waiting point: wait here
-            return self._abandon_transport(inp)  # no way to the square keeps the body in: drop the cube
+            return self._abandon_transport(inp, "no plan to the square: cube dropped")
         if not inp.holds_zone:
             return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
         if abs(x - z.x) <= p.lead_in_width:
@@ -457,7 +495,7 @@ class BehaviorFSM:
             self._ask_lease(inp)  # lease expired mid-maneuver: the gate blocks the tape and the reverse
         if not self._dropping:
             if not self._still_holding(inp):
-                return self._abandon_transport(inp)
+                return self._abandon_transport(inp, "cube lost while entering")
             if not z.in_corridor(x, y):
                 self.state = State.CARRY  # drifted out of the corridor: line up again
                 return self._carry(inp)

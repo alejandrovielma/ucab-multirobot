@@ -220,3 +220,20 @@ def test_drop_point_keeps_the_body_out_of_the_square_and_the_cube_in():
     assert all(track.contains(cx, cy) for cx, cy in FP.corners(*drop))  # body before the tape
     cube_y = z.drop_y - z.cube_ahead
     assert -0.388 + 0.015 <= cube_y <= -0.180 - 0.015  # whole cube inside the square interior
+
+
+def test_border_turn_points_to_open_space_not_a_random_heading():
+    # Kinematic harness (Webots track): a random 135-225 deg turn in the narrow waist often pointed
+    # at the tape again, and the robot spun in place for 16 s. In a 0.4 m wide corridor facing a
+    # side wall, the open directions are along the corridor (+-90 deg), not back at the other wall.
+    corridor = Track((0.0, 0.0, 0.4, 0.0, 0.4, 2.0, 0.0, 2.0))
+    for seed in range(8):
+        f = BehaviorFSM(BehaviorParams(my_colors=("red",), **ZONE), rng=random.Random(seed), track=corridor)
+        pose = (0.2, 1.0, 0.0)
+        f.step(BehaviorInput(now=0.0, cubes=[], line_front=True, pose=pose))
+        t, theta = 0.1, 0.0
+        while f._turn_until is not None and t < 10.0:
+            cmd = f.step(BehaviorInput(now=t, cubes=[], line_front=False, pose=(0.2, 1.0, theta)))
+            theta += cmd[2] * 0.1
+            t += 0.1
+        assert abs(abs(math.remainder(theta, 2 * math.pi)) - math.pi / 2) < math.radians(35), seed
