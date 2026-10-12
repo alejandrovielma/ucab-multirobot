@@ -34,6 +34,40 @@ Criterios de aceptación:
   Alternativa sin reversa: salir del cuadro girando en arco hacia adelante, si el cuadro y la
   pala lo permiten sin arrastrar el cubo.
 
+## 9. Verificar que el cubo quedó en la pala (captura real, no por tiempo)
+
+Dónde: `BehaviorFSM._capture` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py).
+
+Problema observado (Webots, corrida 7, 2026-10-12): `CAPTURE` empuja 1 s y pasa a `CARRY` sin comprobar
+nada. Se registraron 5 entregas y en el cuadro quedó 1 cubo; otro terminó fuera de la pista. El conteo
+oficial del árbitro hoy no es confiable.
+
+Criterios de aceptación:
+- Con la cámara del robot (sin comprar sensores): definir y medir en Webots dónde aparece un cubo que está
+  dentro de la U (zona inferior central de la imagen, entre las paredes de la pala). Guardar cuadros de
+  ejemplo con `tools/sim_monitor.py --frames-every`.
+- `CAPTURE` pasa a `CARRY` solo si el cubo se ve en esa zona; si no, vuelve a `APPROACH`.
+- Durante `CARRY`, si el cubo deja de verse en la pala durante más de N s, se abandona el transporte
+  (devuelve la llave con `delivered=false`).
+- Corrida de 7 min en Webots: entregas contadas = cubos dentro del cuadro (contarlos en la captura final).
+- Alternativa con hardware (si se acepta comprar): un FC-51 en la pala, como en el documento v2.
+
+## 10. Polígono de la pista real para la cerca virtual
+
+Dónde: [src/mobile_base/config/track.yaml](../src/mobile_base/config/track.yaml).
+
+Criterios de aceptación:
+- Con la cámara cenital calibrada (tarea 5), detectar el borde interior de la cinta, pasarlo por la
+  homografía y guardar el polígono en metros. Medir también el cuadro y ajustar `zone_*`.
+- `test_track.py` sigue pasando con los puntos de inicio, espera y entrada medidos en la pista real.
+
+## 11. Pendientes menores encontrados al actualizar el documento técnico
+
+- La figura f13 (captura de Webots) todavía muestra las palas naranjas: recapturarla.
+- La cabecera de [RecolectorUCAB.proto](../src/multirobot_sim/protos/RecolectorUCAB.proto) aún menciona
+  SG90, FC-51 y TCS34725 como parte del diseño.
+- La cámara simulada sigue con el campo de visión de la OV5647 (tarea 7).
+
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
 
 Dónde: `<wheel_signs>` en [src/multirobot_sim/resource/phineas.urdf](../src/multirobot_sim/resource/phineas.urdf) y `ferb.urdf`.

@@ -88,7 +88,7 @@ En este orden, en cada ciclo de 20 Hz:
    de línea delantero, así que desplazarse de lado o retroceder es ciego al borde (en Webots, el
    esquive lateral sacó a los dos robots del tablero). Girar en el sitio sí está permitido.
 4. Línea negra al frente: se anula el avance; girar sigue permitido (salvo la excepción de entrega).
-5. Otro robot dentro de un cono frontal de 60°: frena linealmente entre 0,60 m y 0,40 m, se detiene
+5. Otro robot a menos de 60° a cada lado del frente (cono de 120° en total): frena linealmente entre 0,60 m y 0,40 m, se detiene
    por debajo de 0,40 m (las palas se tocan a unos 0,38 m entre centros) y gira alejándose de él.
    Si los dos quedan bloqueados de frente más de 3 s, el robot **sin prioridad** (Ferb) gira 1,5 s
    para salir; si lleva un cubo se queda quieto, porque cualquier maniobra lo sacaría de la pala.
