@@ -17,6 +17,11 @@ Rules, applied in order every tick:
    - peer to one side (not ahead, not touching): a forward arc away from it, so a carrying
      robot does not freeze forever next to another robot.
 
+Geofence (rule 4, needs the overhead pose and a track polygon): white looks the same inside and
+outside the tape, so a front point (track_lookahead ahead) outside the polygon counts as a line.
+With the robot center already outside, forward motion is allowed only toward the track centroid,
+even over "black" (off the board the floor reads as tape).
+
 Delivery exception (rules 3 and 4): while this robot holds the zone lease (/zone/occupant) and its
 own overhead pose is inside the delivery corridor facing the square, it may cross the square's
 tape and, once it no longer carries the cube, reverse at most max_reverse. Both conditions come
@@ -28,6 +33,7 @@ from dataclasses import dataclass
 
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing
+from mobile_base.core.track import Track
 
 Command = tuple[float, float, float]
 STOP: Command = (0.0, 0.0, 0.0)
@@ -64,6 +70,8 @@ class SafetyParams:
     carry_arc_away_bearing: float = 25.0  # deg, peer this far off-axis: arc away instead of freezing
     carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
     max_reverse: float = 0.05  # m/s, only inside the delivery corridor with the lease
+    track_lookahead: float = 0.10  # m, geofence point ahead of the center (line sensor at 0.075)
+    track_return_cone: float = 45.0  # deg, outside the track: forward only within this of the centroid
     # Delivery square (see core/delivery.py); keep equal to the behavior's zone_* parameters.
     zone_x: float = DeliveryZone.x
     zone_square_y: float = DeliveryZone.square_y
@@ -86,9 +94,10 @@ class SafetyInput:
 
 
 class SafetyGate:
-    def __init__(self, params: SafetyParams):
+    def __init__(self, params: SafetyParams, track: Track | None = None):
         self.params = params
         self._zone = zone_from(params)
+        self._track = track or Track(())
         self._blocked_since: float | None = None
         self._escape_until: float | None = None
         self._escape_cmd: Command = STOP
@@ -117,10 +126,11 @@ class SafetyGate:
         elif vy != 0.0 or vx < 0.0:
             vx, vy = max(vx, 0.0), 0.0
             reasons.append("forward only")
-        line_blocks = inp.line_front and not delivering
+        returning, off_track = self._geofence(inp, own_fresh and not delivering, reasons)
+        line_blocks = (inp.line_front and not delivering and not returning) or off_track
         if line_blocks and vx > 0.0:
             vx = 0.0
-            reasons.append("line ahead")
+            reasons.append("line ahead" if inp.line_front else "no forward")
 
         peer = inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None
         blocked = False
@@ -139,6 +149,22 @@ class SafetyGate:
         if inp.carrying:
             vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, peer_distance, line_blocks, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
+
+    def _geofence(self, inp: SafetyInput, active: bool, reasons: list[str]) -> tuple[bool, bool]:
+        """Return (returning to the track, forward must be blocked)."""
+        if not active or not self._track.enabled:
+            return False, False
+        own = inp.own_pose
+        p = self.params
+        if not self._track.contains(own.x, own.y):
+            cx, cy = self._track.centroid
+            returning = abs(relative_bearing(own.x, own.y, own.theta, cx, cy)) <= math.radians(p.track_return_cone)
+            reasons.append("outside track: " + ("back in" if returning else "turn back"))
+            return returning, not returning
+        if not self._track.front_inside(own.x, own.y, own.theta, p.track_lookahead):
+            reasons.append("track edge ahead (pose)")
+            return False, True
+        return False, False
 
     def _in_delivery_corridor(self, pose: Pose2D) -> bool:
         return self._zone.in_corridor(pose.x, pose.y) and self._zone.aligned(pose.theta)

@@ -36,7 +36,7 @@ def test_zone_is_identical_in_behavior_and_gate(robot):
     cfg = load(robot)
     behavior = cfg[f"/{robot}/behavior"]["ros__parameters"]
     gate = cfg[f"/{robot}/safety_gate"]["ros__parameters"]
-    zone_keys = [k for k in behavior if k.startswith("zone_")]
+    zone_keys = [k for k in behavior if k.startswith("zone_")] + ["track_lookahead"]
     assert zone_keys
     assert {k: behavior[k] for k in zone_keys} == {k: gate[k] for k in zone_keys}
 

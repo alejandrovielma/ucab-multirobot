@@ -5,7 +5,7 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams
-from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, now_sec, pose_from_msg, spin_node, twist
+from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import RobotPose, RobotState
 
 
@@ -16,7 +16,7 @@ class SafetyGateNode(Node):
         self._cmd_timeout = self.declare_parameter("cmd_timeout", 0.5).value
         peer_topic = self.declare_parameter("peer_pose_topic", "/ferb/pose").value
         self._robot = self.declare_parameter("robot", self.get_namespace().strip("/")).value
-        self.gate = SafetyGate(SafetyParams(**declare_dataclass(self, SafetyParams)))
+        self.gate = SafetyGate(SafetyParams(**declare_dataclass(self, SafetyParams)), track=declare_track(self))
 
         self._cmd = (0.0, 0.0, 0.0)
         self._cmd_time: float | None = None

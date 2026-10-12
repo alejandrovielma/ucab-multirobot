@@ -12,10 +12,15 @@ DELIVER  -> with the lease: drive south across the square's tape until the cube 
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
 
+Geofence (with the overhead pose and a track polygon): the front point outside the track counts as
+the border line in every state but DELIVER, and with the center already outside the robot drops
+whatever it was doing and drives back toward the track centroid.
+
 The output is the DESIRED command; the SafetyGate filters it before the motors. Requests to the
 zone arbiter are returned as ZoneAction items (take_actions) so this module stays free of ROS.
 """
 
+import dataclasses
 import math
 import random
 from collections.abc import Sequence
@@ -25,6 +30,7 @@ from enum import Enum
 from mobile_base.core.colors import is_mine
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing, wrap_angle
+from mobile_base.core.track import Track
 
 Command = tuple[float, float, float]
 ZERO: Command = (0.0, 0.0, 0.0)
@@ -83,6 +89,7 @@ class BehaviorParams:
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
+    track_lookahead: float = 0.10  # m, geofence point ahead of the center (keep equal to the gate)
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
     zone_square_y: float = DeliveryZone.square_y
@@ -106,8 +113,9 @@ class BehaviorInput:
 
 
 class BehaviorFSM:
-    def __init__(self, params: BehaviorParams, rng: random.Random | None = None):
+    def __init__(self, params: BehaviorParams, rng: random.Random | None = None, track: Track | None = None):
         self.params = params
+        self._track = track or Track(())
         self._zone = params.zone
         self._rng = rng or random.Random()
         self.state = State.EXPLORE
@@ -137,6 +145,12 @@ class BehaviorFSM:
         return actions
 
     def step(self, inp: BehaviorInput) -> Command:
+        if self.state not in (State.DELIVER, State.STOP) and self._track.enabled and inp.pose is not None:
+            x, y, theta = inp.pose
+            if not self._track.contains(x, y):
+                return self._return_to_track(inp)
+            if not self._track.front_inside(x, y, theta, self.params.track_lookahead):
+                inp = dataclasses.replace(inp, line_front=True)
         handler = {
             State.EXPLORE: self._explore,
             State.APPROACH: self._approach,
@@ -146,6 +160,23 @@ class BehaviorFSM:
             State.STOP: lambda _inp: ZERO,
         }[self.state]
         return handler(inp)
+
+    def _return_to_track(self, inp: BehaviorInput) -> Command:
+        if self.state is State.CARRY:
+            self._give_up_cube(inp)
+        self.state = State.EXPLORE
+        self._turn_until = None
+        x, y, theta = inp.pose
+        cx, cy = self._track.centroid
+        err = relative_bearing(x, y, theta, cx, cy)
+        if abs(err) > 0.3:
+            return (0.0, 0.0, math.copysign(self.params.turn_speed, err))
+        return (self.params.explore_speed, 0.0, 0.0)
+
+    def _give_up_cube(self, inp: BehaviorInput) -> None:
+        if inp.holds_zone:
+            self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
+        self._carried_color = ""
 
     def _target(self, cubes: Sequence[Cube]) -> Cube | None:
         mine = [c for c in cubes if is_mine(c.color, self.params.my_colors)]
@@ -240,9 +271,7 @@ class BehaviorFSM:
         z = self._zone
         if inp.line_front:
             # The gate turns in place at the line and the turn drops the cube: stop carrying.
-            if inp.holds_zone:
-                self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
-            self._carried_color = ""
+            self._give_up_cube(inp)
             self.state = State.EXPLORE
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)

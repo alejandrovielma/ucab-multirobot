@@ -33,6 +33,7 @@
     enter_lookahead: 0.10
     reverse_speed: 0.04
     drop_timeout: 6.0
+    track_lookahead: 0.10
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
     # Keep these equal in behavior and safety_gate.
     zone_x: -0.13
@@ -65,6 +66,8 @@
     carry_arc_away_bearing: 25.0
     carry_arc_away_min_distance: 0.30
     max_reverse: 0.05
+    track_lookahead: 0.10
+    track_return_cone: 45.0
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
     # Keep these equal in behavior and safety_gate.
     zone_x: -0.13

@@ -10,7 +10,7 @@ from std_msgs.msg import Bool, String
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, ZoneAction
 from mobile_base.core.colors import DEFAULT_ROBOT_COLORS
-from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, now_sec, pose_from_msg, spin_node, twist
+from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
 from multirobot_interfaces.srv import ReleaseZone, RequestZone
 
@@ -25,7 +25,7 @@ class BehaviorNode(Node):
         cube_timeout = self.declare_parameter("cube_timeout", 0.5).value
         self.declare_parameter("peer_pose_topic", "/ferb/pose")  # still in the YAML; avoidance lives in the gate
         values = declare_dataclass(self, BehaviorParams, skip=("my_colors",))
-        self.fsm = BehaviorFSM(BehaviorParams(my_colors=tuple(my_colors), **values))
+        self.fsm = BehaviorFSM(BehaviorParams(my_colors=tuple(my_colors), **values), track=declare_track(self))
         self._cube_timeout = cube_timeout
 
         self._cubes: list[Cube] = []

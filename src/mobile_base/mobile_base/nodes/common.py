@@ -3,6 +3,7 @@
 import dataclasses
 
 import rclpy
+from rclpy.parameter import Parameter
 from builtin_interfaces.msg import Time as TimeMsg
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
@@ -10,6 +11,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
 from mobile_base.core.safety import Pose2D
+from mobile_base.core.track import Track
 
 # /zone/occupant is a latched heartbeat: late joiners get the last value immediately.
 ZONE_OCCUPANT_QOS = QoSProfile(
@@ -27,6 +29,15 @@ def declare_dataclass(node: Node, cls, skip: tuple[str, ...] = ()) -> dict:
             continue
         values[field.name] = node.declare_parameter(field.name, field.default).value
     return values
+
+
+def declare_track(node: Node) -> Track:
+    """track_polygon comes from config/track.yaml; without it there is no geofence."""
+    flat = node.declare_parameter("track_polygon", Parameter.Type.DOUBLE_ARRAY).value
+    track = Track(flat)
+    if not track.enabled:
+        node.get_logger().warn("no track_polygon: geofence disabled, only the line sensor keeps the robot in")
+    return track
 
 
 def stamp_to_sec(stamp: TimeMsg) -> float:
