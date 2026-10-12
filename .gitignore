@@ -8,3 +8,4 @@ __pycache__/
 ~$*
 # Webots per-user GUI layout
 *.wbproj
+.atl/
