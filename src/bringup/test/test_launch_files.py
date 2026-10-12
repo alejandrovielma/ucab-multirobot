@@ -12,6 +12,14 @@ def test_expected_launch_files_exist():
     assert EXPECTED <= present
 
 
+def test_sim_launch_publishes_clock_for_sim_time_nodes():
+    # Nodes run with use_sim_time; without the webots_ros2 Ros2Supervisor nobody publishes /clock
+    # and their timers never fire (robots stay still).
+    source = (LAUNCH_DIR / "sim.launch.py").read_text()
+    assert "ros2_supervisor=True" in source
+    assert "webots._supervisor" in source
+
+
 def test_every_launch_file_defines_generate_launch_description():
     for path in LAUNCH_DIR.glob("*.launch.py"):
         tree = ast.parse(path.read_text())

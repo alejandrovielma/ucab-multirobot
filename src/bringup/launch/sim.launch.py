@@ -27,12 +27,15 @@ def generate_launch_description():
     sim_share = get_package_share_directory("multirobot_sim")
     bringup_share = get_package_share_directory("bringup")
 
-    webots = WebotsLauncher(world=os.path.join(sim_share, "worlds", "pista_ucab.wbt"))
+    # ros2_supervisor starts webots_ros2's Ros2Supervisor, the node that publishes /clock;
+    # every node below runs with use_sim_time and would never advance without it.
+    webots = WebotsLauncher(world=os.path.join(sim_share, "worlds", "pista_ucab.wbt"), ros2_supervisor=True)
     actions = [
         DeclareLaunchArgument(
             "logic", default_value="true", description="false = only Webots and drivers (manual cmd_vel tests)"
         ),
         webots,
+        webots._supervisor,
     ]
 
     for robot, webots_name in ROBOTS.items():
