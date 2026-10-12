@@ -95,7 +95,7 @@ flowchart LR
 | Excepción: con la llave del cuadro y dentro del pasillo de entrega, cruza la cinta del cuadro y retrocede a ≤ 0,05 m/s sin cubo | Es la única forma de dejar el cubo con una pala fija; el filtro lo verifica con su propia pose y la llave |
 | Otro robot a menos de 0,60 m al frente → frena y gira alejándose; a 0,40 m se detiene | Las palas se tocan a unos 0,38 m entre centros |
 | Bloqueo mutuo de más de 3 s → Ferb gira para salir, Phineas espera | Una regla asimétrica evita que los dos cedan a la vez (*livelock*) |
-| Con cubo: solo giros en arco; con la línea al frente, sale de ella en arco lento | Girar en el sitio expulsa el cubo de la pala fija; quedarse quieto en el borde bloquearía al robot para siempre |
+| Con cubo: solo giros en arco; con la línea al frente manda la línea (gira en el sitio y el cubo se pierde) | Girar en el sitio expulsa el cubo de la pala fija, pero salir del tablero es peor (pasó en Webots) |
 
 Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
 

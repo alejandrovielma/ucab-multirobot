@@ -6,7 +6,8 @@ APPROACH -> steer toward the largest (closest) cube of my colors.
 CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop.
 CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point north of the delivery
             square (overhead pose); without it, wait at this robot's own waiting point, away from
-            the entry so the robot holding the lease can get through.
+            the entry so the robot holding the lease can get through. Reaching the border line
+            ends the transport: the turn away from it drops the cube (back to EXPLORE).
 DELIVER  -> with the lease: drive south across the square's tape until the cube is inside,
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
@@ -237,6 +238,14 @@ class BehaviorFSM:
             return ZERO  # without the overhead pose the robot cannot find the square
         p = self.params
         z = self._zone
+        if inp.line_front:
+            # The gate turns in place at the line and the turn drops the cube: stop carrying.
+            if inp.holds_zone:
+                self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
+            self._carried_color = ""
+            self.state = State.EXPLORE
+            self._start_turn(inp.now, inp.pose)
+            return self._explore(inp)
         x, y, _ = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone:

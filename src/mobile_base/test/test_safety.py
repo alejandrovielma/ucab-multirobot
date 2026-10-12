@@ -197,13 +197,28 @@ def test_carrying_stops_turning_when_peer_blocks_forward():
     assert "no in-place turn" in reason
 
 
-@pytest.mark.parametrize("wz, sign", [(0.5, 1.0), (-0.2, -1.0), (0.0, 1.0)])
-def test_carrying_at_the_line_arcs_off_it_instead_of_freezing(wz, sign):
-    # Before: frozen forever (no forward over the line, no in-place spin with a cube).
-    params = SafetyParams()
-    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.1, 0.0, wz), line_front=True, carrying=True))
-    assert cmd == pytest.approx((params.carry_min_forward, 0.0, sign * params.carry_max_turn))
-    assert "arc off the line" in reason
+def test_carrying_at_the_line_turns_in_place_even_if_the_cube_drops():
+    # Webots run 5: arcing off the line with a cube crossed the tape and the robot left the board.
+    # Losing the cube at the border is recoverable; leaving the track is not.
+    cmd, reason = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.1, 0.0, 0.5), line_front=True, carrying=True)
+    )
+    assert cmd == pytest.approx((0.0, 0.0, 0.5))
+    assert "line ahead" in reason
+
+
+def test_carrying_never_moves_forward_over_the_line_to_avoid_a_peer():
+    peer = peer_at(0.36 * math.cos(math.radians(38)), 0.36 * math.sin(math.radians(38)), theta=math.pi / 2)
+    cmd, _ = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer, line_front=True, carrying=True)
+    )
+    assert cmd[0] == pytest.approx(0.0)
+
+
+def test_carrying_does_not_arc_toward_a_peer_already_touching():
+    peer = peer_at(0.2 * math.cos(math.radians(40)), 0.2 * math.sin(math.radians(40)), theta=math.pi / 2)
+    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
 
 
 def test_not_carrying_keeps_in_place_rotation():

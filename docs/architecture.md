@@ -93,9 +93,11 @@ En este orden, en cada ciclo de 20 Hz:
    Si los dos quedan bloqueados de frente más de 3 s, el robot **sin prioridad** (Ferb) gira 1,5 s
    para salir; si lleva un cubo se queda quieto, porque cualquier maniobra lo sacaría de la pala.
 6. Con cubo en la pala: solo giros en arco (avance mínimo 0,05 m/s, giro máximo 0,6 rad/s). Girar en
-   el sitio expulsa el cubo de la pala fija (comprobado en Webots). Si con cubo la línea queda al frente,
-   el robot sale de ella en arco a velocidad mínima en vez de quedarse congelado para siempre; el costo
-   es que el frente puede pasar la cinta unos centímetros.
+   el sitio expulsa el cubo de la pala fija (comprobado en Webots). Dos excepciones: con la línea al
+   frente manda la línea (no avanza y puede girar en el sitio aunque el cubo se caiga; en Webots, salir
+   de la línea en arco con el cubo sacó al robot del tablero), y con otro robot al costado (a 25° o más
+   del frente y a 0,30 m o más) se aleja en arco en vez de quedarse congelado. Al llegar a la línea con
+   cubo,  da el transporte por perdido, devuelve la llave si la tenía y vuelve a explorar.
 
 **Excepción de entrega.** Mientras el robot tiene la llave del cuadro (`/zone/occupant` igual a su
 nombre) y su propia pose cenital está dentro del pasillo de entrega mirando al sur (±60°), puede

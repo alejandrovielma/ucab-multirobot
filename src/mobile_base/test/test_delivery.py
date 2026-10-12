@@ -53,6 +53,26 @@ def test_carry_turns_toward_entry_when_it_is_behind():
     assert abs(wz) == pytest.approx(fsm.params.carry_max_turn)
 
 
+def test_line_while_carrying_gives_up_the_cube_and_the_lease():
+    # The gate turns in place at the line (the cube drops): the behavior must stop pretending to carry.
+    fsm = carrying_fsm()
+    tick(fsm, 1.0, (-0.6, 0.0, 0.0), holds_zone=True)
+    cmd = tick(fsm, 1.1, (-0.6, 0.0, 0.0), holds_zone=True, line_front=True)
+    assert fsm.state is State.EXPLORE
+    assert not fsm.carrying
+    assert fsm.take_actions() == [ZoneAction("release", delivered=False, color="red")]
+    assert cmd[0] == 0.0 and cmd[2] != 0.0
+
+
+def test_line_while_carrying_without_lease_releases_nothing():
+    fsm = carrying_fsm()
+    tick(fsm, 1.0, (-0.6, 0.0, 0.0))
+    fsm.take_actions()
+    tick(fsm, 1.1, (-0.6, 0.0, 0.0), line_front=True)
+    assert fsm.state is State.EXPLORE
+    assert fsm.take_actions() == []
+
+
 def test_requests_lease_while_carrying_and_retries_periodically():
     fsm = carrying_fsm(request_period=1.0)
     pose = (-0.7, 0.0, 0.0)
@@ -161,7 +181,7 @@ def test_never_reverses_while_carrying():
     z = zone(fsm)
     poses = [(-0.6, 0.0, 0.0), (z.x, z.entry_y, SOUTH), (z.x + 0.04, -0.05, SOUTH), (z.x, -0.1, SOUTH)]
     for i, pose in enumerate(poses * 5):
-        cmd = tick(fsm, 1.0 + i * 0.1, pose, holds_zone=i % 3 != 0, line_front=i % 2 == 0)
+        cmd = tick(fsm, 1.0 + i * 0.1, pose, holds_zone=i % 3 != 0)
         if fsm.carrying:
             assert cmd[0] >= 0.0
 

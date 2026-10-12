@@ -11,8 +11,11 @@ Rules, applied in order every tick:
    If both robots stay blocked facing each other for deadlock_time, the robot
    WITHOUT priority rotates away (or holds still when it carries a cube, since any
    maneuver would drop it from the fixed scoop).
-6. Carrying a cube -> turns only in arcs (see _carry_limits). With the line ahead it arcs off
-   the line at minimum speed instead of freezing forever (the front may overrun the tape a few cm).
+6. Carrying a cube -> turns only in arcs (see _carry_limits), with two exceptions:
+   - line ahead: the line wins. No forward motion at all; turning in place is allowed even
+     though it drops the cube (Webots run 5: arcing off the line with a cube left the board).
+   - peer to one side (not ahead, not touching): a forward arc away from it, so a carrying
+     robot does not freeze forever next to another robot.
 
 Delivery exception (rules 3 and 4): while this robot holds the zone lease (/zone/occupant) and its
 own overhead pose is inside the delivery corridor facing the square, it may cross the square's
@@ -59,6 +62,7 @@ class SafetyParams:
     carry_min_forward: float = 0.05  # m/s, forward speed forced while turning with a cube
     carry_max_turn: float = 0.6  # rad/s, turn-rate limit with a cube
     carry_arc_away_bearing: float = 25.0  # deg, peer this far off-axis: arc away instead of freezing
+    carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
     max_reverse: float = 0.05  # m/s, only inside the delivery corridor with the lease
     # Delivery square (see core/delivery.py); keep equal to the behavior's zone_* parameters.
     zone_x: float = DeliveryZone.x
@@ -120,10 +124,12 @@ class SafetyGate:
 
         peer = inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None
         blocked = False
-        peer_bearing = 0.0
+        peer_bearing = peer_distance = 0.0
         if own_fresh and peer is not None:
             vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer)
-            peer_bearing = relative_bearing(inp.own_pose.x, inp.own_pose.y, inp.own_pose.theta, peer.x, peer.y)
+            own = inp.own_pose
+            peer_bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
+            peer_distance = distance(own.x, own.y, peer.x, peer.y)
             if peer_reason:
                 reasons.append(peer_reason)
 
@@ -131,7 +137,7 @@ class SafetyGate:
         if escape is not None:
             return escape
         if inp.carrying:
-            vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, line_blocks, reasons)
+            vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, peer_distance, line_blocks, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
     def _in_delivery_corridor(self, pose: Pose2D) -> bool:
@@ -143,20 +149,27 @@ class SafetyGate:
         wz: float,
         peer_blocked: bool,
         peer_bearing: float,
+        peer_distance: float,
         line_blocks: bool,
         reasons: list[str],
     ) -> Command:
         p = self.params
         vx = max(vx, 0.0)
         wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz))
-        if peer_blocked and abs(peer_bearing) >= math.radians(p.carry_arc_away_bearing):
+        if line_blocks:
+            # Losing the cube at the border is recoverable; leaving the track is not.
+            if "line ahead" not in reasons:
+                reasons.append("line ahead")
+            reasons.append("carrying: turn in place, cube may drop")
+            return 0.0, 0.0, wz
+        if (
+            peer_blocked
+            and abs(peer_bearing) >= math.radians(p.carry_arc_away_bearing)
+            and peer_distance >= p.carry_arc_away_min_distance
+        ):
             # Peer to one side: a forward arc away from it opens the gap (a frozen robot never does).
             reasons.append("carrying: arc away from peer")
             return p.carry_min_forward, 0.0, -math.copysign(p.carry_max_turn, peer_bearing)
-        if line_blocks and not peer_blocked:
-            # Frozen at the border forever is worse than overrunning the tape a few cm in an arc.
-            reasons.append("carrying: arc off the line")
-            return p.carry_min_forward, 0.0, math.copysign(p.carry_max_turn, wz if wz != 0.0 else 1.0)
         if wz != 0.0:
             if peer_blocked:
                 reasons.append("carrying: no in-place turn")
