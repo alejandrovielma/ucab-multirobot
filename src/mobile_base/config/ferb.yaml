@@ -40,7 +40,11 @@
     body_front: 0.095
     body_rear: 0.095
     body_half_width: 0.082
-    escape_angle: 1.5708  # 90 deg arc that must fit after a capture
+    plan_replan_distance: 0.04  # carry planner (core/planner.py)
+    plan_replan_heading: 0.3
+    plan_max_expansions: 30000
+    plan_retry: 2.0
+    entry_heading_tolerance: 0.524  # 30 deg
     skip_time: 3.0
     backoff_time: 3.0
     # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.

@@ -139,8 +139,11 @@ def test_gate_carrying_stops_when_no_arc_keeps_the_body_inside():
 # ---- behavior
 
 
+ZONE = dict(zone_x=1.0, zone_square_y=0.4, zone_entry_y=1.2, zone_drop_y=0.9, zone_exit_y=1.1)  # inside ARENA
+
+
 def fsm(**kw):
-    return BehaviorFSM(BehaviorParams(my_colors=("red",), **kw), rng=random.Random(5), track=ARENA)
+    return BehaviorFSM(BehaviorParams(my_colors=("red",), **ZONE, **kw), rng=random.Random(5), track=ARENA)
 
 
 def step(f, now, pose, cubes=(), scoop="", line_front=False, holds_zone=False):
@@ -173,7 +176,7 @@ def test_spin_room_is_the_full_sweep_circle_not_the_next_instant():
     assert cmd[0] < 0.0
 
 
-def test_capture_skipped_when_no_arc_could_leave_the_tape_afterwards():
+def test_capture_skipped_when_no_plan_could_leave_the_tape_afterwards():
     f = fsm()
     pose = (2.0 - 0.10 - FP.front, 1.0, 0.0)  # cube right at the wall, robot facing it
     step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
@@ -184,7 +187,7 @@ def test_capture_skipped_when_no_arc_could_leave_the_tape_afterwards():
     assert f.state is State.EXPLORE
 
 
-def test_capture_allowed_when_an_escape_arc_fits():
+def test_capture_allowed_when_a_plan_to_the_square_exists():
     f = fsm()
     pose = (1.0, 1.0, 0.0)
     step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
@@ -192,7 +195,7 @@ def test_capture_allowed_when_an_escape_arc_fits():
     assert f.state is State.CAPTURE
 
 
-def test_carry_with_no_feasible_arc_drops_the_cube_by_backing_off():
+def test_carry_with_no_plan_drops_the_cube_by_backing_off():
     f = fsm(capture_time=0.1)
     step(f, 0.0, (1.0, 1.0, 0.0), cubes=[Cube("red", 0.0, 0.3, 400.0)])
     step(f, 0.1, (1.0, 1.0, 0.0), cubes=[Cube("red", 0.0, 0.7, 3000.0)])

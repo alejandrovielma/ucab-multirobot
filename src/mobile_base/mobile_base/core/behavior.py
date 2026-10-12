@@ -19,9 +19,11 @@ released with delivered=false), and a delivery counts only if the cube left the 
 Body geofence (overhead pose + track polygon; same model as the safety gate): the scoop may step on
 the tape, the body may not. Without a cube, a forward move that leaves no room to spin counts as the
 border line; a spin with no room tries the other way or backs off first (reverse is allowed with the
-pose). A cube is captured only if an escape arc fits afterwards (otherwise it is skipped for
-skip_time), and with a cube a blocked arc tries the other side or the cube is dropped by backing
-off. With the center already outside, the robot drives back toward the track centroid.
+pose). With a cube the robot follows a plan from core/planner.py (forward arcs and straights that
+keep the body inside) to the entry, or to its waiting point without the lease; it replans when it
+drifts, and with no plan it drops the cube by backing off. A cube is captured only if a plan to the
+entry exists from the pose after the capture push (otherwise it is skipped for skip_time). With the
+center already outside, the robot drives back toward the track centroid.
 
 The output is the DESIRED command; the SafetyGate filters it before the motors. Requests to the
 zone arbiter are returned as ZoneAction items (take_actions) so this module stays free of ROS.
@@ -37,6 +39,7 @@ from enum import Enum
 from mobile_base.core.colors import is_mine
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing, wrap_angle
+from mobile_base.core.planner import Plan, plan_arcs
 from mobile_base.core.track import Footprint, Track, path_inside, predict
 
 Command = tuple[float, float, float]
@@ -104,7 +107,11 @@ class BehaviorParams:
     body_front: float = 0.095  # m
     body_rear: float = 0.095
     body_half_width: float = 0.082
-    escape_angle: float = math.radians(90.0)  # arc that must fit after a capture
+    plan_replan_distance: float = 0.04  # m, drift from the planned pose that triggers a replan
+    plan_replan_heading: float = 0.3  # rad
+    plan_max_expansions: int = 30000
+    plan_retry: float = 2.0  # s before planning again after a failure
+    entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
@@ -137,6 +144,10 @@ class BehaviorFSM:
         self._body = Footprint(params.body_front, params.body_rear, params.body_half_width)
         self._ignore_until = 0.0
         self._backoff_until: float | None = None
+        self.plan: Plan | None = None
+        self._plan_t0 = 0.0
+        self._plan_kind = ""
+        self._plan_fail_until = 0.0
         self._zone = params.zone
         self._rng = rng or random.Random()
         self.state = State.EXPLORE
@@ -191,17 +202,58 @@ class BehaviorFSM:
             return True
         return path_inside(self._track, self._body, pose, vx, wz, self.params.track_horizon)
 
-    def _escape_fits(self, pose) -> bool:
-        """After the capture push, can an arc turn escape_angle with the body inside the track?"""
+    def _at_entry(self, pose) -> bool:
+        z = self._zone
+        error = abs(math.remainder(pose[2] - z.heading, 2.0 * math.pi))
+        return z.in_corridor(pose[0], pose[1]) and error <= self.params.entry_heading_tolerance
+
+    def _plan_to(self, kind: str, pose) -> Plan | None:
+        p = self.params
+        z = self._zone
+        if kind == "entry":
+            goal, target = self._at_entry, (z.x, z.entry_y)
+        else:
+            def goal(q):
+                return distance(q[0], q[1], p.wait_x, p.wait_y) <= p.arrive_radius
+
+            target = (p.wait_x, p.wait_y)
+        return plan_arcs(
+            self._track, self._body, pose, goal, target,
+            straight_speed=p.carry_speed, arc_speed=p.carry_min_speed, turn=p.carry_max_turn,
+            max_expansions=p.plan_max_expansions,
+        )
+
+    def _deliverable_from(self, pose) -> bool:
+        """After the capture push, is there a way to the entry with the body inside the track?"""
         p = self.params
         if pose is None or not self._track.enabled:
             return True
         after = predict(pose, p.capture_speed, 0.0, p.capture_time)
-        duration = p.escape_angle / p.carry_max_turn
-        return any(
-            path_inside(self._track, self._body, after, p.carry_min_speed, turn, duration, steps=24)
-            for turn in (p.carry_max_turn, -p.carry_max_turn)
-        )
+        return self._plan_to("entry", after) is not None
+
+    def _follow_plan(self, inp: BehaviorInput, kind: str) -> Command | None:
+        """Command from the current plan; replan when drifting, finished or for a new goal."""
+        p = self.params
+        if self.plan is not None and self._plan_kind == kind:
+            t = inp.now - self._plan_t0
+            expected = self.plan.expected(t)
+            cmd = self.plan.command(t)
+            drift = distance(expected[0], expected[1], inp.pose[0], inp.pose[1])
+            heading = abs(math.remainder(expected[2] - inp.pose[2], 2.0 * math.pi))
+            if cmd is not None and drift <= p.plan_replan_distance and heading <= p.plan_replan_heading:
+                return (cmd[0], 0.0, cmd[1])
+        if inp.now < self._plan_fail_until and self._plan_kind == kind:
+            return None
+        self._plan_kind = kind
+        self.plan = self._plan_to(kind, inp.pose)
+        if self.plan is None:
+            self._plan_fail_until = inp.now + p.plan_retry
+            return None
+        self._plan_t0 = inp.now
+        cmd = self.plan.command(0.0)
+        if cmd is None:  # already there
+            return ZERO
+        return (cmd[0], 0.0, cmd[1])
 
     def _return_to_track(self, inp: BehaviorInput) -> Command:
         if self.state is State.CARRY:
@@ -221,6 +273,7 @@ class BehaviorFSM:
         return inp.now - self._scoop_seen <= self.params.scoop_lost_timeout
 
     def _abandon_transport(self, inp: BehaviorInput) -> Command:
+        self.plan = None
         self._give_up_cube(inp)
         self.state = State.EXPLORE
         self._start_turn(inp.now, inp.pose)
@@ -314,7 +367,7 @@ class BehaviorFSM:
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
-            if not self._escape_fits(inp.pose):
+            if not self._deliverable_from(inp.pose):
                 # Captured here, the robot would face the tape with no arc that keeps its body in.
                 self._ignore_until = inp.now + p.skip_time
                 self.state = State.EXPLORE
@@ -372,30 +425,27 @@ class BehaviorFSM:
             return self._abandon_transport(inp)  # the camera no longer sees the cube in the U
         x, y, theta = inp.pose
         self._ask_lease(inp)
-        if not inp.holds_zone:
-            if distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
-                return ZERO  # the other robot is using the square
-            return self._carry_arc(inp, self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed))
-        if z.in_corridor(x, y) and z.aligned(theta):
+        if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
+            return ZERO  # the other robot is using the square
+        if inp.holds_zone and z.in_corridor(x, y) and z.aligned(theta):
             self.state = State.DELIVER
             self._dropping = False
             return self._deliver(inp)
+        if self._track.enabled:
+            kind = "entry" if inp.holds_zone else "wait"
+            cmd = self._follow_plan(inp, kind)
+            if cmd is not None:
+                return cmd
+            if kind == "wait":
+                return ZERO  # cannot reach the waiting point: wait here
+            return self._abandon_transport(inp)  # no way to the square keeps the body in: drop the cube
+        if not inp.holds_zone:
+            return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
         if abs(x - z.x) <= p.lead_in_width:
             # Near the axis: aim a bit south of the entry so the arc ends facing the square
             # (Webots run 8: arriving at the entry facing north and entering anyway went wrong).
-            return self._carry_arc(inp, self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed))
-        return self._carry_arc(inp, self._steer(inp.pose, z.x, z.entry_y, p.carry_speed))
-
-    def _carry_arc(self, inp: BehaviorInput, cmd: Command) -> Command:
-        """Keep the body inside: the other arc if this one crosses, else drop the cube by backing off."""
-        vx, _, wz = cmd
-        if self._fits(inp.pose, vx, wz, carrying=True):
-            return cmd
-        p = self.params
-        for other in ([-wz] if wz != 0.0 else [p.carry_max_turn, -p.carry_max_turn]):
-            if self._fits(inp.pose, vx, other, carrying=True):
-                return (vx, 0.0, other)
-        return self._abandon_transport(inp)
+            return self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed)
+        return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
 
     def _deliver(self, inp: BehaviorInput) -> Command:
         p = self.params
