@@ -248,12 +248,16 @@ PROTO RecolectorUCAB [
       }
 
       # ---------------- Sensores ----------------
-      # Camara OV5647 (lente estandar ~54 grados), inclinada ~24 grados hacia abajo
+      # Camara Pi5-IMX219-120 (Waveshare: 120 grados en diagonal, lente de 1.79 mm), inclinada ~24 grados.
+      # Webots usa un modelo pinhole con FOV horizontal: 2*atan(1.84/1.79) = 1.60 rad con el area activa
+      # del IMX219 (3.68 x 2.76 mm); la distorsion del gran angular real no se simula.
+      # Con la OV5647 (0.94 rad) el cubo dentro de la pala quedaba fuera de la imagen.
+      # Altura e inclinacion: medir en el robot real y ajustar (docs/team-todo.md, tarea 7).
       Camera {
         translation 0.075 0 0.11
         rotation 0 1 0 0.42
         name "camara"
-        fieldOfView 0.94
+        fieldOfView 1.60
         width 640
         height 480
         near 0.01

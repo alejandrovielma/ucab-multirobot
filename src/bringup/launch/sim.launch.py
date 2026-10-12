@@ -15,7 +15,7 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from webots_ros2_driver.webots_controller import WebotsController
 from webots_ros2_driver.webots_launcher import WebotsLauncher
@@ -29,8 +29,12 @@ def generate_launch_description():
 
     # ros2_supervisor starts webots_ros2's Ros2Supervisor, the node that publishes /clock;
     # every node below runs with use_sim_time and would never advance without it.
-    webots = WebotsLauncher(world=os.path.join(sim_share, "worlds", "pista_ucab.wbt"), ros2_supervisor=True)
+    world = PathJoinSubstitution([sim_share, "worlds", LaunchConfiguration("world")])
+    webots = WebotsLauncher(world=world, ros2_supervisor=True)
     actions = [
+        DeclareLaunchArgument(
+            "world", default_value="pista_ucab.wbt", description="world file inside multirobot_sim/worlds"
+        ),
         DeclareLaunchArgument(
             "logic", default_value="true", description="false = only Webots and drivers (manual cmd_vel tests)"
         ),

@@ -8,7 +8,7 @@ Writes one line every --period seconds (wall time) to stdout and <out>/monitor.l
 sim time, per robot state, pose, commanded velocity, front line flag and the closest cube
 of its own colors (cx_norm, cy_norm), cubes delivered, plus the distance between the robots and
 the holder of the delivery-square lease. Optionally saves
-Phineas' camera frames as PNG every --frames-every seconds.
+the camera frames of --frames-robots (default phineas) as PNG every --frames-every seconds.
 """
 
 import argparse
@@ -29,13 +29,13 @@ ROBOTS = {"phineas": {"red", "orange", "yellow"}, "ferb": {"green", "blue", "pur
 
 
 class SimMonitor(Node):
-    def __init__(self, out_dir: str, frames_every: float):
+    def __init__(self, out_dir: str, frames_every: float, frames_robots: list[str]):
         super().__init__("sim_monitor")
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
         self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0} for r in ROBOTS}
-        self.last_frame = 0.0
+        self.last_frame = {robot: 0.0 for robot in frames_robots}
         self.occupant = ""
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
         self.create_subscription(String, "/zone/occupant", self._on_occupant, 10)
@@ -46,7 +46,8 @@ class SimMonitor(Node):
             self.create_subscription(Bool, f"/{robot}/line_front", self._setter(robot, "line", lambda m: m.data), 10)
             self.create_subscription(CubeDetectionArray, f"/{robot}/cubes", self._cubes_cb(robot), 10)
         if frames_every > 0:
-            self.create_subscription(Image, "/phineas/camera/image_raw", self._on_image, 1)
+            for robot in frames_robots:
+                self.create_subscription(Image, f"/{robot}/camera/image_raw", self._image_cb(robot), 1)
 
     def _on_clock(self, msg: Clock):
         self.sim_time = msg.clock.sec + msg.clock.nanosec * 1e-9
@@ -72,17 +73,22 @@ class SimMonitor(Node):
             self.data[robot]["cube"] = None if best is None else (best.color, best.cx_norm, best.cy_norm)
         return cb
 
-    def _on_image(self, msg: Image):
+    def _image_cb(self, robot):
+        def cb(msg: Image):
+            self._on_image(robot, msg)
+        return cb
+
+    def _on_image(self, robot: str, msg: Image):
         now = time.monotonic()
-        if now - self.last_frame < self.frames_every:
+        if now - self.last_frame[robot] < self.frames_every:
             return
-        self.last_frame = now
+        self.last_frame[robot] = now
         import cv2
         import numpy as np
 
         channels = 4 if msg.encoding == "bgra8" else 3
         img = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape(msg.height, msg.width, channels)
-        cv2.imwrite(os.path.join(self.out_dir, f"phineas_cam_{self.sim_time:07.1f}.png"), img[:, :, :3])
+        cv2.imwrite(os.path.join(self.out_dir, f"{robot}_cam_{self.sim_time:07.1f}.png"), img[:, :, :3])
 
     def line(self) -> str:
         parts = [f"t={self.sim_time:6.1f}"]
@@ -104,11 +110,12 @@ def main():
     parser.add_argument("--period", type=float, default=0.5)
     parser.add_argument("--out", default="/tmp/monitor")
     parser.add_argument("--frames-every", type=float, default=0.0)
+    parser.add_argument("--frames-robots", default="phineas", help="comma separated, e.g. phineas,ferb")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
     rclpy.init()
-    node = SimMonitor(args.out, args.frames_every)
+    node = SimMonitor(args.out, args.frames_every, args.frames_robots.split(","))
     end = time.monotonic() + args.duration
     next_line = time.monotonic()
     with open(os.path.join(args.out, "monitor.log"), "w") as log:
