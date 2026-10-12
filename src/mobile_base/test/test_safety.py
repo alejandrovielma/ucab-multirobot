@@ -62,30 +62,53 @@ def test_missing_own_pose_stops_only_when_required():
     assert gate.filter(make_input(own_pose=None))[0] == pytest.approx(FORWARD)
 
 
-def test_line_blocks_forward_but_allows_turn_and_strafe():
+def test_line_blocks_forward_but_allows_turn():
     cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.2, 0.1, 0.5), line_front=True)
+        make_input(cmd=(0.2, 0.0, 0.5), line_front=True)
     )
-    assert cmd == pytest.approx((0.0, 0.1, 0.5))
+    assert cmd == pytest.approx((0.0, 0.0, 0.5))
     assert "line" in reason
 
 
-def test_line_allows_reverse():
-    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(-0.1, 0.0, 0.0), line_front=True))
-    assert cmd == pytest.approx((-0.1, 0.0, 0.0))
+# The robot has a single FRONT line sensor: any translation that is not forward is blind to the
+# track edge. In Webots, strafing to avoid the peer drove both robots off the board.
+def test_strafe_is_never_passed_through():
+    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.1, 0.1, 0.0)))
+    assert cmd == pytest.approx((0.1, 0.0, 0.0))
 
 
-def test_peer_very_close_in_front_blocks_forward():
-    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(peer_pose=peer_at(0.2, 0.0)))
+def test_reverse_is_never_passed_through():
+    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(cmd=(-0.1, 0.0, 0.0)))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert "forward only" in reason
+
+
+def test_peer_very_close_in_front_blocks_forward_and_turns_away():
+    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(peer_pose=peer_at(0.3, 0.0)))
     assert cmd[0] == pytest.approx(0.0)
+    assert cmd[1] == pytest.approx(0.0)
+    assert cmd[2] != 0.0
     assert "peer" in reason
 
 
-def test_peer_in_slow_band_scales_forward_and_strafes_right():
+def test_peer_in_slow_band_scales_forward_and_turns_away_from_it():
     params = SafetyParams()
-    cmd, _ = SafetyGate(params).filter(make_input(peer_pose=peer_at(0.375, 0.0)))
-    assert cmd[0] == pytest.approx(FORWARD[0] * 0.5)
-    assert cmd[1] == pytest.approx(-params.avoid_strafe)
+    mid = (params.stop_distance + params.slow_distance) / 2
+    cmd, _ = SafetyGate(params).filter(make_input(peer_pose=peer_at(mid, 0.05)))
+    assert cmd[0] == pytest.approx(FORWARD[0] * 0.5, abs=0.02)
+    assert cmd[1] == pytest.approx(0.0)
+    assert cmd[2] == pytest.approx(-params.avoid_turn)  # peer slightly left -> turn right
+
+
+def test_peer_slightly_right_turns_left():
+    params = SafetyParams()
+    cmd, _ = SafetyGate(params).filter(make_input(peer_pose=peer_at(0.45, -0.05)))
+    assert cmd[2] == pytest.approx(params.avoid_turn)
+
+
+def test_contact_distance_accounts_for_scoop_length():
+    # Center-to-center distance when scoop tips touch is ~0.38 m; stopping must happen before that.
+    assert SafetyParams().stop_distance >= 0.35
 
 
 def test_peer_behind_is_ignored():
@@ -121,11 +144,12 @@ def _run_deadlock(gate, start, duration, carrying=False, step=0.1):
     return result
 
 
-def test_deadlock_robot_without_priority_backs_off():
+def test_deadlock_robot_without_priority_rotates_away_without_reversing():
     params = SafetyParams(has_priority=False)
     cmd, reason = _run_deadlock(SafetyGate(params), 10.0, params.deadlock_time + 0.2)
-    assert cmd[0] == pytest.approx(-params.backoff_speed)
-    assert "backoff" in reason
+    assert cmd[0] == pytest.approx(0.0)
+    assert cmd[2] != 0.0
+    assert "rotate away" in reason
 
 
 def test_deadlock_robot_with_priority_waits():
@@ -178,12 +202,12 @@ def test_not_carrying_keeps_in_place_rotation():
     assert cmd == pytest.approx((0.0, 0.0, 0.5))
 
 
-def test_backoff_ends_after_backoff_time():
+def test_escape_ends_after_escape_time():
     params = SafetyParams(has_priority=False)
     gate = SafetyGate(params)
     end = 10.0 + params.deadlock_time + 0.2
     _run_deadlock(gate, 10.0, params.deadlock_time + 0.2)
-    later = end + params.backoff_time + 0.1
+    later = end + params.escape_time + 0.1
     cmd, _ = gate.filter(
         make_input(now=later, own_pose=Pose2D(0.0, 0.0, 0.0, stamp=later), peer_pose=None)
     )

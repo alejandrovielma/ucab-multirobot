@@ -3,11 +3,15 @@
 Rules, applied in order every tick:
 1. Coordinator heartbeat lost (when required) -> full stop.
 2. Own pose stale (when required) -> full stop.
-3. Front line sensor on black -> no forward motion (turning and strafing allowed).
-4. Peer robot ahead (overhead-camera poses) -> slow down, stop, and strafe right.
+3. Forward-only translation: the robot has a single FRONT line sensor, so strafing or
+   reversing is blind to the track edge (in Webots, strafing drove both robots off the board).
+   Turning in place is allowed; vy and negative vx are removed.
+4. Front line sensor on black -> no forward motion (turning allowed).
+5. Peer robot ahead (overhead-camera poses) -> slow down, stop, and turn away from it.
    If both robots stay blocked facing each other for deadlock_time, the robot
-   WITHOUT priority backs off (or rotates away when it carries a cube, since the
-   fixed scoop would drop it when reversing).
+   WITHOUT priority rotates away (or holds still when it carries a cube, since any
+   maneuver would drop it from the fixed scoop).
+6. Carrying a cube -> turns only in arcs (see _carry_limits).
 """
 
 import math
@@ -34,14 +38,15 @@ class SafetyParams:
     require_pose: bool = True
     pose_timeout: float = 0.5
     front_cone_deg: float = 60.0
-    stop_distance: float = 0.25
-    slow_distance: float = 0.50
-    avoid_distance: float = 0.50
-    avoid_strafe: float = 0.05  # m/s, applied to the right (vy negative)
+    # Center-to-center distances. Scoop tips touch at ~0.38 m when facing each other.
+    stop_distance: float = 0.40
+    slow_distance: float = 0.60
+    avoid_distance: float = 0.60
+    avoid_turn: float = 0.6  # rad/s, turning away from the peer
     has_priority: bool = False
     deadlock_time: float = 3.0
-    backoff_speed: float = 0.05
-    backoff_time: float = 1.0
+    escape_turn: float = 0.8  # rad/s, deadlock escape rotation of the robot without priority
+    escape_time: float = 1.5
     # The fixed scoop only retains a cube when it is pushed forward: in-place spins and strafes
     # eject it (observed in Webots), and reversing leaves it behind.
     carry_min_forward: float = 0.05  # m/s, forward speed forced while turning with a cube
@@ -83,6 +88,9 @@ class SafetyGate:
 
         vx, vy, wz = inp.cmd
         reasons = []
+        if vy != 0.0 or vx < 0.0:
+            vx, vy = max(vx, 0.0), 0.0
+            reasons.append("forward only")
         if inp.line_front and vx > 0.0:
             vx = 0.0
             reasons.append("line ahead")
@@ -90,7 +98,7 @@ class SafetyGate:
         peer = inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None
         blocked = False
         if own_fresh and peer is not None:
-            vx, vy, blocked, peer_reason = self._avoid_peer(vx, vy, inp.own_pose, peer)
+            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer)
             if peer_reason:
                 reasons.append(peer_reason)
 
@@ -119,11 +127,11 @@ class SafetyGate:
     def _is_fresh(self, pose: Pose2D | None, now: float) -> bool:
         return pose is not None and now - pose.stamp <= self.params.pose_timeout
 
-    def _avoid_peer(self, vx: float, vy: float, own: Pose2D, peer: Pose2D):
+    def _avoid_peer(self, vx: float, wz: float, own: Pose2D, peer: Pose2D):
         p = self.params
         bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
         if abs(bearing) >= math.radians(p.front_cone_deg):
-            return vx, vy, False, ""
+            return vx, wz, False, ""
         d = distance(own.x, own.y, peer.x, peer.y)
         blocked = False
         reason = ""
@@ -135,10 +143,11 @@ class SafetyGate:
             vx *= (d - p.stop_distance) / (p.slow_distance - p.stop_distance)
             reason = f"peer ahead at {d:.2f} m: slow"
         if d < p.avoid_distance:
-            vy -= p.avoid_strafe
+            # Turn away from the peer; dead ahead counts as "left" so both robots break right.
+            wz = -p.avoid_turn if bearing >= 0.0 else p.avoid_turn
             reason = reason or f"peer ahead at {d:.2f} m"
-            reason += ", strafe right"
-        return vx, vy, blocked, reason
+            reason += ", turn away"
+        return vx, wz, blocked, reason
 
     def _update_deadlock(self, blocked: bool, inp: SafetyInput, peer: Pose2D | None):
         p = self.params
@@ -155,9 +164,11 @@ class SafetyGate:
             self._escape_cmd = STOP
             self._escape_reason = "deadlock: hold still (carrying)"
         else:
-            self._escape_cmd = (-p.backoff_speed, 0.0, 0.0)
-            self._escape_reason = "deadlock: backoff"
-        self._escape_until = inp.now + p.backoff_time
+            bearing = relative_bearing(inp.own_pose.x, inp.own_pose.y, inp.own_pose.theta, peer.x, peer.y)
+            turn = -p.escape_turn if bearing >= 0.0 else p.escape_turn
+            self._escape_cmd = (0.0, 0.0, turn)
+            self._escape_reason = "deadlock: rotate away"
+        self._escape_until = inp.now + p.escape_time
         return self._escape_cmd, self._escape_reason
 
     def _peer_faces_us(self, own: Pose2D, peer: Pose2D) -> bool:
