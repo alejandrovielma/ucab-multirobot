@@ -4,7 +4,7 @@
 # Electronica: Raspberry Pi 5 + HAT Cokoino 4WD (DRV8833), bateria 2S 18650.
 # Sensores del plan: camara OV5647 (~54 grados), 4 TCRT5000 abajo, HC-SR04 al frente, FC-51 y TCS34725 en la pala,
 # MPU6050 (acelerometro + giroscopio, sin brujula).
-# Pala de un cubo con hueco en U de ~32 mm, movida por un servo SG90.
+# Pala de un cubo con hueco en U de 40 mm (cubos de 30 mm), movida por un servo SG90.
 # Todas las medidas que no vienen del fabricante son estimadas: medir y ajustar.
 # template language: javascript
 
@@ -206,16 +206,16 @@ PROTO RecolectorUCAB [
               children [
                 Pose { translation 0.003 0 -0.008 children [ Shape { appearance DEF PLA_AP PBRAppearance { baseColor 0.95 0.5 0.1 roughness 0.6 metalness 0 } geometry Box { size 0.006 0.05 0.016 } } ] }
                 Pose { translation 0.021 0 -0.0155 children [ Shape { appearance USE PLA_AP geometry Box { size 0.042 0.05 0.003 } } ] }
-                Pose { translation 0.038 0 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.038 0.035 } } ] }
-                Pose { translation 0.0555 0.0175 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.032 0.003 0.035 } } ] }
-                Pose { translation 0.0555 -0.0175 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.032 0.003 0.035 } } ] }
-                Pose { translation 0.0858 0.031 -0.035 rotation 0 0 1 0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
-                Pose { translation 0.0858 -0.031 -0.035 rotation 0 0 1 -0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
+                Pose { translation 0.038 0 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.046 0.035 } } ] }
+                Pose { translation 0.0565 0.0215 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.034 0.003 0.035 } } ] }
+                Pose { translation 0.0565 -0.0215 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.034 0.003 0.035 } } ] }
+                Pose { translation 0.0878 0.0352 -0.035 rotation 0 0 1 0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
+                Pose { translation 0.0878 -0.0352 -0.035 rotation 0 0 1 -0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
               ]
             }
             # FC-51: IR de obstaculo en la pared izquierda de la U, mirando al otro lado (cubo adentro = 1)
             DistanceSensor {
-              translation 0.054 0.0155 -0.04
+              translation 0.056 0.0195 -0.04
               rotation 0 0 1 -1.5708
               name "ir_pala"
               type "infra-red"
@@ -236,11 +236,11 @@ PROTO RecolectorUCAB [
           boundingObject Group {
             children [
               Pose { translation 0.021 0 -0.0155 children [ Box { size 0.042 0.05 0.003 } ] }
-              Pose { translation 0.038 0 -0.035 children [ Box { size 0.003 0.038 0.035 } ] }
-              Pose { translation 0.0555 0.0175 -0.035 children [ Box { size 0.032 0.003 0.035 } ] }
-              Pose { translation 0.0555 -0.0175 -0.035 children [ Box { size 0.032 0.003 0.035 } ] }
-              Pose { translation 0.0858 0.031 -0.035 rotation 0 0 1 0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
-              Pose { translation 0.0858 -0.031 -0.035 rotation 0 0 1 -0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
+              Pose { translation 0.038 0 -0.035 children [ Box { size 0.003 0.046 0.035 } ] }
+              Pose { translation 0.0565 0.0215 -0.035 children [ Box { size 0.034 0.003 0.035 } ] }
+              Pose { translation 0.0565 -0.0215 -0.035 children [ Box { size 0.034 0.003 0.035 } ] }
+              Pose { translation 0.0878 0.0352 -0.035 rotation 0 0 1 0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
+              Pose { translation 0.0878 -0.0352 -0.035 rotation 0 0 1 -0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
             ]
           }
           physics Physics { density -1 mass 0.03 }
