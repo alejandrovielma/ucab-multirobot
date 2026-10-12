@@ -10,10 +10,12 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import EmitEvent, IncludeLaunchDescription, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, EmitEvent, IncludeLaunchDescription, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from webots_ros2_driver.webots_controller import WebotsController
 from webots_ros2_driver.webots_launcher import WebotsLauncher
@@ -26,7 +28,12 @@ def generate_launch_description():
     bringup_share = get_package_share_directory("bringup")
 
     webots = WebotsLauncher(world=os.path.join(sim_share, "worlds", "pista_ucab.wbt"))
-    actions = [webots]
+    actions = [
+        DeclareLaunchArgument(
+            "logic", default_value="true", description="false = only Webots and drivers (manual cmd_vel tests)"
+        ),
+        webots,
+    ]
 
     for robot, webots_name in ROBOTS.items():
         actions.append(
@@ -44,6 +51,7 @@ def generate_launch_description():
                     "require_pose": "true",
                     "require_heartbeat": "true",
                 }.items(),
+                condition=IfCondition(LaunchConfiguration("logic")),
             )
         )
 
