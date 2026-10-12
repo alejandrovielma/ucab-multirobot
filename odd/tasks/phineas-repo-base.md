@@ -91,6 +91,12 @@ Forecast: ~2500 authored lines (scaffold, generated-like packaging and tests).
 - Not verified: Webots runtime (plugin loading, wheel signs, /clock with two controllers), lgpio API names on the Pi, TCRT5000 active level.
 - Review: risk high, consent granted, START refused `lens_context_budget_exceeded` (96 files, 4223 lines); per-commit split unassessable. User chose to continue without this review (2026-10-12); next smaller candidates will be reviewed.
 
+- Follow-up after Webots teleop tests (user, 2026-10-12): strafe works without turning; an in-place spin ejected the cube at ~45 deg even at speed 0.36.
+  - 14884c8 measured 3 cm cubes, scoop U widened to 40 mm.
+  - b6891b7 carry rules in safety_gate (arc turns only, no strafe, hold still on deadlock) + U depth 48 mm. RED 4 failures -> GREEN 91 tests, 0 failures.
+  - Review assess (base 4dde89f): medium, under_budget (148 lines), pending in slice.
+  - Webots world saved accidentally from Webots: stashed as `stash@{0}`, not committed.
+
 ## Next step
 
 Team runs `ros2 launch bringup sim.launch.py` in WSL2 with Webots R2025a, validates wheel signs (docs/team-todo.md item 2), then implements CARRY/delivery (item 1).
