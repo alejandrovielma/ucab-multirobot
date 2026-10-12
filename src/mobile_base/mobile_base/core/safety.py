@@ -11,12 +11,19 @@ Rules, applied in order every tick:
    If both robots stay blocked facing each other for deadlock_time, the robot
    WITHOUT priority rotates away (or holds still when it carries a cube, since any
    maneuver would drop it from the fixed scoop).
-6. Carrying a cube -> turns only in arcs (see _carry_limits).
+6. Carrying a cube -> turns only in arcs (see _carry_limits). With the line ahead it arcs off
+   the line at minimum speed instead of freezing forever (the front may overrun the tape a few cm).
+
+Delivery exception (rules 3 and 4): while this robot holds the zone lease (/zone/occupant) and its
+own overhead pose is inside the delivery corridor facing the square, it may cross the square's
+tape and, once it no longer carries the cube, reverse at most max_reverse. Both conditions come
+from inputs the gate reads itself, so a faulty behavior cannot unlock reversing elsewhere.
 """
 
 import math
 from dataclasses import dataclass
 
+from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing
 
 Command = tuple[float, float, float]
@@ -51,6 +58,14 @@ class SafetyParams:
     # eject it (observed in Webots), and reversing leaves it behind.
     carry_min_forward: float = 0.05  # m/s, forward speed forced while turning with a cube
     carry_max_turn: float = 0.6  # rad/s, turn-rate limit with a cube
+    max_reverse: float = 0.05  # m/s, only inside the delivery corridor with the lease
+    # Delivery square (see core/delivery.py); keep equal to the behavior's zone_* parameters.
+    zone_x: float = DeliveryZone.x
+    zone_square_y: float = DeliveryZone.square_y
+    zone_entry_y: float = DeliveryZone.entry_y
+    zone_drop_y: float = DeliveryZone.drop_y
+    zone_exit_y: float = DeliveryZone.exit_y
+    zone_corridor_half_width: float = DeliveryZone.corridor_half_width
 
 
 @dataclass(frozen=True)
@@ -62,11 +77,13 @@ class SafetyInput:
     now: float
     heartbeat_age: float | None  # None = never received
     carrying: bool = False
+    holds_zone: bool = False  # /zone/occupant == this robot
 
 
 class SafetyGate:
     def __init__(self, params: SafetyParams):
         self.params = params
+        self._zone = zone_from(params)
         self._blocked_since: float | None = None
         self._escape_until: float | None = None
         self._escape_cmd: Command = STOP
@@ -88,10 +105,15 @@ class SafetyGate:
 
         vx, vy, wz = inp.cmd
         reasons = []
-        if vy != 0.0 or vx < 0.0:
+        delivering = own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose)
+        if delivering and not inp.carrying and vx < 0.0 and vy == 0.0:
+            vx = max(vx, -p.max_reverse)
+            reasons.append("delivery: reverse out")
+        elif vy != 0.0 or vx < 0.0:
             vx, vy = max(vx, 0.0), 0.0
             reasons.append("forward only")
-        if inp.line_front and vx > 0.0:
+        line_blocks = inp.line_front and not delivering
+        if line_blocks and vx > 0.0:
             vx = 0.0
             reasons.append("line ahead")
 
@@ -106,17 +128,24 @@ class SafetyGate:
         if escape is not None:
             return escape
         if inp.carrying:
-            if inp.line_front and "line ahead" not in reasons:
-                reasons.append("line ahead")
-            vx, vy, wz = self._carry_limits(vx, wz, blocked or inp.line_front, reasons)
+            vx, vy, wz = self._carry_limits(vx, wz, blocked, line_blocks, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
-    def _carry_limits(self, vx: float, wz: float, forward_blocked: bool, reasons: list[str]) -> Command:
+    def _in_delivery_corridor(self, pose: Pose2D) -> bool:
+        return self._zone.in_corridor(pose.x, pose.y) and self._zone.aligned(pose.theta)
+
+    def _carry_limits(
+        self, vx: float, wz: float, peer_blocked: bool, line_blocks: bool, reasons: list[str]
+    ) -> Command:
         p = self.params
         vx = max(vx, 0.0)
         wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz))
+        if line_blocks and not peer_blocked:
+            # Frozen at the border forever is worse than overrunning the tape a few cm in an arc.
+            reasons.append("carrying: arc off the line")
+            return p.carry_min_forward, 0.0, math.copysign(p.carry_max_turn, wz if wz != 0.0 else 1.0)
         if wz != 0.0:
-            if forward_blocked:
+            if peer_blocked:
                 reasons.append("carrying: no in-place turn")
                 return 0.0, 0.0, 0.0
             if vx < p.carry_min_forward:

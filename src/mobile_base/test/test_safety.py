@@ -188,13 +188,22 @@ def test_carrying_never_strafes_even_to_avoid_peer():
     assert cmd[1] == pytest.approx(0.0)
 
 
-def test_carrying_stops_turning_when_forward_is_blocked():
-    # With the line ahead the robot cannot advance, so an in-place spin would eject the cube.
+def test_carrying_stops_turning_when_peer_blocks_forward():
+    # The robot cannot advance, so an in-place spin would eject the cube.
     cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.0, 0.0, 0.5), line_front=True, carrying=True)
+        make_input(cmd=(0.1, 0.0, 0.5), peer_pose=peer_at(0.3, 0.0), carrying=True)
     )
     assert cmd == pytest.approx((0.0, 0.0, 0.0))
-    assert "line ahead" in reason
+    assert "no in-place turn" in reason
+
+
+@pytest.mark.parametrize("wz, sign", [(0.5, 1.0), (-0.2, -1.0), (0.0, 1.0)])
+def test_carrying_at_the_line_arcs_off_it_instead_of_freezing(wz, sign):
+    # Before: frozen forever (no forward over the line, no in-place spin with a cube).
+    params = SafetyParams()
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.1, 0.0, wz), line_front=True, carrying=True))
+    assert cmd == pytest.approx((params.carry_min_forward, 0.0, sign * params.carry_max_turn))
+    assert "arc off the line" in reason
 
 
 def test_not_carrying_keeps_in_place_rotation():
@@ -212,3 +221,48 @@ def test_escape_ends_after_escape_time():
         make_input(now=later, own_pose=Pose2D(0.0, 0.0, 0.0, stamp=later), peer_pose=None)
     )
     assert cmd == pytest.approx(FORWARD)
+
+
+# ---- Delivery square: the gate decides from its own pose and /zone/occupant, not from the behavior.
+SOUTH = -math.pi / 2
+IN_CORRIDOR = Pose2D(-0.13, -0.05, SOUTH, stamp=10.0)
+
+
+def test_reverse_allowed_in_corridor_with_lease_and_bounded():
+    params = SafetyParams()
+    cmd, reason = SafetyGate(params).filter(
+        make_input(cmd=(-0.5, 0.0, 0.0), own_pose=IN_CORRIDOR, holds_zone=True)
+    )
+    assert cmd == pytest.approx((-params.max_reverse, 0.0, 0.0))
+    assert "delivery" in reason
+
+
+@pytest.mark.parametrize(
+    "pose, holds_zone, carrying",
+    [
+        (IN_CORRIDOR, False, False),  # no lease
+        (Pose2D(0.4, 0.0, SOUTH, stamp=10.0), True, False),  # outside the corridor
+        (Pose2D(-0.13, -0.05, math.pi / 2, stamp=10.0), True, False),  # facing away from the square
+        (IN_CORRIDOR, True, True),  # still carrying: reversing would leave the cube outside
+    ],
+)
+def test_reverse_refused_otherwise(pose, holds_zone, carrying):
+    cmd, _ = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(-0.04, 0.0, 0.0), own_pose=pose, holds_zone=holds_zone, carrying=carrying)
+    )
+    assert cmd[0] >= 0.0
+
+
+def test_square_tape_crossed_with_lease_while_carrying():
+    cmd, reason = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.05, 0.0, 0.1), line_front=True, own_pose=IN_CORRIDOR, holds_zone=True, carrying=True)
+    )
+    assert cmd == pytest.approx((0.05, 0.0, 0.1))
+    assert "line ahead" not in reason
+
+
+def test_square_tape_blocks_without_lease():
+    cmd, _ = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.05, 0.0, 0.0), line_front=True, own_pose=IN_CORRIDOR, holds_zone=False)
+    )
+    assert cmd[0] == pytest.approx(0.0)
