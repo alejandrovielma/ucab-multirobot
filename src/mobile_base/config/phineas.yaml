@@ -45,6 +45,7 @@
     plan_replan_heading: 0.3
     plan_max_expansions: 30000
     plan_retry: 2.0
+    plan_give_up: 6.0
     entry_heading_tolerance: 0.524  # 30 deg
     skip_time: 3.0
     backoff_time: 3.0

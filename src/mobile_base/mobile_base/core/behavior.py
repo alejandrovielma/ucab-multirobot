@@ -112,6 +112,7 @@ class BehaviorParams:
     plan_replan_heading: float = 0.3  # rad
     plan_max_expansions: int = 30000
     plan_retry: float = 2.0  # s before planning again after a failure
+    plan_give_up: float = 6.0  # s of failed planning (holding still) before dropping the cube
     entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
@@ -150,6 +151,7 @@ class BehaviorFSM:
         self._plan_t0 = 0.0
         self._plan_kind = ""
         self._plan_fail_until = 0.0
+        self._plan_failing_since: float | None = None
         self._zone = params.zone
         self._rng = rng or random.Random()
         self.state = State.EXPLORE
@@ -492,9 +494,15 @@ class BehaviorFSM:
             kind = "entry" if inp.holds_zone else "wait"
             cmd = self._follow_plan(inp, kind)
             if cmd is not None:
+                self._plan_failing_since = None
                 return cmd
             if kind == "wait":
                 return ZERO  # cannot reach the waiting point: wait here
+            if self._plan_failing_since is None:
+                self._plan_failing_since = inp.now
+            if inp.now - self._plan_failing_since < p.plan_give_up:
+                return ZERO  # hold still with the cube and retry (drift, pose noise, the other robot)
+            self._plan_failing_since = None
             return self._abandon_transport(inp, "no plan to the square: cube dropped")
         if not inp.holds_zone:
             return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)

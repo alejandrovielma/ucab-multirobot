@@ -202,7 +202,11 @@ def test_carry_with_no_plan_drops_the_cube_by_backing_off():
     step(f, 0.3, (1.0, 1.0, 0.0), scoop="red")
     assert f.state is State.CARRY
     f.take_actions()
-    cmd = step(f, 0.4, (2.0 - 0.005 - FP.front, 1.0, 0.0), scoop="red", holds_zone=True)
+    stuck = (2.0 - 0.005 - FP.front, 1.0, 0.0)
+    # Webots run 16: one failed replan dropped the cube 27 times; holding still and retrying is safe.
+    assert step(f, 0.4, stuck, scoop="red", holds_zone=True) == (0.0, 0.0, 0.0)
+    assert f.state is State.CARRY
+    cmd = step(f, 0.5 + f.params.plan_give_up, stuck, scoop="red", holds_zone=True)
     assert f.state is State.EXPLORE
     assert not f.carrying
     assert cmd[0] < 0.0  # reverse leaves the cube; a spin here would put a corner over the tape
