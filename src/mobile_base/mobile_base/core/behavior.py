@@ -82,6 +82,7 @@ class BehaviorParams:
     k_turn: float = 1.5  # rad/s per unit of cx_norm
     approach_speed: float = 0.10  # m/s
     approach_min_scale: float = 0.3  # forward scale when the cube is at the image edge
+    approach_align: float = 0.15  # |cx_norm| below which the cube counts as straight ahead
     lost_timeout: float = 1.0  # s
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
@@ -184,10 +185,15 @@ class BehaviorFSM:
             x, y, theta = inp.pose
             if not self._track.contains(x, y):
                 return self._return_to_track(inp)
-            if self.state in (State.EXPLORE, State.APPROACH, State.CAPTURE) and not self._fits(
+            if self.state in (State.EXPLORE, State.CAPTURE) and not self._fits(
                 inp.pose, self.params.explore_speed, 0.0, carrying=False
             ):
-                inp = dataclasses.replace(inp, line_front=True)  # no room ahead: same as the border
+                # No room ahead for the body: same as the border, except that a visible cube is still
+                # approached (APPROACH handles the geofence itself; the scoop reaches past the body).
+                edge_only = not inp.line_front
+                inp = dataclasses.replace(inp, line_front=True)
+                if edge_only and self.state is State.EXPLORE and self._target(inp.cubes, inp.now) is not None:
+                    inp = dataclasses.replace(inp, line_front=False)
         handler = {
             State.EXPLORE: self._explore,
             State.APPROACH: self._approach,
@@ -413,7 +419,20 @@ class BehaviorFSM:
             self._capture_until = inp.now + p.capture_time
             return self._capture(inp)
         scale = max(p.approach_min_scale, 1.0 - abs(target.cx_norm))
-        return (p.approach_speed * scale, 0.0, -p.k_turn * target.cx_norm)
+        cmd = (p.approach_speed * scale, 0.0, -p.k_turn * target.cx_norm)
+        if inp.pose is not None and not self._fits(inp.pose, cmd[0], cmd[2], carrying=False):
+            # The body cannot advance here. The cube may still be reachable with the scoop (it
+            # reaches 10 cm past the body): face it first; give up only when it is already ahead.
+            # Webots run 15: giving up at once dropped 69 approaches to cubes inside the track.
+            turn = cmd[2] if cmd[2] != 0.0 else p.turn_speed
+            if abs(target.cx_norm) > p.approach_align and self._fits(inp.pose, 0.0, turn, carrying=False):
+                return (0.0, 0.0, turn)
+            self._ignore_until = inp.now + p.skip_time
+            self.state = State.EXPLORE
+            self.note = "border before the cube"
+            self._start_turn(inp.now, inp.pose)
+            return self._explore(inp)
+        return cmd
 
     def _capture(self, inp: BehaviorInput) -> Command:
         if inp.line_front:

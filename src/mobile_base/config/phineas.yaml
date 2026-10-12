@@ -17,6 +17,7 @@
     k_turn: 1.5
     approach_speed: 0.10
     approach_min_scale: 0.3
+    approach_align: 0.15
     lost_timeout: 1.0
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08

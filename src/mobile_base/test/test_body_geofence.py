@@ -237,3 +237,23 @@ def test_border_turn_points_to_open_space_not_a_random_heading():
             theta += cmd[2] * 0.1
             t += 0.1
         assert abs(abs(math.remainder(theta, 2 * math.pi)) - math.pi / 2) < math.radians(35), seed
+
+
+def test_approach_near_the_tape_turns_toward_a_side_cube_instead_of_giving_up():
+    # Webots run 15: 69 approaches abandoned as "border before the cube" because the body was a few
+    # cm from the tape, although the cube was inside the track and off to one side.
+    f = fsm()
+    pose = (2.0 - 0.128, 1.0, 0.0)  # straight ahead does not fit, a spin does
+    step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    cmd = step(f, 0.1, pose, cubes=[Cube("red", 0.6, 0.4, 600.0)])  # cube to the right
+    assert f.state is State.APPROACH
+    assert cmd[2] < 0.0  # turning toward it (a slow arc or in place, whatever keeps the body in)
+    assert path_inside(ARENA, FP, pose, cmd[0], cmd[2], 0.3)
+
+
+def test_approach_gives_up_when_the_cube_is_ahead_and_the_body_cannot_advance():
+    f = fsm()
+    pose = (2.0 - 0.12, 1.0, 0.0)  # front 2.5 cm from the wall
+    step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    step(f, 0.1, pose, cubes=[Cube("red", 0.02, 0.4, 600.0)])
+    assert f.state is State.EXPLORE
