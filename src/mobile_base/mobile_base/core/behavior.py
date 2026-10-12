@@ -16,9 +16,12 @@ STOP     -> all zeros.
 While carrying, a cube not seen in the scoop for scoop_lost_timeout ends the transport (lease
 released with delivered=false), and a delivery counts only if the cube left the scoop after reversing.
 
-Geofence (with the overhead pose and a track polygon): the front point outside the track counts as
-the border line in every state but DELIVER, and with the center already outside the robot drops
-whatever it was doing and drives back toward the track centroid.
+Body geofence (overhead pose + track polygon; same model as the safety gate): the scoop may step on
+the tape, the body may not. Without a cube, a forward move that leaves no room to spin counts as the
+border line; a spin with no room tries the other way or backs off first (reverse is allowed with the
+pose). A cube is captured only if an escape arc fits afterwards (otherwise it is skipped for
+skip_time), and with a cube a blocked arc tries the other side or the cube is dropped by backing
+off. With the center already outside, the robot drives back toward the track centroid.
 
 The output is the DESIRED command; the SafetyGate filters it before the motors. Requests to the
 zone arbiter are returned as ZoneAction items (take_actions) so this module stays free of ROS.
@@ -34,7 +37,7 @@ from enum import Enum
 from mobile_base.core.colors import is_mine
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing, wrap_angle
-from mobile_base.core.track import Track
+from mobile_base.core.track import Footprint, Track, path_inside, predict
 
 Command = tuple[float, float, float]
 ZERO: Command = (0.0, 0.0, 0.0)
@@ -96,7 +99,15 @@ class BehaviorParams:
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
-    track_lookahead: float = 0.10  # m, geofence point ahead of the center (keep equal to the gate)
+    # Body geofence (keep equal to the gate): see core/track.py.
+    track_horizon: float = 0.3  # s
+    track_margin: float = 0.01  # m
+    body_front: float = 0.095  # m
+    body_rear: float = 0.095
+    body_half_width: float = 0.082
+    escape_angle: float = math.radians(90.0)  # arc that must fit after a capture
+    skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
+    backoff_time: float = 1.0  # s, reverse when there is no room to spin
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
     zone_square_y: float = DeliveryZone.square_y
@@ -124,6 +135,9 @@ class BehaviorFSM:
     def __init__(self, params: BehaviorParams, rng: random.Random | None = None, track: Track | None = None):
         self.params = params
         self._track = track or Track(())
+        self._body = Footprint(params.body_front, params.body_rear, params.body_half_width)
+        self._ignore_until = 0.0
+        self._backoff_until: float | None = None
         self._zone = params.zone
         self._rng = rng or random.Random()
         self.state = State.EXPLORE
@@ -158,8 +172,10 @@ class BehaviorFSM:
             x, y, theta = inp.pose
             if not self._track.contains(x, y):
                 return self._return_to_track(inp)
-            if not self._track.front_inside(x, y, theta, self.params.track_lookahead):
-                inp = dataclasses.replace(inp, line_front=True)
+            if self.state in (State.EXPLORE, State.APPROACH, State.CAPTURE) and not self._fits(
+                inp.pose, self.params.explore_speed, 0.0, carrying=False
+            ):
+                inp = dataclasses.replace(inp, line_front=True)  # no room ahead: same as the border
         handler = {
             State.EXPLORE: self._explore,
             State.APPROACH: self._approach,
@@ -169,6 +185,30 @@ class BehaviorFSM:
             State.STOP: lambda _inp: ZERO,
         }[self.state]
         return handler(inp)
+
+    def _fits(self, pose, vx: float, wz: float, carrying: bool) -> bool:
+        """Same test as SafetyGate._body_fits."""
+        p = self.params
+        if pose is None or not self._track.enabled:
+            return True
+        if not path_inside(self._track, self._body, pose, vx, wz, p.track_horizon):
+            return False
+        if vx > 0.0 and not carrying:
+            end = predict(pose, vx, wz, p.track_horizon)
+            return self._track.distance_to_edge(end[0], end[1]) >= self._body.sweep_radius + p.track_margin
+        return True
+
+    def _escape_fits(self, pose) -> bool:
+        """After the capture push, can an arc turn escape_angle with the body inside the track?"""
+        p = self.params
+        if pose is None or not self._track.enabled:
+            return True
+        after = predict(pose, p.capture_speed, 0.0, p.capture_time)
+        duration = p.escape_angle / p.carry_max_turn
+        return any(
+            path_inside(self._track, self._body, after, p.carry_min_speed, turn, duration, steps=24)
+            for turn in (p.carry_max_turn, -p.carry_max_turn)
+        )
 
     def _return_to_track(self, inp: BehaviorInput) -> Command:
         if self.state is State.CARRY:
@@ -198,7 +238,9 @@ class BehaviorFSM:
             self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
         self._carried_color = ""
 
-    def _target(self, cubes: Sequence[Cube]) -> Cube | None:
+    def _target(self, cubes: Sequence[Cube], now: float) -> Cube | None:
+        if now < self._ignore_until:
+            return None
         mine = [c for c in cubes if is_mine(c.color, self.params.my_colors)]
         return max(mine, key=lambda c: c.area_px, default=None)
 
@@ -214,6 +256,18 @@ class BehaviorFSM:
         self._turn_goal = self._rng.uniform(p.turn_angle_min, p.turn_angle_max)
         self._turn_prev_theta = pose[2]
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
+        self._check_turn_room(now, pose)
+
+    def _check_turn_room(self, now: float, pose) -> None:
+        """Spin only where the body corners stay inside; else the other way, else back off first."""
+        p = self.params
+        if self._fits(pose, 0.0, self._turn_dir * p.turn_speed, carrying=False):
+            return
+        if self._fits(pose, 0.0, -self._turn_dir * p.turn_speed, carrying=False):
+            self._turn_dir = -self._turn_dir
+            return
+        self._backoff_until = now + p.backoff_time
+        self._turn_until = max(self._turn_until, self._backoff_until + 2.0 * (self._turn_goal or 0.0) / p.turn_speed)
 
     def _turn_done(self, inp: BehaviorInput) -> bool:
         if self._turn_goal is not None and inp.pose is not None:
@@ -225,22 +279,29 @@ class BehaviorFSM:
 
     def _explore(self, inp: BehaviorInput) -> Command:
         p = self.params
+        if self._backoff_until is not None and inp.now >= self._backoff_until:
+            self._backoff_until = None
+            if self._turn_until is not None and inp.pose is not None:
+                self._turn_prev_theta = inp.pose[2]
+                self._check_turn_room(inp.now, inp.pose)
         if self._turn_until is not None and self._turn_done(inp):
             self._turn_until = None
         if self._turn_until is None:
             if inp.line_front:
                 self._start_turn(inp.now, inp.pose)
-            elif self._target(inp.cubes) is not None:
+            elif self._target(inp.cubes, inp.now) is not None:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
                 return self._approach(inp)
+        if self._backoff_until is not None:
+            return (-p.reverse_speed, 0.0, 0.0)  # no room to spin: back off first (leaves any cube)
         if self._turn_until is not None:
             return (0.0, 0.0, self._turn_dir * p.turn_speed)
         return (p.explore_speed, 0.0, 0.0)
 
     def _approach(self, inp: BehaviorInput) -> Command:
         p = self.params
-        target = self._target(inp.cubes)
+        target = self._target(inp.cubes, inp.now)
         if target is None:
             if inp.now - self._last_seen > p.lost_timeout:
                 self.state = State.EXPLORE
@@ -255,6 +316,12 @@ class BehaviorFSM:
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
+            if not self._escape_fits(inp.pose):
+                # Captured here, the robot would face the tape with no arc that keeps its body in.
+                self._ignore_until = inp.now + p.skip_time
+                self.state = State.EXPLORE
+                self._start_turn(inp.now, inp.pose)
+                return self._explore(inp)
             self.state = State.CAPTURE
             self._capture_until = inp.now + p.capture_time
             return self._capture(inp)
@@ -310,7 +377,7 @@ class BehaviorFSM:
         if not inp.holds_zone:
             if distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
                 return ZERO  # the other robot is using the square
-            return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
+            return self._carry_arc(inp, self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed))
         if z.in_corridor(x, y) and z.aligned(theta):
             self.state = State.DELIVER
             self._dropping = False
@@ -318,8 +385,19 @@ class BehaviorFSM:
         if abs(x - z.x) <= p.lead_in_width:
             # Near the axis: aim a bit south of the entry so the arc ends facing the square
             # (Webots run 8: arriving at the entry facing north and entering anyway went wrong).
-            return self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed)
-        return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
+            return self._carry_arc(inp, self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed))
+        return self._carry_arc(inp, self._steer(inp.pose, z.x, z.entry_y, p.carry_speed))
+
+    def _carry_arc(self, inp: BehaviorInput, cmd: Command) -> Command:
+        """Keep the body inside: the other arc if this one crosses, else drop the cube by backing off."""
+        vx, _, wz = cmd
+        if self._fits(inp.pose, vx, wz, carrying=True):
+            return cmd
+        p = self.params
+        for other in ([-wz] if wz != 0.0 else [p.carry_max_turn, -p.carry_max_turn]):
+            if self._fits(inp.pose, vx, other, carrying=True):
+                return (vx, 0.0, other)
+        return self._abandon_transport(inp)
 
     def _deliver(self, inp: BehaviorInput) -> Command:
         p = self.params

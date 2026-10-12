@@ -64,7 +64,7 @@ def test_capture_confirmed_by_the_camera_goes_to_carry_with_the_seen_color():
     capture(fsm, scoop_at_end="orange")
     assert fsm.state is State.CARRY
     tick(fsm, 1.3, scoop="orange", pose=(-0.13, 0.08, SOUTH), holds_zone=True)
-    tick(fsm, 1.4, scoop="orange", pose=(-0.13, -0.13, SOUTH), holds_zone=True)
+    tick(fsm, 1.4, scoop="orange", pose=(-0.13, -0.07, SOUTH), holds_zone=True)
     tick(fsm, 1.5, scoop="", pose=(-0.13, 0.03, SOUTH), holds_zone=True)
     assert ZoneAction("release", delivered=True, color="orange") in fsm.take_actions()
 
@@ -100,7 +100,7 @@ def test_cube_still_in_the_scoop_after_reversing_is_not_counted():
     capture(fsm, scoop_at_end="red")
     fsm.take_actions()
     tick(fsm, 1.3, scoop="red", pose=(-0.13, 0.08, SOUTH), holds_zone=True)
-    tick(fsm, 1.4, scoop="red", pose=(-0.13, -0.13, SOUTH), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=(-0.13, -0.07, SOUTH), holds_zone=True)
     tick(fsm, 1.5, scoop="red", pose=(-0.13, 0.03, SOUTH), holds_zone=True)  # cube dragged back out
     assert fsm.take_actions() == [ZoneAction("release", delivered=False, color="red")]
 

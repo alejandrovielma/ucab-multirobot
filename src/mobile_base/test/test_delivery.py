@@ -131,7 +131,7 @@ def test_enter_ignores_the_square_tape():
     fsm = carrying_fsm()
     z = zone(fsm)
     tick(fsm, 2.0, (z.x, z.entry_y, SOUTH), holds_zone=True)
-    vx, _, _ = tick(fsm, 2.1, (z.x, -0.10, SOUTH), holds_zone=True, line_front=True)
+    vx, _, _ = tick(fsm, 2.1, (z.x, z.drop_y + 0.03, SOUTH), holds_zone=True, line_front=True)
     assert vx > 0.0
     assert fsm.state is State.DELIVER
 

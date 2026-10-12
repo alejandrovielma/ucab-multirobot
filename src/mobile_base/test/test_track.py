@@ -66,7 +66,7 @@ def gate_input(pose, cmd=(0.1, 0.0, 0.0), **kw):
 
 def test_gate_blocks_forward_when_the_front_leaves_the_track():
     gate = SafetyGate(SafetyParams(), track=SQUARE)
-    cmd, reason = gate.filter(gate_input(Pose2D(0.95, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3)))
+    cmd, reason = gate.filter(gate_input(Pose2D(0.85, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3)))
     assert cmd == pytest.approx((0.0, 0.0, 0.3))
     assert "track edge" in reason
 
@@ -81,18 +81,15 @@ def test_gate_lets_the_robot_drive_back_in_from_outside():
     assert gate.filter(gate_input(toward, line_front=True))[0][0] == pytest.approx(0.1)
 
 
-def test_gate_track_edge_while_carrying_turns_in_place():
-    gate = SafetyGate(SafetyParams(), track=SQUARE)
-    cmd, _ = gate.filter(gate_input(Pose2D(0.95, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3), carrying=True))
-    assert cmd == pytest.approx((0.0, 0.0, 0.3))
-
-
-def test_gate_track_ignored_in_delivery_corridor_with_lease():
+def test_gate_lets_the_body_reach_the_square_tape_but_not_cross_it():
     track = real_track()
     gate = SafetyGate(SafetyParams(), track=track)
-    pose = Pose2D(-0.13, -0.12, -math.pi / 2, stamp=10.0)  # front already over the square
+    pose = Pose2D(-0.13, -0.05, -math.pi / 2, stamp=10.0)  # 1.5 cm before the drop point
     cmd, _ = gate.filter(gate_input(pose, cmd=(0.05, 0.0, 0.0), holds_zone=True, carrying=True))
     assert cmd[0] == pytest.approx(0.05)
+    beyond = Pose2D(-0.13, -0.08, -math.pi / 2, stamp=10.0)  # 0.3 s more would put the front on the tape
+    cmd, _ = gate.filter(gate_input(beyond, cmd=(0.05, 0.0, 0.0), holds_zone=True, carrying=True))
+    assert cmd[0] == pytest.approx(0.0)
 
 
 def make_fsm(seed=1):
@@ -101,7 +98,7 @@ def make_fsm(seed=1):
 
 def test_behavior_treats_track_edge_as_line():
     fsm = make_fsm()
-    cmd = fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False, pose=(0.95, 0.5, 0.0)))
+    cmd = fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False, pose=(0.85, 0.5, 0.0)))
     assert cmd[0] == 0.0 and cmd[2] != 0.0
     assert fsm.state is State.EXPLORE
 

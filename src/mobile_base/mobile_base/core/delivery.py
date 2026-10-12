@@ -7,7 +7,9 @@ y -0.180..-0.164); measure the real track and override them in the YAML.
 
 The robot enters heading south (the ArUco id 10 marker stands on the south side, outside the
 track). Robot positions below are of the robot CENTER; the cube sits cube_ahead meters in front
-of it, inside the U of the fixed scoop.
+of it, inside the U of the fixed scoop. Rule: the scoop may step on the tape, the body may not, so
+the robot stops with its front (0.095 m) just before the square's north tape and only the scoop
+(with the cube) goes in.
 """
 
 import math
@@ -22,9 +24,9 @@ class DeliveryZone:
     square_y: float = -0.284
     square_half: float = 0.104  # half side of the interior
     heading: float = -math.pi / 2  # entry heading (south)
-    cube_ahead: float = 0.155  # cube center ahead of the robot center
+    cube_ahead: float = 0.145  # cube center ahead of the robot center (against the U back wall)
     entry_y: float = 0.08  # robot center where it waits for the lease, north of the tape
-    drop_y: float = -0.125  # robot center that leaves the cube at the square center
+    drop_y: float = -0.065  # body front at -0.160 (tape starts at -0.164); cube center at -0.210
     exit_y: float = 0.02  # robot center after reversing; the scoop is clear of the cube
     corridor_half_width: float = 0.10
     corridor_margin: float = 0.05

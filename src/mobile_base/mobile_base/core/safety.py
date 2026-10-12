@@ -5,7 +5,9 @@ Rules, applied in order every tick:
 2. Own pose stale (when required) -> full stop.
 3. Forward-only translation: the robot has a single FRONT line sensor, so strafing or
    reversing is blind to the track edge (in Webots, strafing drove both robots off the board).
-   Turning in place is allowed; vy and negative vx are removed.
+   Turning in place is allowed; vy and negative vx are removed. Exception: with the overhead pose
+   and a track polygon reversing is no longer blind, so a slow reverse (max_reverse) is allowed
+   when the body stays inside the track (and never while carrying: the cube would stay behind).
 4. Front line sensor on black -> no forward motion (turning allowed).
 5. Peer robot ahead (overhead-camera poses) -> slow down, stop, and turn away from it.
    If both robots stay blocked facing each other for deadlock_time, the robot
@@ -17,8 +19,15 @@ Rules, applied in order every tick:
    - peer to one side (not ahead, not touching): a forward arc away from it, so a carrying
      robot does not freeze forever next to another robot.
 
-Geofence (rule 4, needs the overhead pose and a track polygon): white looks the same inside and
-outside the tape, so a front point (track_lookahead ahead) outside the polygon counts as a line.
+Body geofence (last rule, needs the overhead pose and a track polygon). Rule of the team: the
+scoop may step on the tape, the robot body may never cross it. The final command is simulated for
+track_horizon seconds and every corner of the body rectangle (wheels included, scoop excluded) must
+stay inside the polygon:
+- without a cube, forward motion must also leave room to spin afterwards (center at least the
+  corner sweep radius from the edge), so the robot can always turn away in place;
+- an in-place spin that would swing a corner over the tape tries the other direction, else stops;
+- with a cube (arcs only), a blocked arc tries the other direction, else the robot stops and the
+  behavior drops the cube by backing off.
 With the robot center already outside, forward motion is allowed only toward the track centroid,
 even over "black" (off the board the floor reads as tape).
 
@@ -33,7 +42,7 @@ from dataclasses import dataclass
 
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing
-from mobile_base.core.track import Track
+from mobile_base.core.track import Footprint, Track, path_inside, predict
 
 Command = tuple[float, float, float]
 STOP: Command = (0.0, 0.0, 0.0)
@@ -69,8 +78,12 @@ class SafetyParams:
     carry_max_turn: float = 0.6  # rad/s, turn-rate limit with a cube
     carry_arc_away_bearing: float = 25.0  # deg, peer this far off-axis: arc away instead of freezing
     carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
-    max_reverse: float = 0.05  # m/s, only inside the delivery corridor with the lease
-    track_lookahead: float = 0.10  # m, geofence point ahead of the center (line sensor at 0.075)
+    max_reverse: float = 0.05  # m/s: delivery corridor with the lease, or anywhere the pose shows room behind
+    track_horizon: float = 0.3  # s, body geofence prediction
+    track_margin: float = 0.01  # m, extra clearance on top of the spin sweep radius
+    body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
+    body_rear: float = 0.095
+    body_half_width: float = 0.082
     track_return_cone: float = 45.0  # deg, outside the track: forward only within this of the centroid
     # Delivery square (see core/delivery.py); keep equal to the behavior's zone_* parameters.
     zone_x: float = DeliveryZone.x
@@ -98,6 +111,7 @@ class SafetyGate:
         self.params = params
         self._zone = zone_from(params)
         self._track = track or Track(())
+        self._body = Footprint(params.body_front, params.body_rear, params.body_half_width)
         self._blocked_since: float | None = None
         self._escape_until: float | None = None
         self._escape_cmd: Command = STOP
@@ -120,13 +134,14 @@ class SafetyGate:
         vx, vy, wz = inp.cmd
         reasons = []
         delivering = own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose)
-        if delivering and not inp.carrying and vx < 0.0 and vy == 0.0:
+        on_track = own_fresh and self._track.enabled and self._track.contains(inp.own_pose.x, inp.own_pose.y)
+        if (delivering or on_track) and not inp.carrying and vx < 0.0 and vy == 0.0:
             vx = max(vx, -p.max_reverse)
-            reasons.append("delivery: reverse out")
+            reasons.append("delivery: reverse out" if delivering else "reverse (pose geofence)")
         elif vy != 0.0 or vx < 0.0:
             vx, vy = max(vx, 0.0), 0.0
             reasons.append("forward only")
-        returning, off_track = self._geofence(inp, own_fresh and not delivering, reasons)
+        returning, off_track = self._outside_track(inp, own_fresh, reasons)
         line_blocks = (inp.line_front and not delivering and not returning) or off_track
         if line_blocks and vx > 0.0:
             vx = 0.0
@@ -148,23 +163,61 @@ class SafetyGate:
             return escape
         if inp.carrying:
             vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, peer_distance, line_blocks, reasons)
+        if on_track:
+            vx, wz = self._body_geofence(inp.own_pose, vx, wz, inp.carrying, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
-    def _geofence(self, inp: SafetyInput, active: bool, reasons: list[str]) -> tuple[bool, bool]:
-        """Return (returning to the track, forward must be blocked)."""
-        if not active or not self._track.enabled:
+    def _outside_track(self, inp: SafetyInput, own_fresh: bool, reasons: list[str]) -> tuple[bool, bool]:
+        """Center outside the polygon: return (heading back in, forward must be blocked)."""
+        if not own_fresh or not self._track.enabled:
             return False, False
         own = inp.own_pose
+        if self._track.contains(own.x, own.y):
+            return False, False
+        cx, cy = self._track.centroid
+        returning = abs(relative_bearing(own.x, own.y, own.theta, cx, cy)) <= math.radians(self.params.track_return_cone)
+        reasons.append("outside track: " + ("back in" if returning else "turn back"))
+        return returning, not returning
+
+    def _body_fits(self, pose: Pose2D, vx: float, wz: float, carrying: bool) -> bool:
+        """Body inside along the prediction; without a cube, forward also keeps room to spin."""
         p = self.params
-        if not self._track.contains(own.x, own.y):
-            cx, cy = self._track.centroid
-            returning = abs(relative_bearing(own.x, own.y, own.theta, cx, cy)) <= math.radians(p.track_return_cone)
-            reasons.append("outside track: " + ("back in" if returning else "turn back"))
-            return returning, not returning
-        if not self._track.front_inside(own.x, own.y, own.theta, p.track_lookahead):
+        start = (pose.x, pose.y, pose.theta)
+        if not path_inside(self._track, self._body, start, vx, wz, p.track_horizon):
+            return False
+        if vx > 0.0 and not carrying:
+            end = predict(start, vx, wz, p.track_horizon)
+            return self._track.distance_to_edge(end[0], end[1]) >= self._body.sweep_radius + p.track_margin
+        return True
+
+    def _body_geofence(self, pose: Pose2D, vx: float, wz: float, carrying: bool, reasons: list[str]):
+        if vx == 0.0 and wz == 0.0:
+            return vx, wz
+        if self._body_fits(pose, vx, wz, carrying):
+            return vx, wz
+        p = self.params
+        if carrying:
+            # Arcs only: try the other side (or either side when going straight).
+            options = [-wz] if wz != 0.0 else [p.carry_max_turn, -p.carry_max_turn]
+            for other in options:
+                if vx > 0.0 and self._body_fits(pose, vx, other, carrying):
+                    reasons.append("carrying: arc the other way (body geofence)")
+                    return vx, other
+            reasons.append("carrying: body would cross the tape, stop")
+            return 0.0, 0.0
+        if vx > 0.0:
             reasons.append("track edge ahead (pose)")
-            return False, True
-        return False, False
+            vx = 0.0
+            if wz == 0.0 or self._body_fits(pose, 0.0, wz, carrying):
+                return vx, wz
+        if vx < 0.0:
+            reasons.append("no room behind (pose)")
+            return 0.0, 0.0
+        if wz != 0.0 and self._body_fits(pose, 0.0, -wz, carrying):
+            reasons.append("turn the other way (body geofence)")
+            return 0.0, -wz
+        reasons.append("body would cross the tape: no room to turn")
+        return 0.0, 0.0
 
     def _in_delivery_corridor(self, pose: Pose2D) -> bool:
         return self._zone.in_corridor(pose.x, pose.y) and self._zone.aligned(pose.theta)
