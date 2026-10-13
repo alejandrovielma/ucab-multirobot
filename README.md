@@ -257,6 +257,9 @@ también se puede correr `colcon test` directamente en `~/ws`.
 
 ## Robot real
 
+> **Pruebas de laboratorio sin ROS:** para probar motores, sensor de línea, cámara y la persecución de
+> cubos en la Pi 5 sin instalar ROS, ver [tools/lab/README.md](tools/lab/README.md).
+
 En la Pi 5 de cada robot (Ubuntu 24.04, ROS 2 Jazzy y `python3-lgpio`):
 
 ```bash

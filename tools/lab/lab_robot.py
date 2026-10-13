@@ -239,6 +239,8 @@ def main():
     parser.add_argument("--camera", default="auto")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--max-speed", type=float, default=0.10, help="m/s, lab cap")
+    parser.add_argument("--battery", type=float, default=None,
+                        help="measured battery voltage (V): sets the PWM cap that keeps the TT motors <= 6 V")
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
     parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
     parser.add_argument("--latch-timeout", type=float, default=3.0, help="drive mode: stop after N s with no key")
@@ -246,6 +248,8 @@ def main():
     parser.add_argument("--no-stop-at-capture", dest="stop_at_capture", action="store_false")
     args = parser.parse_args()
     cfg = load_config(args.robot)
+    if args.battery is not None:
+        cfg["hat_motor_driver"]["battery_voltage"] = args.battery
     modes = {"motors": mode_motors, "drive": mode_drive, "line": mode_line, "camera": mode_camera,
              "chase": mode_chase}
     try:

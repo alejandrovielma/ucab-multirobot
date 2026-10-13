@@ -54,22 +54,23 @@ def open_gpio(chip: int | None, dry_run: bool):
 
 
 def detect_chip() -> int:
-    """The 40-pin header chip on a Pi 5 is the one labelled pinctrl-rp1 (its number changed between
-    kernels: 4 on early Pi 5 images, 0 on newer ones)."""
+    """The 40-pin header chip on a Pi 5 is the one labelled "pinctrl-rp1". Its number changed with
+    the kernel: gpiochip4 on early Pi 5 images, gpiochip0 after raspberrypi/linux PR #6144 (Aug 2024),
+    and other numbers have been reported, so it is searched by label."""
     import lgpio
 
-    for chip in (0, 4, 1, 2, 3):
+    for chip in range(16):
         try:
             handle = lgpio.gpiochip_open(chip)
         except lgpio.error:
             continue
         try:
-            _lines, _name, label = lgpio.gpio_get_chip_info(handle)
+            _status, _lines, name, label = lgpio.gpio_get_chip_info(handle)
         finally:
             lgpio.gpiochip_close(handle)
-        if "rp1" in label:
+        if "rp1" in label or "rp1" in name:
             return chip
-    raise RuntimeError("no pinctrl-rp1 gpiochip found: is this a Raspberry Pi 5? try --chip N")
+    raise RuntimeError("no pinctrl-rp1 gpiochip found: is this a Raspberry Pi 5? see `gpiodetect`, use --chip N")
 
 
 class Motors:
@@ -135,7 +136,11 @@ class LineSensor:
 
 class Camera:
     """640x480 BGR frames from the first backend that works: picamera2 (Raspberry Pi OS), a
-    GStreamer libcamerasrc pipeline, or a V4L2 index. 'file:<path>' replays an image (laptop tests)."""
+    GStreamer libcamerasrc pipeline, or a V4L2 index (USB webcam). 'file:<path>' replays an image.
+
+    A CSI camera on a Pi 5 is only reachable through libcamera: cv2.VideoCapture(0) does not give
+    frames from it. Ubuntu supports that stack officially from 25.04 only, so on Ubuntu 24.04 use a
+    USB webcam (v4l2) or Raspberry Pi OS for this tool."""
 
     def __init__(self, source: str = "auto", width: int = 640, height: int = 480):
         self.width, self.height = width, height
@@ -174,7 +179,7 @@ class Camera:
         from picamera2 import Picamera2
 
         cam = Picamera2()
-        # libcamera "RGB888" is stored B, G, R in memory: what OpenCV calls BGR.
+        # Picamera2 manual: "RGB888" is ordered [B, G, R] in memory, which is what OpenCV expects.
         cam.configure(cam.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"}))
         cam.start()
         time.sleep(0.5)
