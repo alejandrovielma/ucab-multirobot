@@ -137,3 +137,35 @@ def test_abandoning_a_transport_opens_the_gate():
     step(f, 2.5, scoop="")
     assert f.state is State.EXPLORE
     assert not f.gate_closed
+
+
+# ---- Webots run 19: Phineas entered 5 cm off the axis and 27 deg off south and froze for 7 minutes
+
+
+def carrying_at(f, t0=0.0):
+    capture(f)
+    f.take_actions()
+    return 0.3 + f.params.gate_close_time + 0.05
+
+
+def test_with_the_gate_the_entry_must_be_precise_before_delivering():
+    f = fsm()
+    t = carrying_at(f)
+    z = f.params.zone
+    step(f, t, (z.x + 0.05, z.entry_y, SOUTH + math.radians(27)), scoop="red")
+    assert f.state is State.CARRY
+    step(f, t + 0.1, (z.x + 0.01, z.entry_y, SOUTH + math.radians(5)), scoop="red")
+    assert f.state is State.DELIVER
+
+
+def test_blocked_entry_backs_off_with_the_cube_and_replans():
+    wall = Track((0.0, 0.80, 2.0, 0.80, 2.0, 2.0, 0.0, 2.0))  # the "square tape" 1 cm past the body front
+    f = fsm(track=wall)
+    t = carrying_at(f)
+    z = f.params.zone
+    step(f, t, (z.x, z.entry_y, SOUTH), scoop="red")
+    assert f.state is State.DELIVER
+    cmd = step(f, t + 0.1, (z.x, 0.905, SOUTH), scoop="red")  # forward would put the front past 0.80
+    assert f.state is State.CARRY
+    assert f.gate_closed and f.carrying
+    assert cmd[0] < 0.0

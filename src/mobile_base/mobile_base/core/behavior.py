@@ -45,7 +45,7 @@ from mobile_base.core.colors import is_mine
 from mobile_base.core.delivery import DeliveryZone, zone_from
 from mobile_base.core.geometry import distance, relative_bearing, wrap_angle
 from mobile_base.core.planner import Plan, plan_arcs
-from mobile_base.core.track import Footprint, Track, path_inside, predict
+from mobile_base.core.track import TOLERANCE, Footprint, Track, path_inside, penetration, predict
 
 Command = tuple[float, float, float]
 ZERO: Command = (0.0, 0.0, 0.0)
@@ -122,6 +122,9 @@ class BehaviorParams:
     plan_retry: float = 2.0  # s before planning again after a failure
     plan_give_up: float = 6.0  # s of failed planning (holding still) before dropping the cube
     entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
+    gate_entry_x_tolerance: float = 0.02  # m, with the gate (spins allowed) the entry is precise
+    gate_entry_y_band: float = 0.05  # m around zone_entry_y
+    gate_entry_heading_tolerance: float = math.radians(10.0)
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
     open_probe_distance: float = 0.5  # m, straight free distance probed per heading after the border
@@ -178,6 +181,7 @@ class BehaviorFSM:
         self._scoop_seen = 0.0
         self.gate_closed = False
         self._gate_ready_at = 0.0
+        self._carry_backoff_until = 0.0
         self._actions: list[ZoneAction] = []
 
     @property
@@ -223,9 +227,19 @@ class BehaviorFSM:
         return path_inside(self._track, self._body, pose, vx, wz, self.params.track_horizon)
 
     def _at_entry(self, pose) -> bool:
+        p = self.params
         z = self._zone
         error = abs(math.remainder(pose[2] - z.heading, 2.0 * math.pi))
-        return z.in_corridor(pose[0], pose[1]) and error <= self.params.entry_heading_tolerance
+        if p.has_gate:
+            # Spins are allowed with the gate, so the plan can line up precisely: the square is only
+            # 22 cm wide inside and the body may not touch its tape (Webots run 19: 5 cm and 27 deg off
+            # the axis, a body corner on the tape, stuck for 7 minutes).
+            return (
+                abs(pose[0] - z.x) <= p.gate_entry_x_tolerance
+                and z.entry_y - p.gate_entry_y_band <= pose[1] <= z.entry_y + p.gate_entry_y_band
+                and error <= p.gate_entry_heading_tolerance
+            )
+        return z.in_corridor(pose[0], pose[1]) and error <= p.entry_heading_tolerance
 
     def _plan_to(self, kind: str, pose) -> Plan | None:
         p = self.params
@@ -343,8 +357,8 @@ class BehaviorFSM:
         free = 0.0
         while free < p.open_probe_distance:
             nxt = free + 0.02
-            corners = self._body.corners(x + nxt * math.cos(heading), y + nxt * math.sin(heading), heading)
-            if not all(self._track.contains(cx, cy) for cx, cy in corners):
+            probe = (x + nxt * math.cos(heading), y + nxt * math.sin(heading), heading)
+            if penetration(self._track, self._body, probe) > TOLERANCE:
                 break
             free = nxt
         return free
@@ -501,6 +515,8 @@ class BehaviorFSM:
             return self._abandon_transport(inp, "cube lost from the scoop")
         if inp.now < self._gate_ready_at:
             return ZERO  # the gate is still closing
+        if inp.now < self._carry_backoff_until:
+            return (-p.reverse_speed, 0.0, 0.0)  # cube retained by the gate
         x, y, theta = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
@@ -551,6 +567,13 @@ class BehaviorFSM:
                 # The square's north tape is crossed on purpose here: line_front is ignored.
                 carrot_y = max(y - p.enter_lookahead, z.drop_y - p.enter_lookahead)
                 _, _, wz = self._steer(inp.pose, z.x, carrot_y, p.enter_speed)
+                if self.gate_closed and not self._fits(inp.pose, p.enter_speed, wz, carrying=False):
+                    # The body would touch the square's tape: back off with the retained cube, replan.
+                    self.state = State.CARRY
+                    self.note = "entry blocked: back off and replan"
+                    self.plan = None
+                    self._carry_backoff_until = inp.now + p.backoff_time / 3.0
+                    return (-p.reverse_speed, 0.0, 0.0)
                 return (p.enter_speed, 0.0, wz)
             self._dropping = True
             self._drop_until = inp.now + p.drop_timeout

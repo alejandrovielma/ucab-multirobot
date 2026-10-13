@@ -50,6 +50,9 @@
     plan_retry: 2.0
     plan_give_up: 6.0
     entry_heading_tolerance: 0.524  # 30 deg
+    gate_entry_x_tolerance: 0.02  # with the gate the entry is precise
+    gate_entry_y_band: 0.05
+    gate_entry_heading_tolerance: 0.175  # 10 deg
     skip_time: 3.0
     backoff_time: 3.0
     open_probe_distance: 0.5

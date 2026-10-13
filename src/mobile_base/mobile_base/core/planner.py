@@ -12,7 +12,7 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from mobile_base.core.track import Footprint, Track, path_inside, predict
+from mobile_base.core.track import Footprint, Track, path_inside, penetration, predict
 
 Pose = tuple[float, float, float]
 
@@ -73,8 +73,8 @@ def plan_arcs(
     meters; arcs use the tightest radius allowed with a cube (arc_speed / turn). With the scoop gate
     closed the cube is retained, so in-place spins (one heading bin each) and reverse are offered too.
     """
-    if not all(track.contains(cx, cy) for cx, cy in footprint.corners(*start)):
-        return None
+    # A start already touching the edge (pose noise) is accepted; the plan never goes deeper than it.
+    limit = penetration(track, footprint, start)
     primitives = [
         (straight_speed, 0.0, step / straight_speed),
         (arc_speed, turn, step / arc_speed),
@@ -97,14 +97,15 @@ def plan_arcs(
         if goal(pose):
             return Plan(start, _merge(path))
         for vx, wz, duration in primitives:
-            if not path_inside(track, footprint, pose, vx, wz, duration, steps=3):
+            if not path_inside(track, footprint, pose, vx, wz, duration, steps=3, limit=limit):
                 continue
             nxt = predict(pose, vx, wz, duration)
             if _key(nxt, cell, heading_bins) in seen:
                 continue
             # Mild preference for straight segments; spins are cheap, reversing is discouraged.
             new_cost = cost + (0.5 if vx == 0.0 else 1.5 if vx < 0.0 else 1.0 + (0.2 if wz else 0.0))
-            h = math.hypot(nxt[0] - target[0], nxt[1] - target[1]) / step
+            # Weighted A* (1.5 x heuristic): slightly longer paths, several times fewer expansions.
+            h = 1.5 * math.hypot(nxt[0] - target[0], nxt[1] - target[1]) / step
             tie += 1
             heapq.heappush(queue, (new_cost + h, new_cost, tie, nxt, path + ((vx, wz, duration),)))
     return None

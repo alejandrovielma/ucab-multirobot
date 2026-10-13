@@ -261,3 +261,31 @@ def test_approach_gives_up_when_the_cube_is_ahead_and_the_body_cannot_advance():
     step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     step(f, 0.1, pose, cubes=[Cube("red", 0.02, 0.4, 600.0)])
     assert f.state is State.EXPLORE
+
+
+# ---- Webots run 19: a protruding track corner inside the body, and pose noise at the edge
+
+# Arena with a notch: the outside pokes into the track as a triangle with its tip at (1.0, 1.0).
+NOTCH = Track((0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 1.1, 2.0, 1.0, 1.0, 0.9, 2.0, 0.0, 2.0))
+
+
+def test_penetration_counts_a_track_vertex_inside_the_body():
+    from mobile_base.core.track import penetration
+
+    pose = (1.0, 0.95, 0.0)  # the notch tip (1.0, 1.0) is 5 cm left of the center: inside the body
+    assert all(NOTCH.contains(cx, cy) for cx, cy in FP.corners(*pose))  # the old corner check passed
+    assert penetration(NOTCH, FP, pose) == pytest.approx(FP.half_width - 0.05, abs=1e-6)
+    assert penetration(NOTCH, FP, (1.0, 0.5, 0.0)) == 0.0
+
+
+def test_motion_into_a_protruding_corner_is_refused():
+    pose = (1.0, 0.89, math.pi / 2)  # heading north: 3.6 cm more puts the notch tip 2 cm into the body
+    assert not path_inside(NOTCH, FP, pose, 0.12, 0.0, 0.3)
+
+
+def test_a_robot_already_touching_the_edge_can_still_move_away():
+    # With 5 mm pose noise a robot against the tape reads slightly outside; refusing every command
+    # froze both robots for minutes. Motions that do not deepen the penetration are allowed.
+    pose = (2.0 - FP.front + 0.004, 1.0, 0.0)  # front 4 mm over the edge (noise)
+    assert path_inside(ARENA, FP, pose, -0.04, 0.0, 0.3)  # backing away
+    assert not path_inside(ARENA, FP, pose, 0.05, 0.0, 0.3)  # pushing deeper

@@ -18,6 +18,24 @@ class Track:
         self.vertices = list(zip(values[0::2], values[1::2]))
         self.enabled = len(self.vertices) >= 3
         self.centroid = self._area_centroid() if self.enabled else (0.0, 0.0)
+        self._grid: dict[tuple[int, int], float] | None = None  # distance to the edge, built lazily
+
+    GRID = 0.02  # m
+
+    def clearance_lower_bound(self, x: float, y: float) -> float:
+        """A cheap lower bound of distance_to_edge from a 2 cm precomputed grid (0 near/outside)."""
+        if not self.enabled:
+            return math.inf
+        if self._grid is None:
+            xs = [v[0] for v in self.vertices]
+            ys = [v[1] for v in self.vertices]
+            self._grid = {}
+            for i in range(int(min(xs) / self.GRID) - 1, int(max(xs) / self.GRID) + 2):
+                for j in range(int(min(ys) / self.GRID) - 1, int(max(ys) / self.GRID) + 2):
+                    cx, cy = i * self.GRID, j * self.GRID
+                    self._grid[(i, j)] = self.distance_to_edge(cx, cy) if self.contains(cx, cy) else 0.0
+        cell = self._grid.get((round(x / self.GRID), round(y / self.GRID)), 0.0)
+        return cell - self.GRID * math.sqrt(0.5)  # the point is at most half a cell diagonal away
 
     def contains(self, x: float, y: float) -> bool:
         """Ray casting; a disabled track contains everything (no geofence)."""
@@ -95,12 +113,54 @@ def predict(pose, vx: float, wz: float, t: float) -> tuple[float, float, float]:
     return x + r * (math.sin(theta2) - math.sin(theta)), y - r * (math.cos(theta2) - math.cos(theta)), theta2
 
 
-def path_inside(track: "Track", footprint: Footprint, pose, vx: float, wz: float, horizon: float, steps: int = 6) -> bool:
-    """True when every body corner stays inside the track along the commanded motion."""
+TOLERANCE = 0.002  # m of penetration accepted on top of the current one (pose noise, sampling)
+
+
+def penetration(track: "Track", footprint: Footprint, pose) -> float:
+    """How deep the body is over the track edge (0 = fully inside).
+
+    Two cases: a body corner outside the polygon (its distance to the edge), and a polygon vertex
+    inside the body rectangle (a protruding corner of the track, which all four body corners can miss;
+    Webots run 19: Ferb wedged on the notch of the right lobe)."""
+    if not track.enabled:
+        return 0.0
+    x, y, theta = pose
+    if track.clearance_lower_bound(x, y) >= footprint.sweep_radius:
+        return 0.0  # the whole body (any heading) is inside: skip the corner and vertex checks
+    depth = 0.0
+    for cx, cy in footprint.corners(x, y, theta):
+        if not track.contains(cx, cy):
+            depth = max(depth, track.distance_to_edge(cx, cy))
+    c, s = math.cos(theta), math.sin(theta)
+    reach = footprint.sweep_radius
+    for vx_, vy_ in track.vertices:
+        dx, dy = vx_ - x, vy_ - y
+        if abs(dx) > reach or abs(dy) > reach:
+            continue
+        fx, fy = dx * c + dy * s, -dx * s + dy * c  # vertex in the robot frame
+        if -footprint.rear <= fx <= footprint.front and abs(fy) <= footprint.half_width:
+            depth = max(depth, min(footprint.front - fx, fx + footprint.rear, footprint.half_width - abs(fy)))
+    return depth
+
+
+def path_inside(
+    track: "Track",
+    footprint: Footprint,
+    pose,
+    vx: float,
+    wz: float,
+    horizon: float,
+    steps: int = 6,
+    limit: float | None = None,
+) -> bool:
+    """True when the motion never puts the body deeper over the edge than limit + TOLERANCE.
+
+    limit defaults to the current penetration: a robot already touching the tape (or reading so
+    because of pose noise) may still move away from it, never deeper."""
     if not track.enabled:
         return True
+    allowed = (penetration(track, footprint, pose) if limit is None else limit) + TOLERANCE
     for k in range(1, steps + 1):
-        x, y, theta = predict(pose, vx, wz, horizon * k / steps)
-        if not all(track.contains(cx, cy) for cx, cy in footprint.corners(x, y, theta)):
+        if penetration(track, footprint, predict(pose, vx, wz, horizon * k / steps)) > allowed:
             return False
     return True
