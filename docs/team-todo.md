@@ -3,7 +3,12 @@
 Cada tarea es acotada y tiene un criterio de aceptación verificable. Antes de dar una tarea por
 terminada, `powershell -File scripts/test_in_docker.ps1` debe seguir pasando.
 
-## 1. Comportamiento de transporte y entrega (`CARRY`)
+## 1. Comportamiento de transporte y entrega (`CARRY`) — implementado
+
+Estado: implementado en la rama `feat/carry-delivery` (ver [odd/tasks/carry-delivery.md](../odd/tasks/carry-delivery.md)).
+Se eligió la reversa acotada bajo la llave del cuadro. Quedan pendientes: medir el cuadro real y
+ajustar `zone_*` en los YAML, y validar la entrada al cuadro con la cámara cenital real.
+Criterios originales:
 
 Dónde: `BehaviorFSM._carry` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py)
 y el nodo `behavior_node.py` (clientes de servicio).
@@ -28,6 +33,57 @@ Criterios de aceptación:
   (`/zone/occupant` = su nombre) y `carrying` acaba de pasar a falso, con un test que lo cubra.
   Alternativa sin reversa: salir del cuadro girando en arco hacia adelante, si el cuadro y la
   pala lo permiten sin arrastrar el cubo.
+
+## 9. Verificar que el cubo quedó en la pala (captura real, no por tiempo) — implementado en Webots
+
+Estado: implementado en `feat/capture-verification` con la cámara (ventana entre las paredes de la
+pala, ver [architecture.md](architecture.md)). En la corrida 10, 2 entregas contadas = 2 cubos en el
+cuadro. Falta medir la ventana con la cámara real montada (depende de la tarea 7).
+Criterios originales:
+
+Dónde: `BehaviorFSM._capture` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py).
+
+Problema observado (Webots, corrida 7, 2026-10-12): `CAPTURE` empuja 1 s y pasa a `CARRY` sin comprobar
+nada. Se registraron 5 entregas y en el cuadro quedó 1 cubo; otro terminó fuera de la pista. El conteo
+oficial del árbitro hoy no es confiable.
+
+Criterios de aceptación:
+- Con la cámara del robot (sin comprar sensores): definir y medir en Webots dónde aparece un cubo que está
+  dentro de la U (zona inferior central de la imagen, entre las paredes de la pala). Guardar cuadros de
+  ejemplo con `tools/sim_monitor.py --frames-every`.
+- `CAPTURE` pasa a `CARRY` solo si el cubo se ve en esa zona; si no, vuelve a `APPROACH`.
+- Durante `CARRY`, si el cubo deja de verse en la pala durante más de N s, se abandona el transporte
+  (devuelve la llave con `delivered=false`).
+- Corrida de 7 min en Webots: entregas contadas = cubos dentro del cuadro (contarlos en la captura final).
+- Alternativa con hardware (si se acepta comprar): un FC-51 en la pala, como en el documento v2.
+
+## 10. Polígono de la pista real para la cerca virtual
+
+Dónde: [src/mobile_base/config/track.yaml](../src/mobile_base/config/track.yaml).
+
+Criterios de aceptación:
+- Con la cámara cenital calibrada (tarea 5), detectar el borde interior de la cinta, pasarlo por la
+  homografía y guardar el polígono en metros. Medir también el cuadro y ajustar `zone_*`.
+- `test_track.py` sigue pasando con los puntos de inicio, espera y entrada medidos en la pista real.
+
+## 11. Pendientes menores encontrados al actualizar el documento técnico
+
+- La figura f13 (captura de Webots) todavía muestra las palas naranjas: recapturarla.
+- La cabecera de [RecolectorUCAB.proto](../src/multirobot_sim/protos/RecolectorUCAB.proto) aún menciona
+  SG90, FC-51 y TCS34725 como parte del diseño.
+- La cámara simulada sigue con el campo de visión de la OV5647 (tarea 7).
+
+## 12. Cubos capturados mirando al borde (decisión de reglas)
+
+Problema observado (Webots, corrida 10): Ferb capturó 7 cubos cerca del borde norte y los perdió todos.
+Al capturar mira hacia afuera; con cubo solo puede girar en arco (radio ~8 cm) y la cerca virtual frena
+el avance antes de completar el giro, así que abandona el cubo.
+
+Opciones (requieren saber qué dice el reglamento sobre pisar o cruzar la cinta):
+- Permitir que, con cubo, la pala y el frente pasen unos centímetros sobre la cinta mientras el
+  centro del robot siga dentro del polígono con margen (cerca virtual evaluada en el centro).
+- No intentar capturar cubos a menos de ~12 cm del borde (con la pose y el polígono): se pierden esos cubos.
+- Probar en el robot real si un giro en el sitio muy lento conserva el cubo en la U.
 
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
 
@@ -83,7 +139,11 @@ Criterios de aceptación:
 - Si se deja de publicar `cmd_vel`, los motores se detienen en menos de 300 ms.
 - Se mide que el voltaje medio en bornes del motor no supera 6 V con la batería cargada.
 
-## 7. Campo de visión de la cámara de Webots (IMX219 de 120°)
+## 7. Campo de visión de la cámara de Webots (IMX219 de 120°) — FOV aplicado, falta medir el montaje
+
+Estado: `fieldOfView` = 1,60 rad (pinhole, calculado con la lente de 1,79 mm y el área activa del
+IMX219) y `capture_cy` = 0,62 medido en Webots. Falta medir altura e inclinación reales y repetir la
+medición con `calibracion_pala.wbt`; la distorsión del gran angular real no se simula.
 
 Dónde: `Camera "camara"` en [src/multirobot_sim/protos/RecolectorUCAB.proto](../src/multirobot_sim/protos/RecolectorUCAB.proto).
 

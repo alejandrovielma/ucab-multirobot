@@ -5,7 +5,7 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams
-from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, now_sec, pose_from_msg, spin_node, twist
+from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import RobotPose, RobotState
 
 
@@ -15,7 +15,8 @@ class SafetyGateNode(Node):
         rate_hz = self.declare_parameter("rate_hz", 20.0).value
         self._cmd_timeout = self.declare_parameter("cmd_timeout", 0.5).value
         peer_topic = self.declare_parameter("peer_pose_topic", "/ferb/pose").value
-        self.gate = SafetyGate(SafetyParams(**declare_dataclass(self, SafetyParams)))
+        self._robot = self.declare_parameter("robot", self.get_namespace().strip("/")).value
+        self.gate = SafetyGate(SafetyParams(**declare_dataclass(self, SafetyParams)), track=declare_track(self))
 
         self._cmd = (0.0, 0.0, 0.0)
         self._cmd_time: float | None = None
@@ -24,6 +25,8 @@ class SafetyGateNode(Node):
         self._peer_pose = None
         self._heartbeat_time: float | None = None
         self._carrying = False
+        self._gate_closed = False
+        self._zone_occupant = ""
         self._last_reason = ""
 
         self.create_subscription(Twist, "cmd_vel_nav", self._on_cmd, 10)
@@ -50,9 +53,11 @@ class SafetyGateNode(Node):
 
     def _on_state(self, msg: RobotState):
         self._carrying = msg.carrying
+        self._gate_closed = msg.gate_closed
 
-    def _on_zone(self, _msg: String):
+    def _on_zone(self, msg: String):
         self._heartbeat_time = now_sec(self)
+        self._zone_occupant = msg.data
 
     def _tick(self):
         now = now_sec(self)
@@ -67,6 +72,8 @@ class SafetyGateNode(Node):
                 now=now,
                 heartbeat_age=heartbeat_age,
                 carrying=self._carrying,
+                gate_closed=self._gate_closed,
+                holds_zone=self._zone_occupant == self._robot,
             )
         )
         if reason != self._last_reason:

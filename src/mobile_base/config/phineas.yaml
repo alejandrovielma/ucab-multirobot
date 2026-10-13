@@ -12,13 +12,58 @@
     turn_speed: 1.2
     turn_min: 0.8
     turn_max: 2.0
+    turn_angle_min: 2.356  # 135 deg
+    turn_angle_max: 3.927  # 225 deg
     k_turn: 1.5
     approach_speed: 0.10
     approach_min_scale: 0.3
+    approach_align: 0.15
     lost_timeout: 1.0
-    capture_cy: 0.85
+    capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
     capture_time: 1.0
+    has_gate: false  # no servo on the real robots yet: true only with the scoop gate fitted (feat/scoop-gate)
+    gate_close_time: 0.4
+    gate_open_time: 0.4
+    scoop_lost_timeout: 1.0
+    carry_speed: 0.08
+    carry_min_speed: 0.05
+    carry_max_turn: 0.6
+    k_heading: 1.5
+    arrive_radius: 0.10
+    lead_in: 0.10
+    lead_in_width: 0.20
+    wait_x: -0.45  # waiting point while the other robot holds the lease
+    wait_y: 0.05
+    request_period: 1.0
+    enter_speed: 0.05
+    enter_lookahead: 0.10
+    reverse_speed: 0.04
+    drop_timeout: 6.0
+    track_horizon: 0.3  # body geofence (keep equal to safety_gate)
+    body_front: 0.095
+    body_rear: 0.095
+    body_half_width: 0.082
+    plan_replan_distance: 0.04  # carry planner (core/planner.py)
+    plan_replan_heading: 0.3
+    plan_max_expansions: 30000
+    plan_retry: 2.0
+    plan_give_up: 6.0
+    entry_heading_tolerance: 0.524  # 30 deg
+    gate_entry_x_tolerance: 0.02  # with the gate the entry is precise
+    gate_entry_y_band: 0.05
+    gate_entry_heading_tolerance: 0.175  # 10 deg
+    skip_time: 3.0
+    backoff_time: 3.0
+    open_probe_distance: 0.5
+    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Keep these equal in behavior and safety_gate.
+    zone_x: -0.13
+    zone_square_y: -0.284
+    zone_entry_y: 0.08
+    zone_drop_y: -0.065  # body front stops before the tape, cube 4.6 cm inside
+    zone_exit_y: 0.02
+    zone_corridor_half_width: 0.10
 
 /phineas/safety_gate:
   ros__parameters:
@@ -40,6 +85,22 @@
     escape_time: 1.5
     carry_min_forward: 0.05
     carry_max_turn: 0.6
+    carry_arc_away_bearing: 25.0
+    carry_arc_away_min_distance: 0.30
+    max_reverse: 0.05
+    track_horizon: 0.3
+    body_front: 0.095  # body without the scoop: the scoop may step on the tape, the body may not
+    body_rear: 0.095
+    body_half_width: 0.082
+    track_return_cone: 45.0
+    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Keep these equal in behavior and safety_gate.
+    zone_x: -0.13
+    zone_square_y: -0.284
+    zone_entry_y: 0.08
+    zone_drop_y: -0.065
+    zone_exit_y: 0.02
+    zone_corridor_half_width: 0.10
 
 /phineas/cube_detector:
   ros__parameters:
@@ -51,6 +112,11 @@
     aspect_max: 1.6
     min_solidity: 0.8
     open_kernel: 5
+    # Window between the scoop walls (calibracion_pala.wbt): cube in the U 0.60, at the mouth 0.04.
+    scoop_x_half: 0.2
+    scoop_y_min: 0.74
+    scoop_y_max: 0.84
+    scoop_min_fill: 0.30
     # OpenCV hue (0-179) ranges as [lo1, hi1, lo2, hi2, ...]; calibrate with the real cubes.
     hue_ranges:
       red: [0, 8, 169, 179]

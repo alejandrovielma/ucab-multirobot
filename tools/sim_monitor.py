@@ -6,8 +6,11 @@ Usage (after sourcing ROS 2 and the workspace):
 
 Writes one line every --period seconds (wall time) to stdout and <out>/monitor.log:
 sim time, per robot state, pose, commanded velocity, front line flag and the closest cube
-of its own colors (cx_norm, cy_norm), plus the distance between the robots. Optionally saves
-Phineas' camera frames as PNG every --frames-every seconds.
+of its own colors (cx_norm, cy_norm), cubes delivered, plus the distance between the robots and
+the holder of the delivery-square lease. Optionally saves
+the camera frames of --frames-robots (default phineas) as PNG every --frames-every seconds, and with
+--frames-on-delivery the frame of a robot right after each counted delivery (it has just reversed out
+of the square and faces it, so the frame shows where the cube was left).
 """
 
 import argparse
@@ -20,7 +23,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 
 from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
 
@@ -28,25 +31,45 @@ ROBOTS = {"phineas": {"red", "orange", "yellow"}, "ferb": {"green", "blue", "pur
 
 
 class SimMonitor(Node):
-    def __init__(self, out_dir: str, frames_every: float):
+    def __init__(self, out_dir: str, frames_every: float, frames_robots: list[str], on_delivery: bool = False):
         super().__init__("sim_monitor")
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
-        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None} for r in ROBOTS}
-        self.last_frame = 0.0
+        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0, "scoop": "", "gate": False} for r in ROBOTS}
+        self.last_frame = {robot: 0.0 for robot in frames_robots}
+        self.on_delivery = on_delivery
+        self.pending_delivery = {robot: 0 for robot in ROBOTS}
+        self.occupant = ""
         self.create_subscription(Clock, "/clock", self._on_clock, 10)
+        self.create_subscription(String, "/zone/occupant", self._on_occupant, 10)
         for robot in ROBOTS:
-            self.create_subscription(RobotState, f"/{robot}/state", self._setter(robot, "state", lambda m: m.state), 10)
+            self.create_subscription(RobotState, f"/{robot}/state", self._state_cb(robot), 10)
             self.create_subscription(RobotPose, f"/{robot}/pose", self._setter(robot, "pose", lambda m: (m.x, m.y, m.theta)), 10)
             self.create_subscription(Twist, f"/{robot}/cmd_vel", self._setter(robot, "cmd", lambda m: (m.linear.x, m.linear.y, m.angular.z)), 10)
             self.create_subscription(Bool, f"/{robot}/line_front", self._setter(robot, "line", lambda m: m.data), 10)
             self.create_subscription(CubeDetectionArray, f"/{robot}/cubes", self._cubes_cb(robot), 10)
-        if frames_every > 0:
-            self.create_subscription(Image, "/phineas/camera/image_raw", self._on_image, 1)
+        if on_delivery:
+            frames_robots = list(ROBOTS)
+            self.last_frame = {robot: 0.0 for robot in ROBOTS}
+        if frames_every > 0 or on_delivery:
+            for robot in frames_robots:
+                self.create_subscription(Image, f"/{robot}/camera/image_raw", self._image_cb(robot), 1)
 
     def _on_clock(self, msg: Clock):
         self.sim_time = msg.clock.sec + msg.clock.nanosec * 1e-9
+
+    def _on_occupant(self, msg: String):
+        self.occupant = msg.data
+
+    def _state_cb(self, robot):
+        def cb(msg: RobotState):
+            self.data[robot]["state"] = msg.state
+            self.data[robot]["gate"] = msg.gate_closed
+            if msg.delivered > self.data[robot]["delivered"]:
+                self.pending_delivery[robot] = msg.delivered
+            self.data[robot]["delivered"] = msg.delivered
+        return cb
 
     def _setter(self, robot, key, extract):
         def cb(msg):
@@ -58,19 +81,31 @@ class SimMonitor(Node):
             mine = [c for c in msg.cubes if c.color in ROBOTS[robot]]
             best = max(mine, key=lambda c: c.area_px, default=None)
             self.data[robot]["cube"] = None if best is None else (best.color, best.cx_norm, best.cy_norm)
+            self.data[robot]["scoop"] = msg.scoop_color
         return cb
 
-    def _on_image(self, msg: Image):
+    def _image_cb(self, robot):
+        def cb(msg: Image):
+            self._on_image(robot, msg)
+        return cb
+
+    def _on_image(self, robot: str, msg: Image):
         now = time.monotonic()
-        if now - self.last_frame < self.frames_every:
+        delivered = self.pending_delivery[robot]
+        if delivered:
+            self.pending_delivery[robot] = 0
+            name = f"{robot}_delivery_{delivered}_t{self.sim_time:06.1f}.png"
+        elif self.frames_every > 0 and now - self.last_frame[robot] >= self.frames_every:
+            self.last_frame[robot] = now
+            name = f"{robot}_cam_{self.sim_time:07.1f}.png"
+        else:
             return
-        self.last_frame = now
         import cv2
         import numpy as np
 
         channels = 4 if msg.encoding == "bgra8" else 3
         img = np.frombuffer(bytes(msg.data), dtype=np.uint8).reshape(msg.height, msg.width, channels)
-        cv2.imwrite(os.path.join(self.out_dir, f"phineas_cam_{self.sim_time:07.1f}.png"), img[:, :, :3])
+        cv2.imwrite(os.path.join(self.out_dir, name), img[:, :, :3])
 
     def line(self) -> str:
         parts = [f"t={self.sim_time:6.1f}"]
@@ -78,10 +113,11 @@ class SimMonitor(Node):
             pose = "pose=----" if d["pose"] is None else f"pose=({d['pose'][0]:+.2f},{d['pose'][1]:+.2f},{math.degrees(d['pose'][2]):+4.0f})"
             cmd = "cmd=----" if d["cmd"] is None else f"cmd=({d['cmd'][0]:+.2f},{d['cmd'][1]:+.2f},{d['cmd'][2]:+.2f})"
             cube = "cube=-" if d["cube"] is None else f"cube={d['cube'][0]}@({d['cube'][1]:+.2f},{d['cube'][2]:.2f})"
-            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube}")
+            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} scoop={d['scoop'] or '-'} gate={'C' if d['gate'] else 'o'} n={d['delivered']}")
         p, f = self.data["phineas"]["pose"], self.data["ferb"]["pose"]
         if p and f:
             parts.append(f"| dist={math.hypot(p[0] - f[0], p[1] - f[1]):.2f}")
+        parts.append(f"| zone={self.occupant or '-'}")
         return " ".join(parts)
 
 
@@ -91,11 +127,13 @@ def main():
     parser.add_argument("--period", type=float, default=0.5)
     parser.add_argument("--out", default="/tmp/monitor")
     parser.add_argument("--frames-every", type=float, default=0.0)
+    parser.add_argument("--frames-robots", default="phineas", help="comma separated, e.g. phineas,ferb")
+    parser.add_argument("--frames-on-delivery", action="store_true")
     args = parser.parse_args()
     os.makedirs(args.out, exist_ok=True)
 
     rclpy.init()
-    node = SimMonitor(args.out, args.frames_every)
+    node = SimMonitor(args.out, args.frames_every, args.frames_robots.split(","), args.frames_on_delivery)
     end = time.monotonic() + args.duration
     next_line = time.monotonic()
     with open(os.path.join(args.out, "monitor.log"), "w") as log:

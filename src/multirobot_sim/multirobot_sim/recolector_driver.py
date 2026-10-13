@@ -6,7 +6,8 @@ and exposes exactly the same topics as the real robot nodes (namespace /<robot>)
   pub  line_front         <- DistanceSensor "linea_frente" below line_threshold
   pub  camera/image_raw   <- Camera "camara" (bgra8)
   pub  pose               <- GPS "gps" + InertialUnit "imu_sim" (emulates the overhead camera)
-The scoop servo is held at 0 (the real scoop is fixed).
+The scoop servo is held at 0 (the real scoop is fixed). The gate servo at the mouth of the U follows
+<ns>/gate_cmd (std_msgs/Bool, true = closed); it starts open.
 
 Properties (child tags of <plugin> in the URDF): robot, line_threshold, pose_noise_xy,
 pose_noise_theta, wheel_signs. TODO(team): validate wheel_signs with the strafe test
@@ -29,6 +30,8 @@ from multirobot_interfaces.msg import RobotPose
 from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs, read_camera_image
 
 MOTORS = ("motor_fl", "motor_fr", "motor_rl", "motor_rr")
+GATE_CLOSED = 0.0  # rad, side door across the mouth of the U
+GATE_OPEN = 2.34  # rad, door folded against the left funnel wall (out of the camera's view of the cube)
 MAX_MOTOR_SPEED = 10.5  # rad/s, velMaxMotor of RecolectorUCAB.proto
 CAMERA_PERIOD_MS = 64
 CAMERA_MISSING_WARN_S = 5.0  # warn if the camera still has no frame after this sim time
@@ -58,6 +61,9 @@ class RecolectorDriver:
             motor.setPosition(math.inf)
             motor.setVelocity(0.0)
         self._robot.getDevice("servo_pala").setPosition(0.0)
+        self._gate = self._robot.getDevice("servo_compuerta")  # None when the PROTO has compuerta FALSE
+        if self._gate is not None:
+            self._gate.setPosition(GATE_OPEN)
 
         self._line = self._robot.getDevice("linea_frente")
         self._line.enable(timestep)
@@ -73,6 +79,7 @@ class RecolectorDriver:
         self._node = rclpy.create_node(f"{self._name}_webots_driver")
         ns = f"/{self._name}"
         self._node.create_subscription(Twist, f"{ns}/cmd_vel", self._on_cmd_vel, 1)
+        self._node.create_subscription(Bool, f"{ns}/gate_cmd", self._on_gate, 1)
         self._line_pub = self._node.create_publisher(Bool, f"{ns}/line_front", 10)
         self._image_pub = self._node.create_publisher(Image, f"{ns}/camera/image_raw", 1)
         self._pose_pub = self._node.create_publisher(RobotPose, f"{ns}/pose", 10)
@@ -81,6 +88,10 @@ class RecolectorDriver:
         self._cmd_time = -math.inf
         self._last_image = -math.inf
         self._last_pose = -math.inf
+
+    def _on_gate(self, msg: Bool):
+        if self._gate is not None:
+            self._gate.setPosition(GATE_CLOSED if msg.data else GATE_OPEN)
 
     def _on_cmd_vel(self, msg: Twist):
         self._cmd = (msg.linear.x, msg.linear.y, msg.angular.z)

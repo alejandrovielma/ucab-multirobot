@@ -24,6 +24,13 @@ class VisionParams:
     min_solidity: float = 0.8
     open_kernel: int = 5  # px, morphological opening kernel size
     hue_ranges: HueRanges = field(default_factory=lambda: DEFAULT_HUE_RANGES)
+    # Window between the scoop walls where a cube INSIDE the U appears (normalized like Detection).
+    # Measured in Webots with calibracion_pala.wbt and the IMX219-120 camera: cube in the U -> 0.60
+    # of the window, cube at the mouth -> 0.04. Re-measure on the real robot.
+    scoop_x_half: float = 0.2
+    scoop_y_min: float = 0.74
+    scoop_y_max: float = 0.84
+    scoop_min_fill: float = 0.30
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,33 @@ def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list
             Detection(color, (cx / width) * 2.0 - 1.0, cy / height, float(area))
         )
     return detections
+
+
+def scoop_content(bgr: np.ndarray, params: VisionParams = VisionParams()) -> tuple[str, float]:
+    """Color that fills the scoop window, and its fill fraction ("" when below scoop_min_fill).
+
+    A cube inside the U is seen from above as a wide, flat band cut by the scoop walls, so the
+    blob shape filters of detect_cubes reject it; a fixed window does not depend on its shape and
+    no cube farther away can appear there.
+    """
+    height, width = bgr.shape[:2]
+    x0 = int((1.0 - params.scoop_x_half) / 2.0 * width)
+    x1 = int((1.0 + params.scoop_x_half) / 2.0 * width)
+    y0, y1 = int(params.scoop_y_min * height), int(params.scoop_y_max * height)
+    hsv = cv2.cvtColor(bgr[y0:y1, x0:x1], cv2.COLOR_BGR2HSV)
+    if hsv.size == 0:
+        return "", 0.0
+    hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    painted = (sat > params.s_min) & (val > params.v_min)
+    best, best_fill = "", 0.0
+    for name, spans in params.hue_ranges.items():
+        in_range = np.zeros(hue.shape, bool)
+        for low, high in spans:
+            in_range |= (hue >= low) & (hue <= high)
+        fill = float((in_range & painted).mean())
+        if fill > best_fill:
+            best, best_fill = name, fill
+    return (best if best_fill >= params.scoop_min_fill else ""), best_fill
 
 
 _CHANNELS = {"bgr8": 3, "rgb8": 3, "bgra8": 4, "rgba8": 4}

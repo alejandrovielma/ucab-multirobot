@@ -15,6 +15,8 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     robot = LaunchConfiguration("robot")
     config = PathJoinSubstitution([FindPackageShare("mobile_base"), "config", [robot, ".yaml"]])
+    # Track polygon for the pose geofence, shared by both robots.
+    track = PathJoinSubstitution([FindPackageShare("mobile_base"), "config", "track.yaml"])
     sim_time = {"use_sim_time": ParameterValue(LaunchConfiguration("use_sim_time"), value_type=bool)}
     gate_overrides = {
         "require_pose": ParameterValue(LaunchConfiguration("require_pose"), value_type=bool),
@@ -27,7 +29,7 @@ def generate_launch_description():
             executable=executable,
             name=executable,
             namespace=robot,
-            parameters=[config, sim_time, *(extra or [])],
+            parameters=[config, track, sim_time, *(extra or [])],
             output="screen",
         )
 

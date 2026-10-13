@@ -1,3 +1,4 @@
+import math
 import random
 
 import pytest
@@ -12,8 +13,8 @@ def make_fsm(**overrides):
     return BehaviorFSM(params, rng=random.Random(42))
 
 
-def tick(fsm, now, cubes=(), line_front=False):
-    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=line_front))
+def tick(fsm, now, cubes=(), line_front=False, scoop=""):
+    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=line_front, scoop_color=scoop))
 
 
 def test_starts_exploring_forward():
@@ -96,7 +97,7 @@ def test_close_cube_triggers_capture_then_carry():
     assert cmd[0] == pytest.approx(fsm.params.capture_speed)
     tick(fsm, 0.6)
     assert fsm.state is State.CAPTURE
-    tick(fsm, 1.2)
+    tick(fsm, 1.2, scoop="red")
     assert fsm.state is State.CARRY
     assert fsm.carrying
 
@@ -105,10 +106,10 @@ def test_carry_never_reverses():
     fsm = make_fsm(capture_time=0.1)
     tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
-    tick(fsm, 0.5)
+    tick(fsm, 0.5, scoop="red")
     assert fsm.state is State.CARRY
     for i in range(50):
-        cmd = tick(fsm, 1.0 + i * 0.1, cubes=[Cube("blue", 0.0, 0.9, 900.0)], line_front=i % 2 == 0)
+        cmd = tick(fsm, 1.0 + i * 0.1, cubes=[Cube("blue", 0.0, 0.9, 900.0)], scoop="red")
         assert cmd[0] >= 0.0
         assert fsm.state is State.CARRY
 
@@ -118,3 +119,26 @@ def test_stop_outputs_zero():
     fsm.stop()
     assert tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)]) == (0.0, 0.0, 0.0)
     assert fsm.state is State.STOP
+
+
+def turn_until_straight(fsm, pose_at, start=0.2, dt=0.05, limit=10.0):
+    """Feed poses that integrate the commanded rotation; return the total turned angle."""
+    t, theta, turned = start, 0.0, 0.0
+    while t < limit:
+        vx, _, wz = fsm.step(BehaviorInput(now=t, cubes=[], line_front=False, pose=pose_at(theta)))
+        if wz == 0.0:
+            return turned
+        theta += wz * dt
+        turned += abs(wz * dt)
+        t += dt
+    raise AssertionError("never stopped turning")
+
+
+def test_border_turn_with_pose_turns_far_enough_to_face_inward():
+    # Webots run 4: a timed 55 deg turn left the front sensor beyond the tape and the robot drove off.
+    for seed in range(20):
+        fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS), rng=random.Random(seed))
+        fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False, pose=(0.0, 0.0, 0.0)))
+        fsm.step(BehaviorInput(now=0.1, cubes=[], line_front=True, pose=(0.0, 0.0, 0.0)))
+        turned = turn_until_straight(fsm, lambda th: (0.0, 0.0, th))
+        assert math.radians(135) - 0.1 <= turned <= math.radians(225) + 0.1
