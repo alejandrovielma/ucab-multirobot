@@ -30,8 +30,8 @@ from multirobot_interfaces.msg import RobotPose
 from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs, read_camera_image
 
 MOTORS = ("motor_fl", "motor_fr", "motor_rl", "motor_rr")
-GATE_CLOSED = 0.0  # rad, flap hanging in front of the cube
-GATE_OPEN = -1.5708  # rad, flap horizontal, forward
+GATE_CLOSED = 0.0  # rad, side door across the mouth of the U
+GATE_OPEN = 2.34  # rad, door folded against the left funnel wall (out of the camera's view of the cube)
 MAX_MOTOR_SPEED = 10.5  # rad/s, velMaxMotor of RecolectorUCAB.proto
 CAMERA_PERIOD_MS = 64
 CAMERA_MISSING_WARN_S = 5.0  # warn if the camera still has no frame after this sim time

@@ -215,35 +215,36 @@ PROTO RecolectorUCAB [
               ]
             }
             # Compuerta con servo (SG90) en la boca de la U: retiene el cubo para girar en el sitio y
-            # retroceder con el. Aleta con bisagra arriba (eje y, en lo alto de las paredes de la U):
-            # 0 = cerrada (cuelga delante del cubo, 7.5 mm sobre el piso); -pi/2 = abierta (horizontal
-            # hacia adelante a 3.75 cm del piso, por encima de un cubo de 3 cm que entra).
+            # retroceder con el. Puerta lateral con bisagra vertical en el extremo de la pared izquierda
+            # de la U: 0 = cerrada (cruza la boca delante del cubo); 2.34 rad = abierta (pegada a la pared
+            # izquierda del embudo). Una aleta con bisagra arriba se probo antes: abierta quedaba entre la
+            # camara y el cubo de la boca y lo partia en dos (sin deteccion, sin captura).
             HingeJoint {
               jointParameters HingeJointParameters {
-                axis 0 1 0
-                anchor 0.082 0 -0.0175
-                minStop -1.62
-                maxStop 0.02
+                axis 0 0 1
+                anchor 0.0875 0.0215 -0.0325
+                minStop -0.02
+                maxStop 2.40
               }
               device [
                 RotationalMotor {
                   name "servo_compuerta"
                   maxVelocity 10.5
                   maxTorque 0.18
-                  minPosition -1.5708
-                  maxPosition 0.0
+                  minPosition 0.0
+                  maxPosition 2.34
                 }
               ]
               endPoint Solid {
-                translation 0.082 0 -0.0175
+                translation 0.0875 0.0215 -0.0325
                 name "compuerta"
                 children [
                   Pose {
-                    translation 0 0 -0.015
-                    children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.038 0.030 } } ]
+                    translation 0.0015 -0.019 0
+                    children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.036 0.030 } } ]
                   }
                 ]
-                boundingObject Pose { translation 0 0 -0.015 children [ Box { size 0.003 0.038 0.030 } ] }
+                boundingObject Pose { translation 0.0015 -0.019 0 children [ Box { size 0.003 0.036 0.030 } ] }
                 physics Physics { density -1 mass 0.002 }
               }
             }
