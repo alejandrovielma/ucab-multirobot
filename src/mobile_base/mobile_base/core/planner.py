@@ -64,11 +64,14 @@ def plan_arcs(
     cell: float = 0.02,
     heading_bins: int = 24,
     max_expansions: int = 30000,
+    spin_speed: float | None = None,
+    reverse_speed: float | None = None,
 ) -> Plan | None:
     """Shortest primitive sequence from start to a pose where goal(pose) holds, or None.
 
     target is only used by the heuristic (straight-line distance). Each primitive covers `step`
-    meters; arcs use the tightest radius allowed with a cube (arc_speed / turn).
+    meters; arcs use the tightest radius allowed with a cube (arc_speed / turn). With the scoop gate
+    closed the cube is retained, so in-place spins (one heading bin each) and reverse are offered too.
     """
     if not all(track.contains(cx, cy) for cx, cy in footprint.corners(*start)):
         return None
@@ -77,6 +80,11 @@ def plan_arcs(
         (arc_speed, turn, step / arc_speed),
         (arc_speed, -turn, step / arc_speed),
     ]
+    if spin_speed:
+        bin_angle = 2.0 * math.pi / heading_bins
+        primitives += [(0.0, spin_speed, bin_angle / spin_speed), (0.0, -spin_speed, bin_angle / spin_speed)]
+    if reverse_speed:
+        primitives.append((-reverse_speed, 0.0, step / reverse_speed))
     tie = 0
     queue = [(0.0, 0.0, tie, start, ())]
     seen = set()
@@ -94,7 +102,8 @@ def plan_arcs(
             nxt = predict(pose, vx, wz, duration)
             if _key(nxt, cell, heading_bins) in seen:
                 continue
-            new_cost = cost + 1.0 + (0.2 if wz else 0.0)  # mild preference for straight segments
+            # Mild preference for straight segments; spins are cheap, reversing is discouraged.
+            new_cost = cost + (0.5 if vx == 0.0 else 1.5 if vx < 0.0 else 1.0 + (0.2 if wz else 0.0))
             h = math.hypot(nxt[0] - target[0], nxt[1] - target[1]) / step
             tie += 1
             heapq.heappush(queue, (new_cost + h, new_cost, tie, nxt, path + ((vx, wz, duration),)))

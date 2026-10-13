@@ -31,6 +31,9 @@ stay inside the polygon:
 With the robot center already outside, forward motion is allowed only toward the track centroid,
 even over "black" (off the board the floor reads as tape).
 
+Scoop gate: when the robot reports gate_closed the cube is retained by the servo door, so the
+carry restrictions (arcs only, no reverse, hold still in a deadlock) do not apply.
+
 Delivery exception (rules 3 and 4): while this robot holds the zone lease (/zone/occupant) and its
 own overhead pose is inside the delivery corridor facing the square, it may cross the square's
 tape and, once it no longer carries the cube, reverse at most max_reverse. Both conditions come
@@ -103,6 +106,7 @@ class SafetyInput:
     heartbeat_age: float | None  # None = never received
     carrying: bool = False
     holds_zone: bool = False  # /zone/occupant == this robot
+    gate_closed: bool = False  # scoop gate closed: the cube is retained
 
 
 class SafetyGate:
@@ -132,9 +136,11 @@ class SafetyGate:
 
         vx, vy, wz = inp.cmd
         reasons = []
+        # Only a cube in the OPEN fixed scoop restricts the motion; a closed gate retains it.
+        loose_cube = inp.carrying and not inp.gate_closed
         delivering = own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose)
         on_track = own_fresh and self._track.enabled and self._track.contains(inp.own_pose.x, inp.own_pose.y)
-        if (delivering or on_track) and not inp.carrying and vx < 0.0 and vy == 0.0:
+        if (delivering or on_track) and not loose_cube and vx < 0.0 and vy == 0.0:
             vx = max(vx, -p.max_reverse)
             reasons.append("delivery: reverse out" if delivering else "reverse (pose geofence)")
         elif vy != 0.0 or vx < 0.0:
@@ -163,10 +169,10 @@ class SafetyGate:
         escape = self._update_deadlock(blocked, inp, peer)
         if escape is not None:
             return escape
-        if inp.carrying:
+        if loose_cube:
             vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, peer_distance, line_blocks, reasons)
         if on_track:
-            vx, wz = self._body_geofence(inp.own_pose, vx, wz, inp.carrying, reasons)
+            vx, wz = self._body_geofence(inp.own_pose, vx, wz, loose_cube, reasons)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
     def _outside_track(self, inp: SafetyInput, own_fresh: bool, reasons: list[str]) -> tuple[bool, bool]:
@@ -289,7 +295,7 @@ class SafetyGate:
             return None
         if p.has_priority or inp.now - self._blocked_since < p.deadlock_time:
             return None
-        if inp.carrying:
+        if inp.carrying and not inp.gate_closed:
             # Any escape maneuver would drop the cube: hold still and let the priority robot go around.
             self._escape_cmd = STOP
             self._escape_reason = "deadlock: hold still (carrying)"

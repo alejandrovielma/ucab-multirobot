@@ -25,6 +25,7 @@ class SafetyGateNode(Node):
         self._peer_pose = None
         self._heartbeat_time: float | None = None
         self._carrying = False
+        self._gate_closed = False
         self._zone_occupant = ""
         self._last_reason = ""
 
@@ -52,6 +53,7 @@ class SafetyGateNode(Node):
 
     def _on_state(self, msg: RobotState):
         self._carrying = msg.carrying
+        self._gate_closed = msg.gate_closed
 
     def _on_zone(self, msg: String):
         self._heartbeat_time = now_sec(self)
@@ -70,6 +72,7 @@ class SafetyGateNode(Node):
                 now=now,
                 heartbeat_age=heartbeat_age,
                 carrying=self._carrying,
+                gate_closed=self._gate_closed,
                 holds_zone=self._zone_occupant == self._robot,
             )
         )

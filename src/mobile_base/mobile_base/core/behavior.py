@@ -13,6 +13,11 @@ DELIVER  -> with the lease: drive south across the square's tape until the cube 
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
 
+Scoop gate (has_gate): a servo door at the mouth of the U. Open while exploring and capturing; it
+closes once the camera confirms the capture (the robot waits gate_close_time), and with it closed the
+cube is retained, so the carry plan may spin in place and reverse and the border line no longer
+drops the cube. At the drop point it opens (waits gate_open_time) and the robot reverses out.
+
 While carrying, a cube not seen in the scoop for scoop_lost_timeout ends the transport (lease
 released with delivered=false), and a delivery counts only if the cube left the scoop after reversing.
 
@@ -87,6 +92,9 @@ class BehaviorParams:
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
     capture_time: float = 1.0  # s
+    has_gate: bool = False  # servo gate at the mouth of the U (see the module docstring)
+    gate_close_time: float = 0.4  # s, SG90 needs ~0.25 s for 134 deg at 4.8 V
+    gate_open_time: float = 0.4  # s
     scoop_lost_timeout: float = 1.0  # s without seeing the cube in the scoop while carrying
     # Transport: arcs only (the gate enforces the same limits).
     carry_speed: float = 0.08  # m/s
@@ -168,6 +176,8 @@ class BehaviorFSM:
         self._drop_until = 0.0
         self._last_request: float | None = None
         self._scoop_seen = 0.0
+        self.gate_closed = False
+        self._gate_ready_at = 0.0
         self._actions: list[ZoneAction] = []
 
     @property
@@ -231,6 +241,9 @@ class BehaviorFSM:
             self._track, self._body, pose, goal, target,
             straight_speed=p.carry_speed, arc_speed=p.carry_min_speed, turn=p.carry_max_turn,
             max_expansions=p.plan_max_expansions,
+            # With the gate the cube is retained: spins and reverse are allowed too.
+            spin_speed=p.turn_speed if p.has_gate else None,
+            reverse_speed=p.reverse_speed if p.has_gate else None,
         )
 
     def _deliverable_from(self, pose) -> bool:
@@ -291,6 +304,7 @@ class BehaviorFSM:
         return self._explore(inp)
 
     def _give_up_cube(self, inp: BehaviorInput) -> None:
+        self.gate_closed = False  # backing off must leave the cube behind
         if inp.holds_zone:
             self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
         self._carried_color = ""
@@ -453,6 +467,9 @@ class BehaviorFSM:
             self._carried_color = inp.scoop_color
             self._scoop_seen = inp.now
             self._last_request = None
+            if self.params.has_gate:
+                self.gate_closed = True
+                self._gate_ready_at = inp.now + self.params.gate_close_time
             return self._carry(inp)
         return (self.params.capture_speed, 0.0, 0.0)
 
@@ -477,11 +494,13 @@ class BehaviorFSM:
             return ZERO  # without the overhead pose the robot cannot find the square
         p = self.params
         z = self._zone
-        if inp.line_front:
+        if inp.line_front and not self.gate_closed:
             # The gate turns in place at the line and the turn drops the cube: stop carrying.
             return self._abandon_transport(inp, "line while carrying")
         if not self._still_holding(inp):
             return self._abandon_transport(inp, "cube lost from the scoop")
+        if inp.now < self._gate_ready_at:
+            return ZERO  # the gate is still closing
         x, y, theta = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
@@ -535,6 +554,12 @@ class BehaviorFSM:
                 return (p.enter_speed, 0.0, wz)
             self._dropping = True
             self._drop_until = inp.now + p.drop_timeout
+            if self.gate_closed:
+                self.gate_closed = False  # open the door, then reverse out leaving the cube
+                self._gate_ready_at = inp.now + p.gate_open_time
+                self._drop_until += p.gate_open_time
+        if inp.now < self._gate_ready_at:
+            return ZERO  # the gate is still opening
         if y < z.exit_y and inp.now < self._drop_until:
             return (-p.reverse_speed, 0.0, 0.0)
         # Counted only if the cube stayed in the square: it must have left the scoop.

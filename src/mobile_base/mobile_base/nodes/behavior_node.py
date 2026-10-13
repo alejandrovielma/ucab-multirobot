@@ -42,6 +42,7 @@ class BehaviorNode(Node):
         self.create_subscription(String, "/zone/occupant", self._on_zone, ZONE_OCCUPANT_QOS)
         self._cmd_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
         self._state_pub = self.create_publisher(RobotState, "state", 10)
+        self._gate_pub = self.create_publisher(Bool, "gate_cmd", 10)  # true = closed (scoop gate servo)
         self._request_client = self.create_client(RequestZone, "/zone/request")
         self._release_client = self.create_client(ReleaseZone, "/zone/release")
         self.create_timer(1.0 / rate_hz, self._tick)
@@ -93,6 +94,8 @@ class BehaviorNode(Node):
         state.state = self.fsm.state.value
         state.carrying = self.fsm.carrying
         state.delivered = self._delivered
+        state.gate_closed = self.fsm.gate_closed
+        self._gate_pub.publish(Bool(data=self.fsm.gate_closed))
         self._state_pub.publish(state)
 
     def _perform(self, action: ZoneAction):

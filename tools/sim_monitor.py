@@ -36,7 +36,7 @@ class SimMonitor(Node):
         self.out_dir = out_dir
         self.frames_every = frames_every
         self.sim_time = 0.0
-        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0, "scoop": ""} for r in ROBOTS}
+        self.data = {r: {"state": "-", "pose": None, "cmd": None, "line": False, "cube": None, "delivered": 0, "scoop": "", "gate": False} for r in ROBOTS}
         self.last_frame = {robot: 0.0 for robot in frames_robots}
         self.on_delivery = on_delivery
         self.pending_delivery = {robot: 0 for robot in ROBOTS}
@@ -65,6 +65,7 @@ class SimMonitor(Node):
     def _state_cb(self, robot):
         def cb(msg: RobotState):
             self.data[robot]["state"] = msg.state
+            self.data[robot]["gate"] = msg.gate_closed
             if msg.delivered > self.data[robot]["delivered"]:
                 self.pending_delivery[robot] = msg.delivered
             self.data[robot]["delivered"] = msg.delivered
@@ -112,7 +113,7 @@ class SimMonitor(Node):
             pose = "pose=----" if d["pose"] is None else f"pose=({d['pose'][0]:+.2f},{d['pose'][1]:+.2f},{math.degrees(d['pose'][2]):+4.0f})"
             cmd = "cmd=----" if d["cmd"] is None else f"cmd=({d['cmd'][0]:+.2f},{d['cmd'][1]:+.2f},{d['cmd'][2]:+.2f})"
             cube = "cube=-" if d["cube"] is None else f"cube={d['cube'][0]}@({d['cube'][1]:+.2f},{d['cube'][2]:.2f})"
-            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} scoop={d['scoop'] or '-'} n={d['delivered']}")
+            parts.append(f"| {robot[0].upper()} {d['state']:<8} {pose} {cmd} line={int(d['line'])} {cube} scoop={d['scoop'] or '-'} gate={'C' if d['gate'] else 'o'} n={d['delivered']}")
         p, f = self.data["phineas"]["pose"], self.data["ferb"]["pose"]
         if p and f:
             parts.append(f"| dist={math.hypot(p[0] - f[0], p[1] - f[1]):.2f}")
