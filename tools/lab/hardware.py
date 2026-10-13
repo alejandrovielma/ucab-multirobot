@@ -1,0 +1,218 @@
+"""Hardware access for the lab tool (no ROS): HAT motors, line sensor and camera.
+
+Reuses the repository's pure logic (mecanum kinematics, duty cap, H-bridge mapping, cube detection)
+so what is tested here is what the ROS nodes run. Every class has a dry-run mode so the tool can be
+checked on a laptop before touching the robot.
+"""
+
+import pathlib
+import sys
+import time
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO / "src" / "mobile_base"))
+
+import yaml  # noqa: E402
+
+from mobile_base.core.kinematics import MecanumGeometry, duty_cap, hbridge_pwm, normalize, to_duty, wheel_speeds  # noqa: E402
+
+WHEELS = ("fl", "fr", "rl", "rr")
+
+
+class Log:
+    """Stand-in for a ROS logger (the shared Gpio wrapper calls warn/error/info)."""
+
+    def info(self, msg):
+        print(f"[info] {msg}", flush=True)
+
+    def warn(self, msg):
+        print(f"[warn] {msg}", flush=True)
+
+    def error(self, msg):
+        print(f"[ERROR] {msg}", flush=True)
+
+
+LOG = Log()
+
+
+def load_config(robot: str) -> dict:
+    """Parameters of every node of one robot, from src/mobile_base/config/<robot>.yaml."""
+    data = yaml.safe_load((REPO / "src" / "mobile_base" / "config" / f"{robot}.yaml").read_text())
+    return {key.split("/")[-1]: value["ros__parameters"] for key, value in data.items()}
+
+
+def open_gpio(chip: int | None, dry_run: bool):
+    """lgpio handle wrapper. chip=None tries the Pi 5 header chip numbers (see detect_chip)."""
+    from mobile_base.gpio import Gpio
+
+    if dry_run:
+        return Gpio(0, LOG, dry_run=True)
+    if chip is None:
+        chip = detect_chip()
+    LOG.info(f"gpiochip {chip}")
+    return Gpio(chip, LOG)
+
+
+def detect_chip() -> int:
+    """The 40-pin header chip on a Pi 5 is the one labelled pinctrl-rp1 (its number changed between
+    kernels: 4 on early Pi 5 images, 0 on newer ones)."""
+    import lgpio
+
+    for chip in (0, 4, 1, 2, 3):
+        try:
+            handle = lgpio.gpiochip_open(chip)
+        except lgpio.error:
+            continue
+        try:
+            _lines, _name, label = lgpio.gpio_get_chip_info(handle)
+        finally:
+            lgpio.gpiochip_close(handle)
+        if "rp1" in label:
+            return chip
+    raise RuntimeError("no pinctrl-rp1 gpiochip found: is this a Raspberry Pi 5? try --chip N")
+
+
+class Motors:
+    """Cokoino HAT (2 x DRV8833): same mapping as nodes/hat_motor_driver_node.py."""
+
+    def __init__(self, cfg: dict, gpio, max_speed: float):
+        hat = cfg["hat_motor_driver"]
+        self.gpio = gpio
+        self.geom = MecanumGeometry(hat["wheel_radius"], hat["lx"], hat["ly"])
+        self.max_wheel_speed = hat["max_wheel_speed"]
+        self.cap = duty_cap(hat["battery_voltage"], hat["motor_max_voltage"])
+        self.frequency = hat["pwm_frequency"]
+        self.signs = hat["wheel_signs"]
+        self.pins = {w: hat[f"pins_{w}"] for w in WHEELS}
+        self.max_speed = max_speed  # m/s, lab safety cap on top of the duty cap
+        for in1, in2 in self.pins.values():
+            gpio.claim_output(in1, 0)
+            gpio.claim_output(in2, 0)
+        for pin in hat["nsleep_pins"]:
+            gpio.claim_output(pin, 1)
+        LOG.info(f"duty cap {self.cap:.2f} (battery {hat['battery_voltage']} V), speed cap {max_speed} m/s, "
+                 f"dry run {gpio.dry_run}")
+
+    def drive(self, vx: float, vy: float, wz: float) -> tuple[float, ...]:
+        scale = max(abs(vx), abs(vy)) / self.max_speed if self.max_speed > 0 else 0.0
+        if scale > 1.0:
+            vx, vy = vx / scale, vy / scale
+        speeds = normalize(wheel_speeds(vx, vy, wz, self.geom), self.max_wheel_speed)
+        duties = to_duty(tuple(s * k for s, k in zip(speeds, self.signs)), self.max_wheel_speed, self.cap)
+        self.set_duties(duties)
+        return duties
+
+    def set_duties(self, duties) -> None:
+        for wheel, duty in zip(WHEELS, duties):
+            in1, in2 = self.pins[wheel]
+            pwm1, pwm2 = hbridge_pwm(duty)
+            self.gpio.pwm(in1, self.frequency, pwm1)
+            self.gpio.pwm(in2, self.frequency, pwm2)
+
+    def wheel(self, wheel: str, duty: float) -> None:
+        """One wheel alone, duty in [-1, 1] before the cap (for wiring checks)."""
+        duty = max(-1.0, min(1.0, duty)) * self.cap
+        self.set_duties(tuple(duty if w == wheel else 0.0 for w in WHEELS))
+
+    def stop(self) -> None:
+        self.set_duties((0.0, 0.0, 0.0, 0.0))
+
+
+class LineSensor:
+    def __init__(self, cfg: dict, gpio):
+        line = cfg["line_sensor"]
+        self.gpio = gpio
+        self.pin = line["pin"]
+        self.active_level = line["active_level"]
+        gpio.claim_input(self.pin)
+
+    def raw(self) -> int:
+        return self.gpio.read(self.pin)
+
+    def black(self) -> bool:
+        return self.raw() == self.active_level
+
+
+class Camera:
+    """640x480 BGR frames from the first backend that works: picamera2 (Raspberry Pi OS), a
+    GStreamer libcamerasrc pipeline, or a V4L2 index. 'file:<path>' replays an image (laptop tests)."""
+
+    def __init__(self, source: str = "auto", width: int = 640, height: int = 480):
+        self.width, self.height = width, height
+        self.backend = None
+        self._read = None
+        attempts = {
+            "picamera2": self._open_picamera2,
+            "gstreamer": self._open_gstreamer,
+            "v4l2": self._open_v4l2,
+        }
+        if source.startswith("file:"):
+            self._open_file(source[5:])
+            return
+        names = list(attempts) if source == "auto" else [source]
+        errors = []
+        for name in names:
+            try:
+                attempts[name]()
+                self.backend = name
+                LOG.info(f"camera backend: {name}")
+                return
+            except Exception as exc:  # each backend fails in its own way; report all of them
+                errors.append(f"{name}: {exc}")
+        raise RuntimeError("no camera backend worked:\n  " + "\n  ".join(errors))
+
+    def _open_file(self, path: str) -> None:
+        import cv2
+
+        frame = cv2.imread(path)
+        if frame is None:
+            raise RuntimeError(f"cannot read {path}")
+        self.backend = "file"
+        self._read = lambda: frame.copy()
+
+    def _open_picamera2(self) -> None:
+        from picamera2 import Picamera2
+
+        cam = Picamera2()
+        # libcamera "RGB888" is stored B, G, R in memory: what OpenCV calls BGR.
+        cam.configure(cam.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"}))
+        cam.start()
+        time.sleep(0.5)
+        self._read = cam.capture_array
+
+    def _open_gstreamer(self) -> None:
+        import cv2
+
+        pipeline = (
+            f"libcamerasrc ! video/x-raw,width={self.width},height={self.height},format=BGRx ! "
+            "videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1"
+        )
+        self._from_capture(cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER))
+
+    def _open_v4l2(self) -> None:
+        import cv2
+
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self._from_capture(cap)
+
+    def _from_capture(self, cap) -> None:
+        if not cap.isOpened():
+            raise RuntimeError("VideoCapture did not open")
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            cap.release()
+            raise RuntimeError("opened but returned no frame")
+
+        def read():
+            ok, img = cap.read()
+            return img if ok else None
+
+        self._read = read
+
+    def read(self):
+        frame = self._read()
+        if frame is not None and frame.ndim == 3 and frame.shape[2] == 4:
+            frame = frame[:, :, :3]
+        return frame
