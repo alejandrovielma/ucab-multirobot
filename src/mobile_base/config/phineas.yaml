@@ -22,7 +22,7 @@
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
     capture_time: 1.0
-    has_gate: true  # scoop gate servo fitted (Webots has it; set false on a robot without the servo)
+    has_gate: false  # no servo on the real robots yet: true only with the scoop gate fitted (feat/scoop-gate)
     gate_close_time: 0.4
     gate_open_time: 0.4
     scoop_lost_timeout: 1.0
