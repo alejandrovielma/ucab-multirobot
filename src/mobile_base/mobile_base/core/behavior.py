@@ -486,7 +486,9 @@ class BehaviorFSM:
         self._ask_lease(inp)
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
             return ZERO  # the other robot is using the square
-        if inp.holds_zone and z.in_corridor(x, y) and z.aligned(theta):
+        if inp.holds_zone and self._at_entry(inp.pose):
+            # Same heading tolerance the planner aims for (30 deg), not the corridor's 60: entering
+            # diagonally put a body corner on the square's tape (Webots run 17).
             self.state = State.DELIVER
             self._dropping = False
             return self._deliver(inp)

@@ -297,3 +297,16 @@ def test_carrying_still_stops_for_a_peer_dead_ahead():
         make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer_at(0.35, 0.02), carrying=True)
     )
     assert cmd == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_delivering_robot_is_not_turned_away_by_the_peer_outside_the_corridor():
+    # Webots run 17: Ferb, entering the square with the lease, was told to "turn away" from Phineas
+    # waiting 0.48 m off; the body geofence forbade the turn and Ferb froze for 8 minutes.
+    params = SafetyParams()
+    own = Pose2D(-0.13, -0.02, -math.pi / 2, stamp=10.0)
+    peer = Pose2D(-0.13 - 0.25, -0.02 - 0.4, 0.0, stamp=10.0)  # 0.47 m away, inside the front cone
+    cmd, reason = SafetyGate(params).filter(
+        make_input(cmd=(0.05, 0.0, 0.0), own_pose=own, peer_pose=peer, holds_zone=True, carrying=True)
+    )
+    assert cmd[2] == pytest.approx(0.0)
+    assert "turn away" not in reason

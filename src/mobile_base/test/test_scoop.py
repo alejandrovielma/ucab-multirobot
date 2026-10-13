@@ -171,3 +171,15 @@ def test_deliver_leaving_the_corridor_goes_back_to_carry():
     tick(fsm, 1.4, scoop="red", pose=(z.x + 0.3, 0.0, SOUTH), holds_zone=True)
     assert fsm.state is State.CARRY
     assert fsm.carrying
+
+
+def test_deliver_needs_the_planned_heading_not_just_the_corridor_tolerance():
+    # Webots run 17: DELIVER started 33 deg off south (corridor accepts 60), went in diagonally and
+    # put a body corner on the square's tape.
+    fsm = make_fsm()
+    carrying(fsm)
+    z = fsm.params.zone
+    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, SOUTH - math.radians(45)), holds_zone=True)
+    assert fsm.state is State.CARRY
+    tick(fsm, 1.4, scoop="red", pose=(z.x, z.entry_y, SOUTH - math.radians(20)), holds_zone=True)
+    assert fsm.state is State.DELIVER

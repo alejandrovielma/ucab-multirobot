@@ -150,7 +150,10 @@ class SafetyGate:
         blocked = False
         peer_bearing = peer_distance = 0.0
         if own_fresh and peer is not None:
-            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer)
+            # In the delivery corridor with the lease the other robot cannot be in the way (it has no
+            # lease): only slow down / stop. Turning away there froze a carrying robot for 8 minutes
+            # (Webots run 17: the body geofence forbade the turn, the cube forbade reversing).
+            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer, turn=not delivering)
             own = inp.own_pose
             peer_bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
             peer_distance = distance(own.x, own.y, peer.x, peer.y)
@@ -254,7 +257,7 @@ class SafetyGate:
     def _is_fresh(self, pose: Pose2D | None, now: float) -> bool:
         return pose is not None and now - pose.stamp <= self.params.pose_timeout
 
-    def _avoid_peer(self, vx: float, wz: float, own: Pose2D, peer: Pose2D):
+    def _avoid_peer(self, vx: float, wz: float, own: Pose2D, peer: Pose2D, turn: bool = True):
         p = self.params
         bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
         if abs(bearing) >= math.radians(p.front_cone_deg):
@@ -269,7 +272,7 @@ class SafetyGate:
         elif d < p.slow_distance and vx > 0.0:
             vx *= (d - p.stop_distance) / (p.slow_distance - p.stop_distance)
             reason = f"peer ahead at {d:.2f} m: slow"
-        if d < p.avoid_distance:
+        if d < p.avoid_distance and turn:
             # Turn away from the peer; dead ahead counts as "left" so both robots break right.
             wz = -p.avoid_turn if bearing >= 0.0 else p.avoid_turn
             reason = reason or f"peer ahead at {d:.2f} m"
