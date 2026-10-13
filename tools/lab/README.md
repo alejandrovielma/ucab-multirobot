@@ -1,5 +1,8 @@
 # Pruebas de laboratorio del robot real (sin ROS)
 
+> Procedimiento completo de la jornada (preparar la Pi, orden de las pruebas y tabla de resultados):
+> [docs/guia-pruebas-laboratorio.md](../../docs/guia-pruebas-laboratorio.md). Este archivo describe la herramienta.
+
 Herramienta en Python para probar en la Raspberry Pi 5 los motores, el sensor de línea y la cámara,
 y ver al robot acercarse solo a los cubos de su color. **No necesita ROS**: usa la misma cinemática,
 la misma detección de cubos y la misma máquina de estados que el resto del repositorio
@@ -43,7 +46,7 @@ agregar `dtoverlay=imx219,cam0` (o `cam1`, según el conector donde esté la cá
 Copiar el código a la Pi (basta con las carpetas `tools/lab` y `src/mobile_base`):
 
 ```bash
-git clone -b lab/pruebas-robot https://github.com/alejandrovielma/ucab-multirobot.git
+git clone https://github.com/alejandrovielma/ucab-multirobot.git
 cd ucab-multirobot
 ```
 
