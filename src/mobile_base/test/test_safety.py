@@ -310,3 +310,21 @@ def test_delivering_robot_is_not_turned_away_by_the_peer_outside_the_corridor():
     )
     assert cmd[2] == pytest.approx(0.0)
     assert "turn away" not in reason
+
+
+def test_lease_holder_is_not_turned_away_by_the_waiting_robot():
+    # Webots run 20: Ferb held the lease and lined up at the entry; Phineas, waiting 0.5 m away, kept
+    # triggering "turn away", the plan drifted and was replanned for 10 minutes (livelock).
+    own = Pose2D(0.0, 0.1, math.pi, stamp=10.0)
+    peer = Pose2D(-0.48, 0.05, 0.0, stamp=10.0)
+    cmd, reason = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.0, 0.0, 1.2), own_pose=own, peer_pose=peer, holds_zone=True, carrying=True)
+    )
+    assert cmd[2] == pytest.approx(0.6)  # its own (carry-limited) turn, not the avoidance turn
+    assert "turn away" not in reason
+    # Still stops before contact.
+    close = Pose2D(-0.35, 0.1, 0.0, stamp=10.0)
+    cmd, _ = SafetyGate(SafetyParams()).filter(
+        make_input(cmd=(0.1, 0.0, 0.0), own_pose=own, peer_pose=close, holds_zone=True)
+    )
+    assert cmd[0] == pytest.approx(0.0)

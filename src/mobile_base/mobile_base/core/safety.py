@@ -156,10 +156,10 @@ class SafetyGate:
         blocked = False
         peer_bearing = peer_distance = 0.0
         if own_fresh and peer is not None:
-            # In the delivery corridor with the lease the other robot cannot be in the way (it has no
-            # lease): only slow down / stop. Turning away there froze a carrying robot for 8 minutes
-            # (Webots run 17: the body geofence forbade the turn, the cube forbade reversing).
-            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer, turn=not delivering)
+            # The lease holder has right of way near the square: only slow down / stop, no turn-away.
+            # Turning away froze a carrying robot in the corridor for 8 minutes (Webots run 17) and kept
+            # a lease holder replanning next to the waiting robot for 10 minutes (run 20).
+            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer, turn=not inp.holds_zone)
             own = inp.own_pose
             peer_bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
             peer_distance = distance(own.x, own.y, peer.x, peer.y)
