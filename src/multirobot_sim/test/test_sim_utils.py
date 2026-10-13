@@ -92,3 +92,15 @@ def test_scoop_color_is_never_classified_as_a_cube_color():
     r, g, b = (float(v) for v in match.groups())
     h, s, v = colorsys.rgb_to_hsv(r, g, b)
     assert classify(h * 179, s * 255, v * 255) is None
+
+
+def test_gate_motor_matches_the_driver_positions():
+    # The driver opens/closes the gate with fixed angles: they must be inside the motor limits.
+    from multirobot_sim import recolector_driver as driver_module
+
+    proto = (PKG / "protos" / "RecolectorUCAB.proto").read_text()
+    block = proto[proto.index('name "servo_compuerta"') :]
+    low = float(block.split("minPosition")[1].split()[0])
+    high = float(block.split("maxPosition")[1].split()[0])
+    assert low <= driver_module.GATE_OPEN <= high
+    assert low <= driver_module.GATE_CLOSED <= high

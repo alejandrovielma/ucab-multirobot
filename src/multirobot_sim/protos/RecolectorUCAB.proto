@@ -4,7 +4,8 @@
 # Electronica: Raspberry Pi 5 + HAT Cokoino 4WD (DRV8833), bateria 2S 18650.
 # Sensores del plan: camara OV5647 (~54 grados), 4 TCRT5000 abajo, HC-SR04 al frente, FC-51 y TCS34725 en la pala,
 # MPU6050 (acelerometro + giroscopio, sin brujula).
-# Pala de un cubo con hueco en U de 40 mm de ancho y 48 mm de fondo (cubos de 30 mm), movida por un servo SG90.
+# Pala de un cubo con hueco en U de 40 mm de ancho y 48 mm de fondo (cubos de 30 mm), fija, con una
+# compuerta con servo (SG90) en la boca de la U que retiene el cubo mientras lo transporta.
 # Todas las medidas que no vienen del fabricante son estimadas: medir y ajustar.
 # template language: javascript
 
@@ -212,6 +213,39 @@ PROTO RecolectorUCAB [
                 Pose { translation 0.1018 0.0353 -0.035 rotation 0 0 1 0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
                 Pose { translation 0.1018 -0.0353 -0.035 rotation 0 0 1 -0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
               ]
+            }
+            # Compuerta con servo (SG90) en la boca de la U: retiene el cubo para girar en el sitio y
+            # retroceder con el. Aleta con bisagra arriba (eje y, en lo alto de las paredes de la U):
+            # 0 = cerrada (cuelga delante del cubo, 7.5 mm sobre el piso); -pi/2 = abierta (horizontal
+            # hacia adelante a 3.75 cm del piso, por encima de un cubo de 3 cm que entra).
+            HingeJoint {
+              jointParameters HingeJointParameters {
+                axis 0 1 0
+                anchor 0.082 0 -0.0175
+                minStop -1.62
+                maxStop 0.02
+              }
+              device [
+                RotationalMotor {
+                  name "servo_compuerta"
+                  maxVelocity 10.5
+                  maxTorque 0.18
+                  minPosition -1.5708
+                  maxPosition 0.0
+                }
+              ]
+              endPoint Solid {
+                translation 0.082 0 -0.0175
+                name "compuerta"
+                children [
+                  Pose {
+                    translation 0 0 -0.015
+                    children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.038 0.030 } } ]
+                  }
+                ]
+                boundingObject Pose { translation 0 0 -0.015 children [ Box { size 0.003 0.038 0.030 } ] }
+                physics Physics { density -1 mass 0.002 }
+              }
             }
             # FC-51: IR de obstaculo en la pared izquierda de la U, mirando al otro lado (cubo adentro = 1)
             DistanceSensor {
