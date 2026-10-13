@@ -61,8 +61,9 @@ class RecolectorDriver:
             motor.setPosition(math.inf)
             motor.setVelocity(0.0)
         self._robot.getDevice("servo_pala").setPosition(0.0)
-        self._gate = self._robot.getDevice("servo_compuerta")
-        self._gate.setPosition(GATE_OPEN)
+        self._gate = self._robot.getDevice("servo_compuerta")  # None when the PROTO has compuerta FALSE
+        if self._gate is not None:
+            self._gate.setPosition(GATE_OPEN)
 
         self._line = self._robot.getDevice("linea_frente")
         self._line.enable(timestep)
@@ -89,7 +90,8 @@ class RecolectorDriver:
         self._last_pose = -math.inf
 
     def _on_gate(self, msg: Bool):
-        self._gate.setPosition(GATE_CLOSED if msg.data else GATE_OPEN)
+        if self._gate is not None:
+            self._gate.setPosition(GATE_CLOSED if msg.data else GATE_OPEN)
 
     def _on_cmd_vel(self, msg: Twist):
         self._cmd = (msg.linear.x, msg.linear.y, msg.angular.z)
