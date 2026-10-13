@@ -22,6 +22,10 @@ PROTO RecolectorUCAB [
   field SFFloat    velMaxMotor     10.5      # rad/s (~100 rpm: TT 1:120 a ~6 V)
   field SFFloat    torqueMaxMotor  0.15      # N*m (estimado TT 1:120)
   field MFNode     extensiones     []        # para agregar sensores sin tocar el PROTO
+  field SFFloat    palaBoca        0.040     # m, ancho interior de la U en la boca
+  field SFFloat    palaFondoAncho  0.040     # m, ancho interior de la U junto a la pared del fondo
+  field SFFloat    palaProfundidad 0.048     # m, largo de las paredes laterales de la U
+  field SFBool     compuerta       TRUE      # puerta con servo en la boca de la U
 ]
 {
   %<
@@ -203,17 +207,35 @@ PROTO RecolectorUCAB [
           translation 0.09 0 0.055
           name "pala"
           children [
+            %<
+              // U de la pala en el marco de la pala (x hacia adelante): pared del fondo en x = 0.038,
+              // paredes laterales que pueden converger hacia la boca (cuña) y embudo de 44 grados.
+              const xb = 0.038;
+              const wb = fields.palaFondoAncho.value / 2 + 0.0015;   // eje de la pared, lado del fondo
+              const wm = fields.palaBoca.value / 2 + 0.0015;         // eje de la pared, lado de la boca
+              const prof = fields.palaProfundidad.value;
+              const xm = xb + 0.0015 + prof;                        // x de la boca
+              const lado = Math.hypot(prof, wb - wm);
+              const ang = Math.atan2(wm - wb, prof);                 // < 0 si la U se cierra hacia la boca
+              const emb = 0.0396, embAng = 0.767;
+              const piezas = [
+                { x: 0.003, y: 0, z: -0.008, sx: 0.006, sy: 2 * wb + 0.002, sz: 0.016, r: 0, solid: false },
+                { x: 0.021, y: 0, z: -0.0155, sx: 0.042, sy: 2 * wb + 0.002, sz: 0.003, r: 0, solid: true },
+                { x: xb, y: 0, z: -0.035, sx: 0.003, sy: 2 * wb, sz: 0.035, r: 0, solid: true },
+              ];
+              for (const s of [1, -1]) {
+                piezas.push({ x: xb + 0.0015 + prof / 2, y: s * (wb + wm) / 2, z: -0.035, sx: lado, sy: 0.003, sz: 0.035, r: s * ang, solid: true });
+                piezas.push({ x: xm + emb / 2 * Math.cos(embAng), y: s * (wm + emb / 2 * Math.sin(embAng)), z: -0.035, sx: emb, sy: 0.003, sz: 0.035, r: s * embAng, solid: true });
+              }
+            >%
             DEF PALA_FORMA Group {
               children [
-                Pose { translation 0.003 0 -0.008 children [ Shape { appearance DEF PLA_AP PBRAppearance { baseColor 0.35 0.35 0.37 roughness 0.6 metalness 0 } geometry Box { size 0.006 0.05 0.016 } } ] }
-                Pose { translation 0.021 0 -0.0155 children [ Shape { appearance USE PLA_AP geometry Box { size 0.042 0.05 0.003 } } ] }
-                Pose { translation 0.038 0 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.046 0.035 } } ] }
-                Pose { translation 0.0635 0.0215 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.048 0.003 0.035 } } ] }
-                Pose { translation 0.0635 -0.0215 -0.035 children [ Shape { appearance USE PLA_AP geometry Box { size 0.048 0.003 0.035 } } ] }
-                Pose { translation 0.1018 0.0353 -0.035 rotation 0 0 1 0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
-                Pose { translation 0.1018 -0.0353 -0.035 rotation 0 0 1 -0.767 children [ Shape { appearance USE PLA_AP geometry Box { size 0.0396 0.003 0.035 } } ] }
+                %< for (const q of piezas) { >%
+                Pose { translation %<= q.x >% %<= q.y >% %<= q.z >% rotation 0 0 1 %<= q.r >% children [ Shape { appearance DEF PLA_AP PBRAppearance { baseColor 0.35 0.35 0.37 roughness 0.6 metalness 0 } geometry Box { size %<= q.sx >% %<= q.sy >% %<= q.sz >% } } ] }
+                %< } >%
               ]
             }
+            %< if (fields.compuerta.value) { >%
             # Compuerta con servo (SG90) en la boca de la U: retiene el cubo para girar en el sitio y
             # retroceder con el. Puerta lateral con bisagra vertical en el extremo de la pared izquierda
             # de la U: 0 = cerrada (cruza la boca delante del cubo); 2.34 rad = abierta (pegada a la pared
@@ -222,7 +244,7 @@ PROTO RecolectorUCAB [
             HingeJoint {
               jointParameters HingeJointParameters {
                 axis 0 0 1
-                anchor 0.0875 0.0215 -0.0325
+                anchor %<= xm >% %<= wm - 0.0015 >% -0.0325
                 minStop -0.02
                 maxStop 2.40
               }
@@ -236,21 +258,22 @@ PROTO RecolectorUCAB [
                 }
               ]
               endPoint Solid {
-                translation 0.0875 0.0215 -0.0325
+                translation %<= xm >% %<= wm - 0.0015 >% -0.0325
                 name "compuerta"
                 children [
                   Pose {
-                    translation 0.0015 -0.019 0
-                    children [ Shape { appearance USE PLA_AP geometry Box { size 0.003 0.036 0.030 } } ]
+                    translation 0.0015 %<= -(wm - 0.0015) >% 0
+                    children [ Shape { appearance PBRAppearance { baseColor 0.35 0.35 0.37 roughness 0.6 metalness 0 } geometry Box { size 0.003 %<= 2 * (wm - 0.0015) - 0.004 >% 0.030 } } ]
                   }
                 ]
-                boundingObject Pose { translation 0.0015 -0.019 0 children [ Box { size 0.003 0.036 0.030 } ] }
+                boundingObject Pose { translation 0.0015 %<= -(wm - 0.0015) >% 0 children [ Box { size 0.003 %<= 2 * (wm - 0.0015) - 0.004 >% 0.030 } ] }
                 physics Physics { density -1 mass 0.002 }
               }
             }
+            %< } >%
             # FC-51: IR de obstaculo en la pared izquierda de la U, mirando al otro lado (cubo adentro = 1)
             DistanceSensor {
-              translation 0.056 0.0195 -0.04
+              translation %<= xb + 0.018 >% %<= wb - 0.002 >% -0.04
               rotation 0 0 1 -1.5708
               name "ir_pala"
               type "infra-red"
@@ -270,12 +293,9 @@ PROTO RecolectorUCAB [
           ]
           boundingObject Group {
             children [
-              Pose { translation 0.021 0 -0.0155 children [ Box { size 0.042 0.05 0.003 } ] }
-              Pose { translation 0.038 0 -0.035 children [ Box { size 0.003 0.046 0.035 } ] }
-              Pose { translation 0.0635 0.0215 -0.035 children [ Box { size 0.048 0.003 0.035 } ] }
-              Pose { translation 0.0635 -0.0215 -0.035 children [ Box { size 0.048 0.003 0.035 } ] }
-              Pose { translation 0.1018 0.0353 -0.035 rotation 0 0 1 0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
-              Pose { translation 0.1018 -0.0353 -0.035 rotation 0 0 1 -0.767 children [ Box { size 0.0396 0.003 0.035 } ] }
+              %< for (const q of piezas) { if (!q.solid) continue; >%
+              Pose { translation %<= q.x >% %<= q.y >% %<= q.z >% rotation 0 0 1 %<= q.r >% children [ Box { size %<= q.sx >% %<= q.sy >% %<= q.sz >% } ] }
+              %< } >%
             ]
           }
           physics Physics { density -1 mass 0.03 }
