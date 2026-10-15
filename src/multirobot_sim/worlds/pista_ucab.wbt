@@ -1,7 +1,9 @@
 #VRML_SIM R2025a utf8
-# Pista UCAB Robotica: tablero blanco con contorno de cinta negra y cuadrado de entrega.
-# Medidas estimadas a partir de las fotos (rectificadas): tablero ~1.93 x 1.22 m, cinta de 19 mm,
-# cuadrado de entrega ~24 x 24 cm (en la pista real es un cuadrado AZUL), 14 cubos de 2 cm en 6 colores. Medir la pista real y ajustar.
+# Pista UCAB Robotica (medida el 2026-10-15): tablero blanco de 1.82 x 0.94 m (margen supuesto, no medido),
+# rectangulo de cinta negra de 1.8 cm de 120.6 x 74 cm (borde exterior) y cuadrado de entrega AZUL de
+# 20.3 x 20.3 cm que sobresale del lado oeste (su lado hacia la pista no tiene cinta). 14 cubos de 2 cm.
+# Marco: origen en el centro del rectangulo, x al este (lado de 120.6 cm), y al norte. La textura y los
+# cubos salen de tools/sim/generate_track.py (fuente unica de la geometria).
 # ROS 2: both robots use controller "<extern>" and are driven by multirobot_sim.recolector_driver (webots_ros2).
 # To drive them by keyboard instead, set controller back to "recolector_teleop".
 
@@ -67,18 +69,18 @@ DEF MESA Solid {
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.35 0.22 0.14 roughness 0.8 metalness 0 }
-      geometry Box { size 1.8 1.1 0.76 }
+      geometry Box { size 1.8 0.92 0.76 }
     }
   ]
   name "mesa"
-  boundingObject Box { size 1.8 1.1 0.76 }
+  boundingObject Box { size 1.8 0.92 0.76 }
 }
 DEF PISTA Solid {
   translation 0 0 -0.009
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.93 0.94 0.95 roughness 0.9 metalness 0 }
-      geometry Box { size 1.93 1.22 0.018 }
+      geometry Box { size 1.82 0.94 0.018 }
     }
     Pose {
       translation 0 0 0.0091
@@ -89,21 +91,22 @@ DEF PISTA Solid {
             roughness 0.9
             metalness 0
           }
-          geometry Plane { size 1.93 1.22 }
+          geometry Plane { size 1.82 0.94 }
         }
       ]
     }
   ]
   name "pista"
   model "pista"
-  boundingObject Box { size 1.93 1.22 0.018 }
+  boundingObject Box { size 1.82 0.94 0.018 }
 }
 DEF MARCADOR_CUADRADO Solid {
-  translation -0.129 -0.5 0
+  # ArUco id 10 west of the blue square, outside the tape, facing east (toward the approaching robot).
+  translation -0.84 0.0085 0
   children [
     Pose {
       translation 0 0 0.003
-      children [ Shape { appearance PBRAppearance { baseColor 0.2 0.2 0.2 roughness 1 metalness 0 } geometry Box { size 0.12 0.03 0.006 } } ]
+      children [ Shape { appearance PBRAppearance { baseColor 0.2 0.2 0.2 roughness 1 metalness 0 } geometry Box { size 0.03 0.12 0.006 } } ]
     }
     Pose {
       translation 0 0.0 0.065
@@ -112,10 +115,11 @@ DEF MARCADOR_CUADRADO Solid {
     }
   ]
   name "marcador_cuadrado"
-  boundingObject Pose { translation 0 0 0.04 children [ Box { size 0.12 0.03 0.08 } ] }
+  boundingObject Pose { translation 0 0 0.04 children [ Box { size 0.03 0.12 0.08 } ] }
 }
 DEF PHINEAS RecolectorUCAB {
-  translation -0.45 0.0 0
+  translation 0.4 0.2 0
+  rotation 0 0 1 3.14159
   name "Phineas"
   controller "<extern>"
   controllerArgs [ "--colores=rojo,naranja,amarillo" ]
@@ -140,7 +144,7 @@ DEF PHINEAS RecolectorUCAB {
   ]
 }
 DEF FERB RecolectorUCAB {
-  translation 0.5 -0.25 0
+  translation 0.4 -0.2 0
   rotation 0 0 1 3.14159
   name "Ferb"
   controller "<extern>"
@@ -167,87 +171,86 @@ DEF FERB RecolectorUCAB {
   ]
 }
 CuboMadera {
-  translation -0.476 0.294 0.01
-  rotation 0 0 1 1.088
-  name "cubo_verde_1"
-  color 0.08 0.55 0.30
-}
-CuboMadera {
-  translation 0.081 -0.112 0.01
-  rotation 0 0 1 0.737
-  name "cubo_azul_1"
-  color 0.10 0.25 0.70
-}
-CuboMadera {
-  translation 0.247 -0.188 0.01
-  rotation 0 0 1 0.788
-  name "cubo_morado_1"
-  color 0.40 0.10 0.30
-}
-CuboMadera {
-  translation 0.087 0.129 0.01
-  rotation 0 0 1 0.486
-  name "cubo_naranja_1"
-  color 0.95 0.45 0.08
-}
-CuboMadera {
-  translation 0.003 0.225 0.01
-  rotation 0 0 1 1.189
-  name "cubo_naranja_2"
-  color 0.95 0.45 0.08
-}
-CuboMadera {
-  translation 0.495 0.234 0.01
-  rotation 0 0 1 0.389
-  name "cubo_amarillo_1"
-  color 0.95 0.80 0.10
-}
-CuboMadera {
-  translation 0.257 -0.026 0.01
-  rotation 0 0 1 0.429
-  name "cubo_verde_2"
-  color 0.08 0.55 0.30
-}
-CuboMadera {
-  translation 0.385 0.15 0.01
-  rotation 0 0 1 1.513
+  translation 0.014 0.253 0.01
+  rotation 0 0 1 0.161
   name "cubo_rojo_1"
   color 0.78 0.12 0.10
 }
 CuboMadera {
-  translation -0.675 0.249 0.01
-  rotation 0 0 1 0.488
-  name "cubo_morado_2"
-  color 0.40 0.10 0.30
-}
-CuboMadera {
-  translation -0.584 -0.295 0.01
-  rotation 0 0 1 1.358
+  translation 0.056 0.162 0.01
+  rotation 0 0 1 1.207
   name "cubo_rojo_2"
   color 0.78 0.12 0.10
 }
 CuboMadera {
-  translation -0.038 0.101 0.01
-  rotation 0 0 1 0.274
+  translation 0.294 0.061 0.01
+  rotation 0 0 1 0.377
+  name "cubo_rojo_3"
+  color 0.78 0.12 0.10
+}
+CuboMadera {
+  translation 0.134 -0.274 0.01
+  rotation 0 0 1 1.283
+  name "cubo_naranja_1"
+  color 0.95 0.45 0.08
+}
+CuboMadera {
+  translation 0.217 0.126 0.01
+  rotation 0 0 1 0.33
+  name "cubo_naranja_2"
+  color 0.95 0.45 0.08
+}
+CuboMadera {
+  translation 0.067 -0.146 0.01
+  rotation 0 0 1 0.719
+  name "cubo_amarillo_1"
+  color 0.95 0.80 0.10
+}
+CuboMadera {
+  translation 0.247 -0.096 0.01
+  rotation 0 0 1 0.663
   name "cubo_amarillo_2"
   color 0.95 0.80 0.10
 }
 CuboMadera {
-  translation 0.221 0.151 0.01
-  rotation 0 0 1 0.19
-  name "cubo_naranja_3"
-  color 0.95 0.45 0.08
+  translation -0.002 -0.27 0.01
+  rotation 0 0 1 0.795
+  name "cubo_verde_1"
+  color 0.08 0.55 0.30
 }
 CuboMadera {
-  translation -0.097 -0.032 0.01
-  rotation 0 0 1 0.556
+  translation 0.499 -0.015 0.01
+  rotation 0 0 1 0.814
+  name "cubo_verde_2"
+  color 0.08 0.55 0.30
+}
+CuboMadera {
+  translation 0.239 0.272 0.01
+  rotation 0 0 1 0.161
+  name "cubo_verde_3"
+  color 0.08 0.55 0.30
+}
+CuboMadera {
+  translation 0.143 -0.021 0.01
+  rotation 0 0 1 0.757
+  name "cubo_azul_1"
+  color 0.10 0.25 0.70
+}
+CuboMadera {
+  translation -0.317 0.272 0.01
+  rotation 0 0 1 0.984
   name "cubo_azul_2"
   color 0.10 0.25 0.70
 }
 CuboMadera {
-  translation 0.354 0.296 0.01
-  rotation 0 0 1 0.018
-  name "cubo_rojo_3"
-  color 0.78 0.12 0.10
+  translation -0.051 -0.022 0.01
+  rotation 0 0 1 1.46
+  name "cubo_morado_1"
+  color 0.40 0.10 0.30
 }
-
+CuboMadera {
+  translation -0.103 0.217 0.01
+  rotation 0 0 1 0.817
+  name "cubo_morado_2"
+  color 0.40 0.10 0.30
+}

@@ -2,9 +2,11 @@
 # Mundo de calibracion de la camara: Phineas con un cubo rojo DENTRO de la U y Ferb con un cubo
 # verde en la BOCA de la pala (justo cuando empieza CAPTURE). Uso: sim.launch.py world:=calibracion_pala.wbt
 # logic:=false y tools/sim_monitor.py --frames-every 1 para guardar lo que ve cada robot.
-# Pista UCAB Robotica: tablero blanco con contorno de cinta negra y cuadrado de entrega.
-# Medidas estimadas a partir de las fotos (rectificadas): tablero ~1.93 x 1.22 m, cinta de 19 mm,
-# cuadrado de entrega ~24 x 24 cm (en la pista real es un cuadrado AZUL), 14 cubos de 2 cm en 6 colores. Medir la pista real y ajustar.
+# Pista UCAB Robotica (medida el 2026-10-15): tablero blanco de 1.82 x 0.94 m (margen supuesto, no medido),
+# rectangulo de cinta negra de 1.8 cm de 120.6 x 74 cm (borde exterior) y cuadrado de entrega AZUL de
+# 20.3 x 20.3 cm que sobresale del lado oeste (su lado hacia la pista no tiene cinta). 14 cubos de 2 cm.
+# Marco: origen en el centro del rectangulo, x al este (lado de 120.6 cm), y al norte. La textura y los
+# cubos salen de tools/sim/generate_track.py (fuente unica de la geometria).
 # ROS 2: both robots use controller "<extern>" and are driven by multirobot_sim.recolector_driver (webots_ros2).
 # To drive them by keyboard instead, set controller back to "recolector_teleop".
 
@@ -70,18 +72,18 @@ DEF MESA Solid {
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.35 0.22 0.14 roughness 0.8 metalness 0 }
-      geometry Box { size 1.8 1.1 0.76 }
+      geometry Box { size 1.8 0.92 0.76 }
     }
   ]
   name "mesa"
-  boundingObject Box { size 1.8 1.1 0.76 }
+  boundingObject Box { size 1.8 0.92 0.76 }
 }
 DEF PISTA Solid {
   translation 0 0 -0.009
   children [
     Shape {
       appearance PBRAppearance { baseColor 0.93 0.94 0.95 roughness 0.9 metalness 0 }
-      geometry Box { size 1.93 1.22 0.018 }
+      geometry Box { size 1.82 0.94 0.018 }
     }
     Pose {
       translation 0 0 0.0091
@@ -92,21 +94,22 @@ DEF PISTA Solid {
             roughness 0.9
             metalness 0
           }
-          geometry Plane { size 1.93 1.22 }
+          geometry Plane { size 1.82 0.94 }
         }
       ]
     }
   ]
   name "pista"
   model "pista"
-  boundingObject Box { size 1.93 1.22 0.018 }
+  boundingObject Box { size 1.82 0.94 0.018 }
 }
 DEF MARCADOR_CUADRADO Solid {
-  translation -0.129 -0.5 0
+  # ArUco id 10 west of the blue square, outside the tape, facing east (toward the approaching robot).
+  translation -0.84 0.0085 0
   children [
     Pose {
       translation 0 0 0.003
-      children [ Shape { appearance PBRAppearance { baseColor 0.2 0.2 0.2 roughness 1 metalness 0 } geometry Box { size 0.12 0.03 0.006 } } ]
+      children [ Shape { appearance PBRAppearance { baseColor 0.2 0.2 0.2 roughness 1 metalness 0 } geometry Box { size 0.03 0.12 0.006 } } ]
     }
     Pose {
       translation 0 0.0 0.065
@@ -115,7 +118,7 @@ DEF MARCADOR_CUADRADO Solid {
     }
   ]
   name "marcador_cuadrado"
-  boundingObject Pose { translation 0 0 0.04 children [ Box { size 0.12 0.03 0.08 } ] }
+  boundingObject Pose { translation 0 0 0.04 children [ Box { size 0.03 0.12 0.08 } ] }
 }
 DEF PHINEAS RecolectorUCAB {
   translation -0.45 0.0 0

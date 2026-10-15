@@ -104,3 +104,87 @@ def test_gate_motor_matches_the_driver_positions():
     high = float(block.split("maxPosition")[1].split()[0])
     assert low <= driver_module.GATE_OPEN <= high
     assert low <= driver_module.GATE_CLOSED <= high
+
+
+# ---- track geometry (tools/sim/generate_track.py renders the texture from the measured track)
+
+
+def _board_size(world: str) -> tuple[float, float]:
+    import re
+
+    match = re.search(r"geometry Plane \{ size ([\d.]+) ([\d.]+) \}", world[world.index("DEF PISTA") :])
+    return float(match.group(1)), float(match.group(2))
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    import struct
+
+    data = path.read_bytes()[:24]
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    return struct.unpack(">II", data[16:24])
+
+
+@pytest.mark.parametrize("world_name", ["pista_ucab.wbt", "calibracion_pala.wbt"])
+def test_track_texture_matches_the_board_aspect(world_name):
+    board_x, board_y = _board_size((PKG / "worlds" / world_name).read_text())
+    assert (board_x, board_y) == (1.82, 0.94)
+    width, height = _png_size(PKG / "worlds" / "textures" / "pista_ucab.png")
+    assert width >= 1000 * board_x  # >= 1000 px per meter on the long side
+    assert width / height == pytest.approx(board_x / board_y, rel=0.01)
+
+
+def _track_polygon():
+    import yaml
+
+    data = yaml.safe_load((PKG.parent / "mobile_base" / "config" / "track.yaml").read_text())
+    flat = data["/**"]["ros__parameters"]["track_polygon"]
+    return list(zip(flat[0::2], flat[1::2]))
+
+
+def test_track_polygon_lies_inside_the_board():
+    board_x, board_y = _board_size((PKG / "worlds" / "pista_ucab.wbt").read_text())
+    polygon = _track_polygon()
+    assert len(polygon) >= 3
+    for x, y in polygon:
+        assert abs(x) < board_x / 2 and abs(y) < board_y / 2
+
+
+def _world_items(pattern: str):
+    import re
+
+    return re.findall(pattern, (PKG / "worlds" / "pista_ucab.wbt").read_text())
+
+
+def test_cubes_are_inside_the_track_and_clear_of_the_starts_and_the_delivery_corridor():
+    cubes = _world_items(r'CuboMadera \{\s+translation ([-\d.]+) ([-\d.]+) ([-\d.]+)\s+rotation [^\n]+\s+name "(\w+)"')
+    assert len(cubes) == 14
+    xs = [abs(x) for x, *_ in _track_polygon()]
+    ys = [abs(y) for _, y in _track_polygon()]
+    inner_x, inner_y = max(xs), max(ys)  # rectangle inner tape edge
+    starts = [(0.40, 0.20), (0.40, -0.20)]
+    corridor = (-0.585, -0.237, 0.0085 - 0.08, 0.0085 + 0.08)
+    colors = {}
+    for x, y, z, name in cubes:
+        x, y, z = float(x), float(y), float(z)
+        assert z == pytest.approx(0.01)  # 2 cm cube resting on the board
+        assert abs(x) <= inner_x - 0.06 and abs(y) <= inner_y - 0.06, name
+        assert all(math.hypot(x - sx, y - sy) >= 0.15 for sx, sy in starts), name
+        dx = max(corridor[0] - x, 0.0, x - corridor[1])
+        dy = max(corridor[2] - y, 0.0, y - corridor[3])
+        assert math.hypot(dx, dy) >= 0.15, name
+        color = name.split("_")[1]
+        colors[color] = colors.get(color, 0) + 1
+    assert set(colors) == {"rojo", "naranja", "amarillo", "verde", "azul", "morado"}
+    assert all(2 <= n <= 3 for n in colors.values())
+
+
+def test_robots_start_east_facing_west():
+    starts = _world_items(r'DEF (PHINEAS|FERB) RecolectorUCAB \{\s+translation ([-\d.]+) ([-\d.]+) 0\s+rotation 0 0 1 ([\d.]+)')
+    assert {name: (float(x), float(y)) for name, x, y, _ in starts} == {"PHINEAS": (0.4, 0.2), "FERB": (0.4, -0.2)}
+    assert all(float(theta) == pytest.approx(math.pi, abs=1e-4) for *_, theta in starts)
+
+
+def test_square_marker_is_west_of_the_square_outside_the_tape():
+    (x, y), = [(float(a), float(b)) for a, b in _world_items(r"DEF MARCADOR_CUADRADO Solid \{\s+#[^\n]*\s+translation ([-\d.]+) ([-\d.]+) 0")]
+    assert x < -0.806 and abs(y - 0.0085) < 0.01  # beyond the square's west tape, on its axis
+    assert x > -0.91  # still on the board
