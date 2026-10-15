@@ -109,6 +109,7 @@ class BehaviorParams:
     request_period: float = 1.0  # s, retry while denied
     enter_speed: float = 0.05  # m/s
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
+    square_align_gain: float = 0.8  # rad/s per unit of square_cx while entering (camera alignment)
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
     # Body geofence (keep equal to the gate): see core/track.py.
@@ -151,6 +152,11 @@ class BehaviorInput:
     pose: tuple[float, float, float] | None = None
     holds_zone: bool = False  # /zone/occupant == this robot
     scoop_color: str = ""  # color seen inside the scoop by the camera ("" = empty or unknown)
+    # Blue delivery square seen by the robot camera (vision.detect_square); never reported as a cube.
+    square_visible: bool = False
+    square_cx: float = 0.0  # [-1, 1], left negative
+    square_cy: float = 0.0  # [0, 1], 0 = top
+    square_area: float = 0.0  # px
 
 
 class BehaviorFSM:
@@ -571,6 +577,9 @@ class BehaviorFSM:
                 # The square's tape is crossed on purpose here (by the scoop): line_front is ignored.
                 carrot = max(before - p.enter_lookahead, z.drop_offset - p.enter_lookahead)
                 _, _, wz = self._steer(inp.pose, *z.point(carrot), p.enter_speed)
+                if inp.square_visible:
+                    # The camera sees the blue square: center it (corrects pose error across the axis).
+                    wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz - p.square_align_gain * inp.square_cx))
                 if self.gate_closed and not self._fits(inp.pose, p.enter_speed, wz, carrying=False):
                     # The body would touch the square's tape: back off with the retained cube, replan.
                     self.state = State.CARRY

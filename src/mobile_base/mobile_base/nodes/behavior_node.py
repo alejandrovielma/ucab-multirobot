@@ -31,6 +31,7 @@ class BehaviorNode(Node):
         self._cubes: list[Cube] = []
         self._cubes_time = 0.0
         self._scoop_color = ""
+        self._square = (False, 0.0, 0.0, 0.0)  # visible, cx, cy, area (blue delivery square)
         self._line_front = False
         self._pose = None
         self._zone_occupant = ""
@@ -51,6 +52,7 @@ class BehaviorNode(Node):
     def _on_cubes(self, msg: CubeDetectionArray):
         self._cubes = [Cube(c.color, c.cx_norm, c.cy_norm, c.area_px) for c in msg.cubes]
         self._scoop_color = msg.scoop_color
+        self._square = (msg.square_visible, msg.square_cx, msg.square_cy, msg.square_area)
         self._cubes_time = now_sec(self)
 
     def _on_line(self, msg: Bool):
@@ -67,6 +69,7 @@ class BehaviorNode(Node):
         fresh = now - self._cubes_time <= self._cube_timeout
         cubes = self._cubes if fresh else []
         scoop_color = self._scoop_color if fresh else ""
+        square_visible, square_cx, square_cy, square_area = self._square if fresh else (False, 0.0, 0.0, 0.0)
         pose = (self._pose.x, self._pose.y, self._pose.theta) if self._pose else None
         previous = self.fsm.state
         holds_zone = self._zone_occupant == self.robot
@@ -78,6 +81,10 @@ class BehaviorNode(Node):
                 pose=pose,
                 holds_zone=holds_zone,
                 scoop_color=scoop_color,
+                square_visible=square_visible,
+                square_cx=square_cx,
+                square_cy=square_cy,
+                square_area=square_area,
             )
         )
         if self.fsm.state is not previous:

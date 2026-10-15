@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from mobile_base.vision import VisionParams, detect_cubes
 
@@ -75,3 +76,47 @@ def test_image_to_bgr_rejects_unknown_encoding():
 
     with pytest.raises(ValueError):
         image_to_bgr(1, 1, "mono16", 2, b"\x00\x00")
+
+
+# ---- blue delivery square: never a cube, but the robot sees it
+
+
+def _board_with_square_and_cube():
+    img = np.full((480, 640, 3), 255, dtype=np.uint8)
+    cv2.rectangle(img, (120, 250), (420, 420), (180, 60, 20), -1)  # blue square (300 x 170 px)
+    cv2.rectangle(img, (500, 300), (540, 340), (180, 60, 20), -1)  # blue cube beside it
+    return img
+
+
+def test_blue_square_is_not_a_cube_but_a_blue_cube_next_to_it_is():
+    from mobile_base.vision import detect_square
+
+    img = _board_with_square_and_cube()
+    cubes = detect_cubes(img, VisionParams())
+    assert [d.color for d in cubes] == ["blue"]
+    assert cubes[0].cx_norm > 0.5  # the small one on the right, not the square
+    square = detect_square(img, VisionParams())
+    assert square.visible
+    assert square.cx_norm == pytest.approx((270 / 640) * 2.0 - 1.0, abs=0.01)
+    assert square.cy_norm == pytest.approx(335 / 480, abs=0.01)
+    assert square.area_px > VisionParams().square_min_area
+
+
+def test_square_shaped_like_a_cube_is_still_the_square():
+    # Seen straight from the entry the square can pass the cube shape filters: its size decides.
+    from mobile_base.vision import detect_square
+
+    img = np.full((480, 640, 3), 255, dtype=np.uint8)
+    cv2.rectangle(img, (200, 200), (380, 380), (180, 60, 20), -1)
+    assert detect_cubes(img, VisionParams()) == []
+    assert detect_square(img, VisionParams()).visible
+
+
+def test_no_square_without_a_big_blue_region():
+    from mobile_base.vision import detect_square
+
+    img = _board_with_cubes()  # only a small blue cube
+    assert not detect_square(img, VisionParams()).visible
+    big_red = np.full((480, 640, 3), 255, dtype=np.uint8)
+    cv2.rectangle(big_red, (120, 250), (420, 420), (20, 20, 200), -1)
+    assert not detect_square(big_red, VisionParams()).visible

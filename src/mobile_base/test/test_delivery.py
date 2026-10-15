@@ -150,6 +150,28 @@ def test_enter_steers_back_to_the_square_axis():
     assert wz < 0.0
 
 
+def test_enter_aligns_with_the_blue_square_seen_by_the_camera():
+    # On the axis the pose alone says "straight"; the square seen to the right adds a right turn.
+    fsm = carrying_fsm()
+    z = zone(fsm)
+    tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
+    _, _, wz_blind = tick(fsm, 2.1, z.pose(0.2), holds_zone=True)
+    _, _, wz_seen = tick(fsm, 2.2, z.pose(0.2), holds_zone=True, square_visible=True, square_cx=0.25)
+    assert wz_blind == pytest.approx(0.0)
+    assert wz_seen == pytest.approx(-fsm.params.square_align_gain * 0.25)
+    # Bounded by the carry turn limit.
+    _, _, wz_far = tick(fsm, 2.3, z.pose(0.2, across=0.05), holds_zone=True, square_visible=True, square_cx=1.0)
+    assert wz_far == pytest.approx(-fsm.params.carry_max_turn)
+
+
+def test_square_alignment_is_not_used_while_reversing_out():
+    fsm = carrying_fsm()
+    z = zone(fsm)
+    tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
+    cmd = tick(fsm, 4.0, z.pose(z.drop_offset - 0.001), holds_zone=True, square_visible=True, square_cx=0.5)
+    assert cmd == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
+
+
 def test_reaching_drop_point_reverses_without_cube():
     fsm = carrying_fsm()
     z = zone(fsm)

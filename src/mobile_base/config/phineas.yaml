@@ -38,6 +38,7 @@
     request_period: 1.0
     enter_speed: 0.05
     enter_lookahead: 0.10
+    square_align_gain: 0.8  # while entering, steer to center the blue square seen by the camera
     reverse_speed: 0.04
     drop_timeout: 6.0
     track_horizon: 0.3  # body geofence (keep equal to safety_gate)
@@ -125,6 +126,10 @@
     scoop_y_min: 0.74
     scoop_y_max: 0.84
     scoop_min_fill: 0.30
+    # Blue delivery square: largest region of this hue range bigger than square_min_area px; it is
+    # reported apart (square_* in the cubes message) and never as a cube. Calibrate on the robot.
+    square_color: blue
+    square_min_area: 12000.0
     # OpenCV hue (0-179) ranges as [lo1, hi1, lo2, hi2, ...]; calibrate with the real cubes.
     hue_ranges:
       red: [0, 8, 169, 179]
