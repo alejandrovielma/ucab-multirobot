@@ -4,7 +4,7 @@
 # logic:=false y tools/sim_monitor.py --frames-every 1 para guardar lo que ve cada robot.
 # Pista UCAB Robotica: tablero blanco con contorno de cinta negra y cuadrado de entrega.
 # Medidas estimadas a partir de las fotos (rectificadas): tablero ~1.93 x 1.22 m, cinta de 19 mm,
-# cuadrado de entrega ~24 x 24 cm, 14 cubos de 3 cm en 6 colores. Medir la pista real y ajustar.
+# cuadrado de entrega ~24 x 24 cm (en la pista real es un cuadrado AZUL), 14 cubos de 2 cm en 6 colores. Medir la pista real y ajustar.
 # ROS 2: both robots use controller "<extern>" and are driven by multirobot_sim.recolector_driver (webots_ros2).
 # To drive them by keyboard instead, set controller back to "recolector_teleop".
 
@@ -170,12 +170,12 @@ DEF FERB RecolectorUCAB {
   ]
 }
 CuboMadera {
-  translation -0.307 0 0.015
+  translation -0.307 0 0.01
   name "cubo_rojo_en_pala"
   color 0.78 0.12 0.10
 }
 CuboMadera {
-  translation 0.30 -0.25 0.015
+  translation 0.30 -0.25 0.01
   name "cubo_verde_en_boca"
   color 0.08 0.55 0.30
 }

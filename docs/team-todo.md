@@ -8,6 +8,9 @@ terminada, `powershell -File scripts/test_in_docker.ps1` debe seguir pasando.
 Estado: implementado en la rama `feat/carry-delivery` (ver [odd/tasks/carry-delivery.md](../odd/tasks/carry-delivery.md)).
 Se eligió la reversa acotada bajo la llave del cuadro. Quedan pendientes: medir el cuadro real y
 ajustar `zone_*` en los YAML, y validar la entrada al cuadro con la cámara cenital real.
+**Dato nuevo (2026-10-13): en la pista real el cuadro de entrega es un cuadrado AZUL pegado sobre la
+cinta del borde oeste** (foto tomada en sitio; faltan medir lado y posición exactas). Ver tarea 13
+por el riesgo de que se confunda con un cubo azul de Ferb.
 Criterios originales:
 
 Dónde: `BehaviorFSM._carry` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py)
@@ -84,6 +87,26 @@ Opciones (requieren saber qué dice el reglamento sobre pisar o cruzar la cinta)
   centro del robot siga dentro del polígono con margen (cerca virtual evaluada en el centro).
 - No intentar capturar cubos a menos de ~12 cm del borde (con la pose y el polígono): se pierden esos cubos.
 - Probar en el robot real si un giro en el sitio muy lento conserva el cubo en la U.
+
+## 13. Re-adaptar el sistema a cubos de 2 x 2 cm y al cuadro azul de la pista real
+
+Cambio de requisito (2026-10-13): los cubos reales ahora miden **2 x 2 cm** (antes 3 cm) y el cuadro
+de entrega de la pista real es un **cuadrado azul**. En Webots ya se actualizaron el proto
+(`CuboMadera.proto`: tamaño, masa ~4,8 g, z de reposición) y los dos mundos. Falta:
+
+- Correr una calibración en `calibracion_pala.wbt` con el cubo de 2 cm y ajustar el ancho de la U de
+  la pala impresa si la holgura de ~10 mm por lado degrada la retención (relacionado con la tarea 12).
+- Revisar los umbrales de detección: `min_area`/`max_area` en `vision.py` y en los YAML — un cubo de
+  2 cm ocupa menos píxeles a la misma distancia; recalibrar con la cámara real (tareas 3 y 7).
+- Verificar que el **cuadrado azul del piso no se detecte como cubo azul** de Ferb: confirmar tono y
+  saturación con la cámara real; si se confunde, filtrar por posición conocida (la zona `zone_*`) o
+  por relación de aspecto/área. Medir lado y posición del cuadro y actualizar `zone_*` y `track.yaml`.
+- Actualizar la figura f13 y el Documento Técnico (el .docx/.pdf de la raíz no se puede editar desde
+  el repo: regenerar desde su fuente con las nuevas medidas).
+
+Criterios de aceptación: una corrida en Webots con cubos de 2 cm entrega ≥2 cubos sin perderlos en el
+transporte, y en el laboratorio `lab_robot.py chase` detecta el cubo de 2 cm a ≥20 cm sin detectar el
+cuadro azul como cubo.
 
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
 

@@ -1,8 +1,9 @@
 # UCAB Multirobot: Phineas y Ferb (ROS 2 Jazzy + Webots)
 
 Software de los robots recolectores del proyecto de Robótica de la UCAB. Dos robots móviles con ruedas
-mecanum, **Phineas** y **Ferb**, comparten una pista blanca delimitada por una línea negra, buscan cubos
-de 3 cm de sus colores y los llevan a una zona de transferencia, donde el brazo **Perry** los clasifica.
+  mecanum, **Phineas** y **Ferb**, comparten una pista blanca delimitada por una línea negra, buscan cubos
+  de 2 x 2 cm de sus colores y los llevan a una zona de transferencia — un cuadrado azul en la pista real
+  —, donde el brazo **Perry** los clasifica.
 
 - Phineas recoge cubos **rojos, naranjas y amarillos**; Ferb, **verdes, azules y morados**.
 - Los dos robots ejecutan **el mismo código**. Solo cambian su archivo de parámetros

@@ -1,7 +1,7 @@
 #VRML_SIM R2025a utf8
 # Pista UCAB Robotica: tablero blanco con contorno de cinta negra y cuadrado de entrega.
 # Medidas estimadas a partir de las fotos (rectificadas): tablero ~1.93 x 1.22 m, cinta de 19 mm,
-# cuadrado de entrega ~24 x 24 cm, 14 cubos de 3 cm en 6 colores. Medir la pista real y ajustar.
+# cuadrado de entrega ~24 x 24 cm (en la pista real es un cuadrado AZUL), 14 cubos de 2 cm en 6 colores. Medir la pista real y ajustar.
 # ROS 2: both robots use controller "<extern>" and are driven by multirobot_sim.recolector_driver (webots_ros2).
 # To drive them by keyboard instead, set controller back to "recolector_teleop".
 
@@ -167,85 +167,85 @@ DEF FERB RecolectorUCAB {
   ]
 }
 CuboMadera {
-  translation -0.476 0.294 0.015
+  translation -0.476 0.294 0.01
   rotation 0 0 1 1.088
   name "cubo_verde_1"
   color 0.08 0.55 0.30
 }
 CuboMadera {
-  translation 0.081 -0.112 0.015
+  translation 0.081 -0.112 0.01
   rotation 0 0 1 0.737
   name "cubo_azul_1"
   color 0.10 0.25 0.70
 }
 CuboMadera {
-  translation 0.247 -0.188 0.015
+  translation 0.247 -0.188 0.01
   rotation 0 0 1 0.788
   name "cubo_morado_1"
   color 0.40 0.10 0.30
 }
 CuboMadera {
-  translation 0.087 0.129 0.015
+  translation 0.087 0.129 0.01
   rotation 0 0 1 0.486
   name "cubo_naranja_1"
   color 0.95 0.45 0.08
 }
 CuboMadera {
-  translation 0.003 0.225 0.015
+  translation 0.003 0.225 0.01
   rotation 0 0 1 1.189
   name "cubo_naranja_2"
   color 0.95 0.45 0.08
 }
 CuboMadera {
-  translation 0.495 0.234 0.015
+  translation 0.495 0.234 0.01
   rotation 0 0 1 0.389
   name "cubo_amarillo_1"
   color 0.95 0.80 0.10
 }
 CuboMadera {
-  translation 0.257 -0.026 0.015
+  translation 0.257 -0.026 0.01
   rotation 0 0 1 0.429
   name "cubo_verde_2"
   color 0.08 0.55 0.30
 }
 CuboMadera {
-  translation 0.385 0.15 0.015
+  translation 0.385 0.15 0.01
   rotation 0 0 1 1.513
   name "cubo_rojo_1"
   color 0.78 0.12 0.10
 }
 CuboMadera {
-  translation -0.675 0.249 0.015
+  translation -0.675 0.249 0.01
   rotation 0 0 1 0.488
   name "cubo_morado_2"
   color 0.40 0.10 0.30
 }
 CuboMadera {
-  translation -0.584 -0.295 0.015
+  translation -0.584 -0.295 0.01
   rotation 0 0 1 1.358
   name "cubo_rojo_2"
   color 0.78 0.12 0.10
 }
 CuboMadera {
-  translation -0.038 0.101 0.015
+  translation -0.038 0.101 0.01
   rotation 0 0 1 0.274
   name "cubo_amarillo_2"
   color 0.95 0.80 0.10
 }
 CuboMadera {
-  translation 0.221 0.151 0.015
+  translation 0.221 0.151 0.01
   rotation 0 0 1 0.19
   name "cubo_naranja_3"
   color 0.95 0.45 0.08
 }
 CuboMadera {
-  translation -0.097 -0.032 0.015
+  translation -0.097 -0.032 0.01
   rotation 0 0 1 0.556
   name "cubo_azul_2"
   color 0.10 0.25 0.70
 }
 CuboMadera {
-  translation 0.354 0.296 0.015
+  translation 0.354 0.296 0.01
   rotation 0 0 1 0.018
   name "cubo_rojo_3"
   color 0.78 0.12 0.10
