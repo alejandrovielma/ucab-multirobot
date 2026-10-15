@@ -160,7 +160,14 @@ El .docx/.pdf de la raíz no se puede editar desde el repositorio: hay que regen
 con el hardware nuevo (Fusion HAT+, batería 2S de 7,4 V y 2000 mAh), la pista medida, los cubos de
 2 x 2 cm y la detección del cuadro azul.
 
-## 18. La entrega se detiene antes del punto de soltar
+## 18. La entrega se detiene antes del punto de soltar — resuelto (2026-10-15)
+
+Solución: `drop_tolerance` = 2 cm en el comportamiento (mayor que los 1,5 cm que el filtro predice a la
+velocidad de entrada): a menos de 2 cm del punto de soltar, la suelta empieza. En el peor caso el cubo
+queda ~2 cm dentro del azul en lugar de 4. Prueba de integración en `test_delivery.py`
+(`test_behavior_and_gate_complete_a_delivery_on_the_real_track`): comportamiento + filtro sobre el
+polígono real completan la entrega; con tolerancia 0 la misma prueba se queda atascada en x = -0,477.
+
 
 Observado en una simulación cinemática (comportamiento + filtro de seguridad, sin Webots), con la
 geometría nueva y también con la anterior: el filtro predice 0,3 s de avance y la cerca virtual frena

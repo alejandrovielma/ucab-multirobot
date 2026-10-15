@@ -161,13 +161,14 @@ def test_with_the_gate_the_entry_must_be_precise_before_delivering():
 
 
 def test_blocked_entry_backs_off_with_the_cube_and_replans():
-    wall = Track((0.0, 0.80, 2.0, 0.80, 2.0, 2.0, 0.0, 2.0))  # the "square tape" 1 cm past the body front
+    # An obstacle line 3.5 cm before the drop point (beyond drop_tolerance): the entry is really blocked.
+    wall = Track((0.0, 0.83, 2.0, 0.83, 2.0, 2.0, 0.0, 2.0))
     f = fsm(track=wall)
     t = carrying_at(f)
     z = f.params.zone
     step(f, t, z.pose(z.entry_offset), scoop="red")
     assert f.state is State.DELIVER
-    cmd = step(f, t + 0.1, (z.x, 0.905, SOUTH), scoop="red")  # forward would put the front past 0.80
+    cmd = step(f, t + 0.1, (z.x, 0.935, SOUTH), scoop="red")  # forward would put the front past 0.83
     assert f.state is State.CARRY
     assert f.gate_closed and f.carrying
     assert cmd[0] < 0.0

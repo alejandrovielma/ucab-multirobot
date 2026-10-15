@@ -112,6 +112,9 @@ class BehaviorParams:
     square_align_gain: float = 0.8  # rad/s per unit of square_cx while entering (camera alignment)
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
+    # The safety gate predicts 0.3 s ahead (1.5 cm at enter_speed) and stops the robot that close to a
+    # drop point placed 3 mm from the boundary: start the drop within this distance of it.
+    drop_tolerance: float = 0.02  # m
     # Body geofence (keep equal to the gate): see core/track.py.
     track_horizon: float = 0.3  # s
     body_front: float = 0.095  # m
@@ -573,7 +576,7 @@ class BehaviorFSM:
                 self.state = State.CARRY  # drifted out of the corridor: line up again
                 return self._carry(inp)
             before = z.before(x, y)
-            if before > z.drop_offset:
+            if before > z.drop_offset + p.drop_tolerance:
                 # The square's tape is crossed on purpose here (by the scoop): line_front is ignored.
                 carrot = max(before - p.enter_lookahead, z.drop_offset - p.enter_lookahead)
                 _, _, wz = self._steer(inp.pose, *z.point(carrot), p.enter_speed)

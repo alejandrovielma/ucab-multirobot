@@ -276,3 +276,51 @@ def test_points_and_coordinates_round_trip_for_any_heading(heading):
     bx, by = z.point(0.0)
     assert (bx, by) == pytest.approx((0.3 - 0.1 * math.cos(heading), -0.2 - 0.1 * math.sin(heading)))
     assert z.pose(0.1)[2] == heading
+
+
+def test_drop_starts_where_the_gate_stops_the_robot():
+    # Kinematic check (behavior + safety gate on the track polygon): the gate's 0.3 s geofence
+    # prediction stops the entering robot ~1.3 cm before a drop point that leaves 3 mm to the
+    # boundary, so the drop never started. Within drop_tolerance the drop starts anyway.
+    fsm = carrying_fsm()
+    z = zone(fsm)
+    tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
+    vx, _, _ = tick(fsm, 4.0, z.pose(z.drop_offset + 0.013), holds_zone=True)
+    assert vx == pytest.approx(-fsm.params.reverse_speed)
+    assert not fsm.carrying
+    # Farther than the tolerance it still enters.
+    fsm2 = carrying_fsm()
+    tick(fsm2, 2.0, z.pose(z.entry_offset), holds_zone=True)
+    vx, _, _ = tick(fsm2, 4.0, z.pose(z.drop_offset + 0.05), holds_zone=True)
+    assert vx > 0.0
+
+
+def test_behavior_and_gate_complete_a_delivery_on_the_real_track():
+    """Integration: entry -> drop -> reverse -> release, with the safety gate's body geofence active."""
+    import pathlib
+
+    import yaml
+
+    from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams
+    from mobile_base.core.track import Track, predict
+
+    cfg = pathlib.Path(__file__).resolve().parents[1] / "config"
+    track = Track(yaml.safe_load((cfg / "track.yaml").read_text())["/**"]["ros__parameters"]["track_polygon"])
+    fsm = carrying_fsm()
+    fsm._track = track  # same polygon for the behavior's own geofence checks
+    gate = SafetyGate(SafetyParams(), track=track)
+    z = zone(fsm)
+    pose = z.pose(z.entry_offset)
+    released = None
+    t = 1.0
+    while t < 30.0 and released is None:
+        scoop = "red" if fsm.carrying else ""
+        want = fsm.step(BehaviorInput(now=t, cubes=[], line_front=False, pose=pose, holds_zone=True,
+                                      scoop_color=scoop))
+        cmd, _ = gate.filter(SafetyInput(cmd=want, line_front=False, own_pose=Pose2D(*pose, stamp=t),
+                                         peer_pose=None, now=t, heartbeat_age=0.1, carrying=fsm.carrying,
+                                         holds_zone=True))
+        pose = predict(pose, cmd[0], cmd[2], 0.1)
+        released = next((a for a in fsm.take_actions() if a.kind == "release"), None)
+        t += 0.1
+    assert released == ZoneAction("release", delivered=True, color="red"), f"stuck at t={t:.1f} pose={pose}"
