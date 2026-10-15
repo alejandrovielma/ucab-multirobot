@@ -21,6 +21,7 @@ El diseño completo (hardware, pines, decisiones y alternativas) está en
 
 - [Estado del proyecto](#estado-del-proyecto)
 - [Cómo funciona](#cómo-funciona)
+- [Pista y hardware](#pista-y-hardware)
 - [Estructura del repositorio](#estructura-del-repositorio)
 - [Instalación](#instalación)
 - [Ejecutar la simulación](#ejecutar-la-simulación)
@@ -37,8 +38,10 @@ El diseño completo (hardware, pines, decisiones y alternativas) está en
 | Lógica pura: cinemática mecanum, filtro de seguridad, colores, máquina de estados, llave del cuadro | Implementada, con pruebas |
 | Simulación en Webots con los dos robots | **Funciona**: exploran, giran ante el borde, capturan cubos de su color y se esquivan |
 | Transporte y entrega del cubo en el cuadro (`CARRY` y `DELIVER`) | **Funciona en Webots** con la captura verificada por la cámara: en la corrida 10, 2 entregas contadas = 2 cubos rojos dentro del cuadro (imagen tomada al soltar cada uno). Los cubos capturados mirando al borde todavía se pierden (tarea 12 de [docs/team-todo.md](docs/team-todo.md)) |
-| Cerca virtual (*geofence*) con la pose cenital | Implementada con el polígono de la pista de Webots ([config/track.yaml](src/mobile_base/config/track.yaml)); falta medir la pista real |
-| Nodos del robot real (HAT, sensor de línea, cámara) | Escritos; arrancan sin hardware, **sin probar en la Pi 5** |
+| Cerca virtual (*geofence*) con la pose cenital | Implementada con el rectángulo de la pista real medido a mano el 2026-10-15 ([config/track.yaml](src/mobile_base/config/track.yaml)); falta comprobarlo con la cámara cenital |
+| Zona de entrega | Generalizada a cualquier rumbo de llegada; en la pista real el robot entra al cuadro azul mirando al oeste. Detección del cuadro azul con la cámara (nunca se informa como cubo) y alineación al entrar. Con pruebas unitarias; **sin correr todavía en Webots** con la pista nueva |
+| Mundo de Webots | Regenerado desde las medidas reales (`tools/sim/generate_track.py`): tablero, textura, 14 cubos de 2 cm, marcador del cuadro; **sin ejecutar todavía** |
+| Nodos del robot real (motores, sensor de línea, cámara) | Escritos; arrancan sin hardware. Motores con la **Fusion HAT+** (y el HAT Cokoino como alternativa), **sin probar en la Pi 5**: falta instalar el driver en Ubuntu y mapear ruedas a puertos |
 | Localizador con cámara cenital | Esqueleto y homografía con pruebas; falta la captura real |
 
 ## Cómo funciona
@@ -75,7 +78,8 @@ flowchart LR
 
 1. **`cube_detector`** convierte la imagen a HSV y busca manchas saturadas con forma de cubo. A cada una
    le asigna un color según su tono. El fondo blanco, la línea negra y la pala gris quedan descartados
-   por tener poca saturación.
+   por tener poca saturación. El cuadro de entrega azul se informa aparte (ver
+   [Pista y hardware](#pista-y-hardware)), nunca como cubo.
 2. **`behavior`** es una máquina de estados:
    `EXPLORE` (avanza y gira al ver el borde) → `APPROACH` (se orienta hacia el cubo propio más grande)
    → `CAPTURE` (empuja para meterlo en la pala) → `CARRY` (va en arco al punto de entrada del cuadro y
@@ -107,11 +111,51 @@ Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
 
 | Función | Webots | Robot real |
 |---|---|---|
-| Motores | plugin `RecolectorDriver` | `hat_motor_driver` (HAT Cokoino, PWM con `lgpio`) |
+| Motores | plugin `RecolectorDriver` | `hat_motor_driver` (Fusion HAT+, puertos M0-M3; o HAT Cokoino con `lgpio`) |
 | Sensor de línea | `DistanceSensor "linea_frente"` | TCRT5000 en GPIO5 |
 | Cámara | `Camera "camara"` | IMX219 120° por CSI |
 | Posición | GPS + InertialUnit con ruido (imita la cámara cenital) | ArUco cenital (id 1 Phineas, id 2 Ferb) |
 | Pala | U fija de 40 × 48 mm, gris | pala impresa en 3D, fija, gris |
+
+## Pista y hardware
+
+### Pista real
+
+Medida el 2026-10-15. Tablero blanco con un rectángulo de cinta negra de 1,8 cm de ancho: **120,6 x 74 cm**
+por el borde exterior de la cinta. Del lado oeste sobresale el **cuadro de entrega, azul sólido**, de
+20,3 x 20,3 cm por fuera, a 26 cm de la esquina norte y a 27,8 cm de la esquina sur; su lado hacia la
+pista no tiene cinta. Solo la pala puede entrar al cuadro (ahí trabaja Perry); el cuerpo del robot no
+puede cruzar la cinta.
+
+Marco de referencia (el mismo en la pista real, en Webots y en los YAML): origen en el centro del
+rectángulo, **x hacia el este** a lo largo del lado de 120,6 cm, **y hacia el norte**, en metros. El
+borde interior de la cinta queda en x ±0,585 e y ±0,352; el interior azul del cuadro, en x −0,788 a
+−0,585 e y −0,075 a 0,092. El robot entra al cuadro **mirando al oeste**: se detiene con el frente 3 mm
+antes de la línea y deja el cubo 4 cm dentro del azul. Detalle de la zona en
+[docs/architecture.md](docs/architecture.md#pista-y-zona-de-entrega).
+
+Los cubos miden **2 x 2 cm**. Phineas recoge los rojos, naranjas y amarillos; Ferb, los verdes, azules
+y morados.
+
+**Cómo ve el robot el cuadro azul.** El cuadro es del mismo azul que los cubos de Ferb. El detector toma
+la región azul más grande de la imagen y, si es mucho más grande que un cubo (`square_min_area`), la
+publica como cuadro (`square_visible`, posición y área) y descarta las manchas azules que son parte
+de él. Mientras entra al cuadro, el robot corrige su giro para centrarlo en la imagen.
+
+### Hardware de cada robot
+
+| Pieza | Detalle |
+|---|---|
+| Computadora | Raspberry Pi 5 con Ubuntu Server 26.04 |
+| Placa de motores | **SunFounder Fusion HAT+**: su microcontrolador (I2C 0x17) maneja 4 puertos de motor M0-M3; se usa con la biblioteca `fusion_hat`. El nodo admite también el HAT Cokoino anterior (`motor_backend: cokoino_drv8833`) |
+| Batería | Li-ion **7,4 V, 2000 mAh (2S)**, 8,4 V con carga completa; alimenta la HAT, la Pi y los motores. Los motores TT son de 6 V, así que la potencia se limita a 6,0 / 8,4 = 71 % |
+| Motores y ruedas | 4 motores TT 1:120 con ruedas mecanum |
+| Cámara | IMX219 de 120° por CSI, montada adelante en la placa superior, hoy casi horizontal. Hay que inclinarla unos 25-30° hacia abajo para ver la pala y el cubo en su boca, y medir su altura, retroceso e inclinación ([tarea 15](docs/team-todo.md)) |
+| Sensor de línea | Un TCRT5000 delantero en GPIO5 (la Fusion HAT+ no usa ese pin) |
+| Pala | Fija, impresa en 3D, gris |
+
+Qué rueda va en cada puerto de la HAT todavía no se sabe: se identifica en el laboratorio con
+`tools/lab/lab_robot.py motors` y se guarda en `fusion_ports` / `fusion_reversed` de los YAML.
 
 ## Estructura del repositorio
 
@@ -119,8 +163,8 @@ Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
 src/
   multirobot_interfaces/   mensajes y servicios compartidos (RobotPose, RobotState, CubeDetection, zona)
   mobile_base/             código común de Phineas y Ferb
-    mobile_base/core/      lógica pura sin ROS: kinematics, safety, colors, behavior, geometry
-    mobile_base/vision.py  detección de cubos con OpenCV
+    mobile_base/core/      lógica pura sin ROS: kinematics, safety, colors, behavior, delivery, fusion_hat
+    mobile_base/vision.py  detección de cubos y del cuadro azul con OpenCV
     mobile_base/nodes/     nodos ROS 2 (lógica y hardware real)
     config/                phineas.yaml, ferb.yaml (colores, prioridad, umbrales)
     test/                  pruebas de la lógica
@@ -130,6 +174,8 @@ src/
   bringup/                 launch: sim.launch.py, robot.launch.py, robot_logic.launch.py, perry.launch.py
 docker/, scripts/          entorno de pruebas con Docker (sin instalar ROS 2 en Windows)
 tools/sim_monitor.py       monitor en vivo de los dos robots para depurar corridas
+tools/sim/generate_track.py  textura y cubos de la pista de Webots desde las medidas reales
+tools/lab/                 pruebas del robot real sin ROS (motores, línea, cámara, persecución)
 docs/                      arquitectura, tareas pendientes, imágenes
 odd/tasks/                 bitácora de la implementación con evidencias de cada paso
 figuras/                   figuras del documento técnico
@@ -252,7 +298,7 @@ powershell -File scripts/test_in_docker.ps1          # construye la imagen y cor
 powershell -File scripts/test_in_docker.ps1 -NoBuild # reutiliza la imagen
 ```
 
-El script compila los 6 paquetes, ejecuta `colcon test` (99 pruebas), importa cada módulo y arranca
+El script compila los 6 paquetes, ejecuta `colcon test` (242 pruebas), importa cada módulo y arranca
 `robot.launch.py` de Phineas y Ferb sin hardware para comprobar que ningún nodo se cae. Desde Ubuntu
 también se puede correr `colcon test` directamente en `~/ws`.
 
@@ -262,7 +308,8 @@ también se puede correr `colcon test` directamente en `~/ws`.
 > cubos en la Pi 5 sin instalar ROS, seguir [docs/guia-pruebas-laboratorio.md](docs/guia-pruebas-laboratorio.md)
 > (procedimiento paso a paso) y [tools/lab/README.md](tools/lab/README.md) (la herramienta).
 
-En la Pi 5 de cada robot (Ubuntu 24.04, ROS 2 Jazzy y `python3-lgpio`):
+En la Pi 5 de cada robot (ROS 2 Jazzy, la biblioteca `fusion_hat` y `python3-lgpio`; el sistema elegido
+es Ubuntu Server 26.04 y la instalación de ROS 2 en esa versión está por verificar):
 
 ```bash
 ros2 launch bringup robot.launch.py robot:=phineas   # o robot:=ferb
@@ -278,9 +325,8 @@ ros2 launch bringup perry.launch.py
   (chrony): el filtro de seguridad descarta poses con más de 0,5 s de antigüedad.
 - Por seguridad el robot **no se mueve** sin pose cenital ni latido del árbitro. Para una prueba en banco
   sin ellos: `robot.launch.py robot:=phineas require_pose:=false require_heartbeat:=false`.
-- Hardware: Raspberry Pi 5, HAT Cokoino 4WD (2 × DRV8833), 4 motores TT 1:120 con ruedas mecanum,
-  cámara IMX219 de 120°, un sensor de línea delantero y pala fija impresa en 3D. Usar **solo batería 2S**:
-  el DRV8833 admite como máximo 11,8 V. Pines en [docs/architecture.md](docs/architecture.md).
+- Hardware en [Pista y hardware](#pista-y-hardware). Usar **solo la batería 2S** (8,4 V cargada): es el
+  máximo de la entrada de la Fusion HAT+. Pines en [docs/architecture.md](docs/architecture.md).
 
 ## Problemas conocidos y soluciones
 
