@@ -84,3 +84,14 @@ geometry too (stopped at y -0.053 vs drop -0.065). Recorded as team-todo task 18
 ## Next step
 Engram mirror pending (writer had no mirror step). Decide task 18; run Webots with the new world;
 lab: Fusion HAT+ driver on Ubuntu Server 26.04 and wheel -> port mapping.
+
+## Parent verification and follow-up (2026-10-15)
+- Native review of f7eb90b..a8823ba (cubes 2 x 2 cm + plan): approved by the reliability lens and
+  acknowledged (lineage review-bcff5bed2f74d25e); 3 non-blocking findings (2 cm cube retention in the
+  40 mm U unproved, detection thresholds not recalibrated, geometry assumptions) tracked in team-todo.
+- Parent spot check: src/mobile_base/test 210 passed; tools/lab 9 passed.
+- 07dd24e fix: drop_tolerance 0.02 (team-todo #18). Integration test behavior + gate on the real track
+  polygon completes entry -> drop -> release; with drop_tolerance 0 it stalls at x -0.477 (RED observed).
+- Full suite in WSL with ROS 2 Jazzy (Docker Desktop daemon down): 244 tests, 0 errors, 0 failures;
+  smoke 37/37; launch smoke both robots OK.
+- Generated texture checked visually against the user's track photo.
