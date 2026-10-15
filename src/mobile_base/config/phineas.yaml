@@ -141,22 +141,31 @@
 
 /phineas/hat_motor_driver:
   ros__parameters:
+    # Backend: fusion_hat (SunFounder Fusion HAT+, current robots) or cokoino_drv8833 (previous
+    # Cokoino 4WD HAT through lgpio). Without the fusion_hat library the node runs dry (logged).
+    motor_backend: fusion_hat
     wheel_radius: 0.0325
     lx: 0.0605
     ly: 0.0655
     max_wheel_speed: 10.5
-    battery_voltage: 8.4
+    battery_voltage: 8.4  # 2S Li-ion 7.4 V nominal, 8.4 V full: duty cap 6.0 / 8.4 = 0.71
     motor_max_voltage: 6.0
-    pwm_frequency: 1000.0
     watchdog_timeout: 0.3
     wheel_signs: [1, 1, 1, 1]
+    dry_run: false
+    # Fusion HAT+: motor port of each wheel [fl, fr, rl, rr] and direction flip done by the HAT.
+    # Wiring not identified yet: run tools/lab/lab_robot.py motors, note which wheel each port
+    # moves and in which direction, then update these two lists.
+    fusion_ports: [M0, M1, M2, M3]
+    fusion_reversed: [false, false, false, false]
+    # Cokoino 4WD HAT (2x DRV8833), only with motor_backend cokoino_drv8833.
+    pwm_frequency: 1000.0
     nsleep_pins: [12, 13]
     pins_fl: [17, 27]
     pins_fr: [24, 25]
     pins_rl: [22, 23]
     pins_rr: [26, 16]
     gpio_chip: 4  # verify with `gpioinfo` on the Pi 5 (RP1 header chip)
-    dry_run: false
 
 /phineas/line_sensor:
   ros__parameters:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Lab tool for the real robot without ROS (Raspberry Pi 5 + Cokoino HAT + IMX219 + line sensor).
+"""Lab tool for the real robot without ROS (Raspberry Pi 5 + Fusion HAT+ + IMX219 + line sensor).
 
-    python3 tools/lab/lab_robot.py motors              # each wheel forward then backward (wiring check)
+    python3 tools/lab/lab_robot.py motors              # each port/wheel forward then backward (wiring check)
     python3 tools/lab/lab_robot.py drive               # keyboard teleop over SSH
     python3 tools/lab/lab_robot.py line                # line sensor level
     python3 tools/lab/lab_robot.py camera              # camera + cube detection, view at http://<ip>:8080/
@@ -79,16 +79,24 @@ class RawKeys:
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
 
+def open_motor_gpio(args, cfg):
+    """The Fusion HAT+ drives its motors over I2C: the Pi GPIO is only needed by the Cokoino HAT."""
+    if cfg["hat_motor_driver"].get("motor_backend", "fusion_hat") == "fusion_hat":
+        return open_gpio(None, dry_run=True)
+    return open_gpio(args.chip, args.dry_run)
+
+
 # ------------------------------------------------------------------ modes
 
 
 def mode_motors(args, cfg):
-    motors = Motors(cfg, open_gpio(args.chip, args.dry_run), args.max_speed)
+    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
     try:
         for wheel in WHEELS:
             for direction in (1.0, -1.0):
                 label = "adelante" if direction > 0 else "atras"
-                print(f"rueda {wheel}: {label} {args.seconds:.1f} s (duty {args.duty:.2f} del tope)", flush=True)
+                print(f"rueda {wheel} ({motors.port(wheel)}): {label} {args.seconds:.1f} s "
+                      f"(duty {args.duty:.2f} del tope)", flush=True)
                 motors.wheel(wheel, direction * args.duty)
                 time.sleep(args.seconds)
                 motors.stop()
@@ -105,7 +113,7 @@ def mode_motors(args, cfg):
 
 
 def mode_drive(args, cfg):
-    motors = Motors(cfg, open_gpio(args.chip, args.dry_run), args.max_speed)
+    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
     keys = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "q": (0, 0, 1), "e": (0, 0, -1)}
     speed, turn = args.max_speed, 1.0
     print("w/s avanzar/retroceder, a/d lateral, q/e girar, espacio parar, +/- velocidad, x salir", flush=True)
@@ -176,7 +184,7 @@ def mode_camera(args, cfg):
 
 def mode_chase(args, cfg):
     gpio = open_gpio(args.chip, args.dry_run)
-    motors = Motors(cfg, gpio, args.max_speed)
+    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
     line = LineSensor(cfg, gpio)
     cam = Camera(args.camera)
     vparams = vision_params(cfg)
