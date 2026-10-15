@@ -31,10 +31,10 @@
     carry_max_turn: 0.6
     k_heading: 1.5
     arrive_radius: 0.10
-    lead_in: 0.10
+    lead_in: 0.10  # aim this far past the entry when close to the axis
     lead_in_width: 0.20
-    wait_x: -0.45  # waiting point while the other robot holds the lease
-    wait_y: 0.05
+    wait_x: 0.0  # waiting point while the other robot holds the lease (no lease needed)
+    wait_y: 0.22
     request_period: 1.0
     enter_speed: 0.05
     enter_lookahead: 0.10
@@ -50,20 +50,24 @@
     plan_retry: 2.0
     plan_give_up: 6.0
     entry_heading_tolerance: 0.524  # 30 deg
-    gate_entry_x_tolerance: 0.02  # with the gate the entry is precise
-    gate_entry_y_band: 0.05
+    gate_entry_across_tolerance: 0.02  # with the gate the entry is precise
+    gate_entry_along_band: 0.05
     gate_entry_heading_tolerance: 0.175  # 10 deg
     skip_time: 3.0
     backoff_time: 3.0
     open_probe_distance: 0.5
-    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
+    # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the
+    # robot center BEFORE the boundary (inner tape edge at x -0.585) along the approach axis.
     # Keep these equal in behavior and safety_gate.
-    zone_x: -0.13
-    zone_square_y: -0.284
-    zone_entry_y: 0.08
-    zone_drop_y: -0.065  # body front stops before the tape, cube 4.6 cm inside
-    zone_exit_y: 0.02
-    zone_corridor_half_width: 0.10
+    zone_x: -0.6865  # blue interior center
+    zone_y: 0.0085
+    zone_heading: 3.14159265
+    zone_square_depth: 0.203  # blue interior along the axis: boundary at x -0.585
+    zone_entry_offset: 0.298  # x -0.287: 0.20 m before the drop
+    zone_drop_offset: 0.098  # x -0.487: body front 3 mm before the boundary, cube 4 cm inside the blue
+    zone_exit_offset: 0.205  # x -0.38: the scoop tip ends east of the cube
+    zone_corridor_half_width: 0.08  # blue interior is 16.7 cm wide across the axis
 
 /phineas/safety_gate:
   ros__parameters:
@@ -93,14 +97,18 @@
     body_rear: 0.095
     body_half_width: 0.082
     track_return_cone: 45.0
-    # Delivery square (core/delivery.py). Measured on the Webots texture: measure the real track.
+    # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
+    # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the
+    # robot center BEFORE the boundary (inner tape edge at x -0.585) along the approach axis.
     # Keep these equal in behavior and safety_gate.
-    zone_x: -0.13
-    zone_square_y: -0.284
-    zone_entry_y: 0.08
-    zone_drop_y: -0.065
-    zone_exit_y: 0.02
-    zone_corridor_half_width: 0.10
+    zone_x: -0.6865  # blue interior center
+    zone_y: 0.0085
+    zone_heading: 3.14159265
+    zone_square_depth: 0.203  # blue interior along the axis: boundary at x -0.585
+    zone_entry_offset: 0.298  # x -0.287: 0.20 m before the drop
+    zone_drop_offset: 0.098  # x -0.487: body front 3 mm before the boundary, cube 4 cm inside the blue
+    zone_exit_offset: 0.205  # x -0.38: the scoop tip ends east of the cube
+    zone_corridor_half_width: 0.08  # blue interior is 16.7 cm wide across the axis
 
 /phineas/cube_detector:
   ros__parameters:

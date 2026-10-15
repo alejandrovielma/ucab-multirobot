@@ -58,7 +58,9 @@ def test_expected_pose_follows_the_steps():
 
 # ---- behavior with the planner (zone moved inside the 2 m arena)
 
-ZONE = dict(zone_x=1.0, zone_square_y=0.4, zone_entry_y=1.2, zone_drop_y=0.9, zone_exit_y=1.1)
+# Square at y 0.0-0.8 with the boundary at y 0.8, approached heading south: entry y 1.2, drop 0.9, exit 1.1.
+ZONE = dict(zone_x=1.0, zone_y=0.4, zone_heading=-math.pi / 2, zone_square_depth=0.8, zone_entry_offset=0.4,
+            zone_drop_offset=0.1, zone_exit_offset=0.3)
 
 
 def fsm():

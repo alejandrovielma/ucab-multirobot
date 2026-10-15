@@ -12,7 +12,7 @@ import yaml
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, State
 from mobile_base.core.delivery import DeliveryZone
 from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams
-from mobile_base.core.track import Track
+from mobile_base.core.track import Footprint, Track
 
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "config"
 SQUARE = Track((0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0))
@@ -41,21 +41,32 @@ def test_odd_number_of_values_is_rejected():
         Track((0.0, 0.0, 1.0))
 
 
-def test_webots_track_contains_the_key_points_but_not_the_square():
+def test_real_track_contains_the_key_points_but_not_the_square():
     track = real_track()
     z = DeliveryZone()
     for name, (x, y) in {
-        "phineas start": (-0.45, 0.0),
-        "ferb start": (0.5, -0.25),
-        "entry": (z.x, z.entry_y),
-        "exit": (z.x, z.exit_y),
-        "phineas wait": (-0.45, 0.05),
-        "ferb wait": (0.25, 0.05),
+        "phineas start": (0.40, 0.20),
+        "ferb start": (0.40, -0.20),
+        "entry": z.entry_point,
+        "drop": z.drop_point,
+        "exit": z.exit_point,
+        "phineas wait": (0.0, 0.22),
+        "ferb wait": (0.0, -0.22),
     }.items():
         assert track.contains(x, y), name
-    assert not track.contains(z.x, z.square_y)
+    assert not track.contains(z.x, z.y)  # only the scoop enters the blue square
     assert track.contains(*track.centroid)  # the way back in from outside points here
-    assert not track.contains(-0.65, 0.81)  # where Phineas ended in run 6
+    assert track.centroid == pytest.approx((0.0, 0.0))
+    assert not track.contains(-0.65, 0.81)  # off the board
+
+
+def test_waiting_points_leave_room_to_spin_away_from_the_corridor():
+    # The waiting robot must not block the one holding the lease, and must be able to turn in place.
+    track = real_track()
+    z = DeliveryZone()
+    for wait in ((0.0, 0.22), (0.0, -0.22)):
+        assert track.distance_to_edge(*wait) >= Footprint().sweep_radius
+        assert not z.in_corridor(*wait)
 
 
 def gate_input(pose, cmd=(0.1, 0.0, 0.0), **kw):
@@ -84,10 +95,11 @@ def test_gate_lets_the_robot_drive_back_in_from_outside():
 def test_gate_lets_the_body_reach_the_square_tape_but_not_cross_it():
     track = real_track()
     gate = SafetyGate(SafetyParams(), track=track)
-    pose = Pose2D(-0.13, -0.05, -math.pi / 2, stamp=10.0)  # 1.5 cm before the drop point
+    z = DeliveryZone()
+    pose = Pose2D(*z.pose(z.drop_offset + 0.015), stamp=10.0)  # 1.5 cm before the drop point
     cmd, _ = gate.filter(gate_input(pose, cmd=(0.05, 0.0, 0.0), holds_zone=True, carrying=True))
     assert cmd[0] == pytest.approx(0.05)
-    beyond = Pose2D(-0.13, -0.08, -math.pi / 2, stamp=10.0)  # 0.3 s more would put the front on the tape
+    beyond = Pose2D(*z.pose(z.drop_offset - 0.015), stamp=10.0)  # 0.3 s more would put the front on the tape
     cmd, _ = gate.filter(gate_input(beyond, cmd=(0.05, 0.0, 0.0), holds_zone=True, carrying=True))
     assert cmd[0] == pytest.approx(0.0)
 

@@ -11,11 +11,13 @@ import numpy as np
 import pytest
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State, ZoneAction
+from mobile_base.core.delivery import DeliveryZone
 from mobile_base.vision import VisionParams, scoop_content
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 PHINEAS = ("red", "orange", "yellow")
-SOUTH = -math.pi / 2
+WEST = math.pi
+ZONE = DeliveryZone()
 
 
 # ---- vision: Webots frames taken with calibracion_pala.wbt and the IMX219-120 camera
@@ -63,9 +65,9 @@ def test_capture_confirmed_by_the_camera_goes_to_carry_with_the_seen_color():
     fsm = make_fsm()
     capture(fsm, scoop_at_end="orange")
     assert fsm.state is State.CARRY
-    tick(fsm, 1.3, scoop="orange", pose=(-0.13, 0.08, SOUTH), holds_zone=True)
-    tick(fsm, 1.4, scoop="orange", pose=(-0.13, -0.07, SOUTH), holds_zone=True)
-    tick(fsm, 1.5, scoop="", pose=(-0.13, 0.03, SOUTH), holds_zone=True)
+    tick(fsm, 1.3, scoop="orange", pose=ZONE.pose(ZONE.entry_offset), holds_zone=True)
+    tick(fsm, 1.4, scoop="orange", pose=ZONE.pose(ZONE.drop_offset - 0.005), holds_zone=True)
+    tick(fsm, 1.5, scoop="", pose=ZONE.pose(ZONE.exit_offset + 0.01), holds_zone=True)
     assert ZoneAction("release", delivered=True, color="orange") in fsm.take_actions()
 
 
@@ -99,9 +101,9 @@ def test_cube_still_in_the_scoop_after_reversing_is_not_counted():
     fsm = make_fsm()
     capture(fsm, scoop_at_end="red")
     fsm.take_actions()
-    tick(fsm, 1.3, scoop="red", pose=(-0.13, 0.08, SOUTH), holds_zone=True)
-    tick(fsm, 1.4, scoop="red", pose=(-0.13, -0.07, SOUTH), holds_zone=True)
-    tick(fsm, 1.5, scoop="red", pose=(-0.13, 0.03, SOUTH), holds_zone=True)  # cube dragged back out
+    tick(fsm, 1.3, scoop="red", pose=ZONE.pose(ZONE.entry_offset), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=ZONE.pose(ZONE.drop_offset - 0.005), holds_zone=True)
+    tick(fsm, 1.5, scoop="red", pose=ZONE.pose(ZONE.exit_offset + 0.01), holds_zone=True)  # cube dragged back out
     assert fsm.take_actions() == [ZoneAction("release", delivered=False, color="red")]
 
 
@@ -146,19 +148,21 @@ def test_deliver_starts_only_facing_the_square():
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, math.pi / 2), holds_zone=True)
+    tick(fsm, 1.3, scoop="red", pose=(*z.entry_point, 0.0), holds_zone=True)  # facing away (east)
     assert fsm.state is State.CARRY
-    tick(fsm, 1.4, scoop="red", pose=(z.x, z.entry_y, SOUTH + 0.2), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST + 0.2), holds_zone=True)
     assert fsm.state is State.DELIVER
 
 
-def test_carry_near_the_axis_aims_south_of_the_entry_to_arrive_turned():
+def test_carry_near_the_axis_aims_past_the_entry_to_arrive_turned():
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    # Coming from the east facing west, level with the entry: aiming at the entry itself gives wz=0;
-    # the lead-in point south of it makes the robot start turning left (toward south) already.
-    _, _, wz = tick(fsm, 1.3, scoop="red", pose=(z.x + 0.05, z.entry_y, math.pi), holds_zone=True)
+    # Coming from the south facing north, level with the entry and 5 cm east of it: aiming at the
+    # entry itself gives wz=0; the lead-in point west of it (toward the square) makes the robot start
+    # turning left (toward west) already.
+    ex, ey = z.entry_point
+    _, _, wz = tick(fsm, 1.3, scoop="red", pose=(ex + 0.05, ey - 0.05, math.atan2(0.05, -0.05)), holds_zone=True)
     assert wz > 0.0
 
 
@@ -166,20 +170,20 @@ def test_deliver_leaving_the_corridor_goes_back_to_carry():
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, SOUTH), holds_zone=True)
+    tick(fsm, 1.3, scoop="red", pose=z.pose(z.entry_offset), holds_zone=True)
     assert fsm.state is State.DELIVER
-    tick(fsm, 1.4, scoop="red", pose=(z.x + 0.3, 0.0, SOUTH), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=z.pose(z.entry_offset, across=0.3), holds_zone=True)
     assert fsm.state is State.CARRY
     assert fsm.carrying
 
 
 def test_deliver_needs_the_planned_heading_not_just_the_corridor_tolerance():
-    # Webots run 17: DELIVER started 33 deg off south (corridor accepts 60), went in diagonally and
-    # put a body corner on the square's tape.
+    # Webots run 17: DELIVER started 33 deg off the approach heading (corridor accepts 60), went in
+    # diagonally and put a body corner on the square's tape.
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    tick(fsm, 1.3, scoop="red", pose=(z.x, z.entry_y, SOUTH - math.radians(45)), holds_zone=True)
+    tick(fsm, 1.3, scoop="red", pose=(*z.entry_point, WEST - math.radians(45)), holds_zone=True)
     assert fsm.state is State.CARRY
-    tick(fsm, 1.4, scoop="red", pose=(z.x, z.entry_y, SOUTH - math.radians(20)), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST - math.radians(20)), holds_zone=True)
     assert fsm.state is State.DELIVER

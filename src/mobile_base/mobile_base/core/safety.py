@@ -89,10 +89,12 @@ class SafetyParams:
     track_return_cone: float = 45.0  # deg, outside the track: forward only within this of the centroid
     # Delivery square (see core/delivery.py); keep equal to the behavior's zone_* parameters.
     zone_x: float = DeliveryZone.x
-    zone_square_y: float = DeliveryZone.square_y
-    zone_entry_y: float = DeliveryZone.entry_y
-    zone_drop_y: float = DeliveryZone.drop_y
-    zone_exit_y: float = DeliveryZone.exit_y
+    zone_y: float = DeliveryZone.y
+    zone_heading: float = DeliveryZone.heading
+    zone_square_depth: float = DeliveryZone.square_depth
+    zone_entry_offset: float = DeliveryZone.entry_offset
+    zone_drop_offset: float = DeliveryZone.drop_offset
+    zone_exit_offset: float = DeliveryZone.exit_offset
     zone_corridor_half_width: float = DeliveryZone.corridor_half_width
 
 

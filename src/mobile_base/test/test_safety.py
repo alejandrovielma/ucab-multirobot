@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from mobile_base.core.delivery import DeliveryZone
 from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams
 
 FORWARD = (0.2, 0.0, 0.0)
@@ -239,8 +240,9 @@ def test_escape_ends_after_escape_time():
 
 
 # ---- Delivery square: the gate decides from its own pose and /zone/occupant, not from the behavior.
-SOUTH = -math.pi / 2
-IN_CORRIDOR = Pose2D(-0.13, -0.05, SOUTH, stamp=10.0)
+ZONE = DeliveryZone()
+WEST = math.pi
+IN_CORRIDOR = Pose2D(*ZONE.pose(0.15), stamp=10.0)  # facing the square, between entry and drop
 
 
 def test_reverse_allowed_in_corridor_with_lease_and_bounded():
@@ -256,8 +258,8 @@ def test_reverse_allowed_in_corridor_with_lease_and_bounded():
     "pose, holds_zone, carrying",
     [
         (IN_CORRIDOR, False, False),  # no lease
-        (Pose2D(0.4, 0.0, SOUTH, stamp=10.0), True, False),  # outside the corridor
-        (Pose2D(-0.13, -0.05, math.pi / 2, stamp=10.0), True, False),  # facing away from the square
+        (Pose2D(0.4, 0.0, WEST, stamp=10.0), True, False),  # outside the corridor
+        (Pose2D(*ZONE.point(0.15), 0.0, stamp=10.0), True, False),  # facing away from the square
         (IN_CORRIDOR, True, True),  # still carrying: reversing would leave the cube outside
     ],
 )
@@ -303,8 +305,9 @@ def test_delivering_robot_is_not_turned_away_by_the_peer_outside_the_corridor():
     # Webots run 17: Ferb, entering the square with the lease, was told to "turn away" from Phineas
     # waiting 0.48 m off; the body geofence forbade the turn and Ferb froze for 8 minutes.
     params = SafetyParams()
-    own = Pose2D(-0.13, -0.02, -math.pi / 2, stamp=10.0)
-    peer = Pose2D(-0.13 - 0.25, -0.02 - 0.4, 0.0, stamp=10.0)  # 0.47 m away, inside the front cone
+    own = Pose2D(*ZONE.pose(0.13), stamp=10.0)
+    # 0.47 m away, inside the front cone (0.4 m ahead along the approach, 0.25 m to the left).
+    peer = Pose2D(own.x - 0.4, own.y - 0.25, 0.0, stamp=10.0)
     cmd, reason = SafetyGate(params).filter(
         make_input(cmd=(0.05, 0.0, 0.0), own_pose=own, peer_pose=peer, holds_zone=True, carrying=True)
     )
