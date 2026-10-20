@@ -15,7 +15,7 @@ import yaml
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State, ZoneAction
 from mobile_base.core.delivery import DeliveryZone
 from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams
-from mobile_base.core.track import Footprint, Track, path_inside, predict
+from mobile_base.core.track import Footprint, Track, path_inside, penetration, predict
 
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "config"
 # 2 m x 2 m arena: walls at x = 0, x = 2, y = 0, y = 2.
@@ -139,7 +139,9 @@ def test_gate_carrying_stops_when_no_arc_keeps_the_body_inside():
 # ---- behavior
 
 
-ZONE = dict(zone_x=1.0, zone_square_y=0.4, zone_entry_y=1.2, zone_drop_y=0.9, zone_exit_y=1.1)  # inside ARENA
+# Square at y 0.0-0.8 with the boundary at y 0.8, approached heading south: entry y 1.2, drop 0.9, exit 1.1.
+ZONE = dict(zone_x=1.0, zone_y=0.4, zone_heading=-math.pi / 2, zone_square_depth=0.8, zone_entry_offset=0.4,
+            zone_drop_offset=0.1, zone_exit_offset=0.3)  # inside ARENA
 
 
 def fsm(**kw):
@@ -213,17 +215,20 @@ def test_carry_with_no_plan_drops_the_cube_by_backing_off():
     assert f.take_actions() == [ZoneAction("release", delivered=False, color="red")]
 
 
-# ---- delivery geometry on the Webots track
+# ---- delivery geometry on the real track (config/track.yaml)
 
 
 def test_drop_point_keeps_the_body_out_of_the_square_and_the_cube_in():
     z = DeliveryZone()
     track = real_track()
     assert track.enabled
-    drop = (z.x, z.drop_y, SOUTH)
+    drop = z.pose(z.drop_offset)
     assert all(track.contains(cx, cy) for cx, cy in FP.corners(*drop))  # body before the tape
-    cube_y = z.drop_y - z.cube_ahead
-    assert -0.388 + 0.015 <= cube_y <= -0.180 - 0.015  # whole cube inside the square interior
+    assert penetration(track, FP, drop) == 0.0
+    cx, cy = z.cube_drop_point
+    # Whole 2 cm cube (5 mm to spare) inside the blue interior x -0.788..-0.585, y -0.075..0.092.
+    assert -0.788 + 0.015 <= cx <= -0.585 - 0.015
+    assert -0.075 + 0.015 <= cy <= 0.092 - 0.015
 
 
 def test_border_turn_points_to_open_space_not_a_random_heading():

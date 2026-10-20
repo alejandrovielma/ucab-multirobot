@@ -5,11 +5,11 @@ EXPLORE  -> drive forward; on the border line turn in place a random 135-225 deg
 APPROACH -> steer toward the largest (closest) cube of my colors.
 CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop; it counts only if the
             camera then sees a cube of my color inside the U (scoop_color), otherwise APPROACH again.
-CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point north of the delivery
-            square (overhead pose); without it, wait at this robot's own waiting point, away from
+CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point in front of the delivery
+            square (overhead pose; core/delivery.py, approach heading west on the real track); without it, wait at this robot's own waiting point, away from
             the entry so the robot holding the lease can get through. Reaching the border line
             ends the transport: the turn away from it drops the cube (back to EXPLORE).
-DELIVER  -> with the lease: drive south across the square's tape until the cube is inside,
+DELIVER  -> with the lease: drive along the approach axis into the square until the cube is inside,
             then reverse out (the U is open at the front, so the cube stays) and release the lease.
 STOP     -> all zeros.
 
@@ -102,15 +102,19 @@ class BehaviorParams:
     carry_max_turn: float = 0.6  # rad/s
     k_heading: float = 1.5  # rad/s per rad of heading error
     arrive_radius: float = 0.10  # m, waiting point reached (> turning radius, or the robot orbits it)
-    lead_in: float = 0.10  # m, aim this far south of the entry when close to the square axis
+    lead_in: float = 0.10  # m, aim this far past the entry (toward the square) when close to the axis
     lead_in_width: float = 0.20  # m, "close to the axis"
-    wait_x: float = -0.45  # m, waiting point while the other robot holds the lease (per robot)
-    wait_y: float = 0.05
+    wait_x: float = 0.0  # m, waiting point while the other robot holds the lease (per robot)
+    wait_y: float = 0.22
     request_period: float = 1.0  # s, retry while denied
     enter_speed: float = 0.05  # m/s
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
+    square_align_gain: float = 0.8  # rad/s per unit of square_cx while entering (camera alignment)
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
+    # The safety gate predicts 0.3 s ahead (1.5 cm at enter_speed) and stops the robot that close to a
+    # drop point placed 3 mm from the boundary: start the drop within this distance of it.
+    drop_tolerance: float = 0.02  # m
     # Body geofence (keep equal to the gate): see core/track.py.
     track_horizon: float = 0.3  # s
     body_front: float = 0.095  # m
@@ -122,18 +126,20 @@ class BehaviorParams:
     plan_retry: float = 2.0  # s before planning again after a failure
     plan_give_up: float = 6.0  # s of failed planning (holding still) before dropping the cube
     entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
-    gate_entry_x_tolerance: float = 0.02  # m, with the gate (spins allowed) the entry is precise
-    gate_entry_y_band: float = 0.05  # m around zone_entry_y
+    gate_entry_across_tolerance: float = 0.02  # m off the axis; with the gate (spins allowed) the entry is precise
+    gate_entry_along_band: float = 0.05  # m around zone_entry_offset
     gate_entry_heading_tolerance: float = math.radians(10.0)
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
     open_probe_distance: float = 0.5  # m, straight free distance probed per heading after the border
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
-    zone_square_y: float = DeliveryZone.square_y
-    zone_entry_y: float = DeliveryZone.entry_y
-    zone_drop_y: float = DeliveryZone.drop_y
-    zone_exit_y: float = DeliveryZone.exit_y
+    zone_y: float = DeliveryZone.y
+    zone_heading: float = DeliveryZone.heading
+    zone_square_depth: float = DeliveryZone.square_depth
+    zone_entry_offset: float = DeliveryZone.entry_offset
+    zone_drop_offset: float = DeliveryZone.drop_offset
+    zone_exit_offset: float = DeliveryZone.exit_offset
     zone_corridor_half_width: float = DeliveryZone.corridor_half_width
 
     @property
@@ -149,6 +155,11 @@ class BehaviorInput:
     pose: tuple[float, float, float] | None = None
     holds_zone: bool = False  # /zone/occupant == this robot
     scoop_color: str = ""  # color seen inside the scoop by the camera ("" = empty or unknown)
+    # Blue delivery square seen by the robot camera (vision.detect_square); never reported as a cube.
+    square_visible: bool = False
+    square_cx: float = 0.0  # [-1, 1], left negative
+    square_cy: float = 0.0  # [0, 1], 0 = top
+    square_area: float = 0.0  # px
 
 
 class BehaviorFSM:
@@ -234,9 +245,10 @@ class BehaviorFSM:
             # Spins are allowed with the gate, so the plan can line up precisely: the square is only
             # 22 cm wide inside and the body may not touch its tape (Webots run 19: 5 cm and 27 deg off
             # the axis, a body corner on the tape, stuck for 7 minutes).
+            along, across = z.along_across(pose[0], pose[1])
             return (
-                abs(pose[0] - z.x) <= p.gate_entry_x_tolerance
-                and z.entry_y - p.gate_entry_y_band <= pose[1] <= z.entry_y + p.gate_entry_y_band
+                abs(across) <= p.gate_entry_across_tolerance
+                and abs(-along - z.entry_offset) <= p.gate_entry_along_band
                 and error <= p.gate_entry_heading_tolerance
             )
         return z.in_corridor(pose[0], pose[1]) and error <= p.entry_heading_tolerance
@@ -245,7 +257,7 @@ class BehaviorFSM:
         p = self.params
         z = self._zone
         if kind == "entry":
-            goal, target = self._at_entry, (z.x, z.entry_y)
+            goal, target = self._at_entry, z.entry_point
         else:
             def goal(q):
                 return distance(q[0], q[1], p.wait_x, p.wait_y) <= p.arrive_radius
@@ -543,11 +555,11 @@ class BehaviorFSM:
             return self._abandon_transport(inp, "no plan to the square: cube dropped")
         if not inp.holds_zone:
             return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
-        if abs(x - z.x) <= p.lead_in_width:
-            # Near the axis: aim a bit south of the entry so the arc ends facing the square
-            # (Webots run 8: arriving at the entry facing north and entering anyway went wrong).
-            return self._steer(inp.pose, z.x, z.entry_y - p.lead_in, p.carry_speed)
-        return self._steer(inp.pose, z.x, z.entry_y, p.carry_speed)
+        if abs(z.along_across(x, y)[1]) <= p.lead_in_width:
+            # Near the axis: aim a bit past the entry (toward the square) so the arc ends facing it
+            # (Webots run 8: arriving at the entry facing away and entering anyway went wrong).
+            return self._steer(inp.pose, *z.point(z.entry_offset - p.lead_in), p.carry_speed)
+        return self._steer(inp.pose, *z.entry_point, p.carry_speed)
 
     def _deliver(self, inp: BehaviorInput) -> Command:
         p = self.params
@@ -563,10 +575,14 @@ class BehaviorFSM:
             if not z.in_corridor(x, y):
                 self.state = State.CARRY  # drifted out of the corridor: line up again
                 return self._carry(inp)
-            if y > z.drop_y:
-                # The square's north tape is crossed on purpose here: line_front is ignored.
-                carrot_y = max(y - p.enter_lookahead, z.drop_y - p.enter_lookahead)
-                _, _, wz = self._steer(inp.pose, z.x, carrot_y, p.enter_speed)
+            before = z.before(x, y)
+            if before > z.drop_offset + p.drop_tolerance:
+                # The square's tape is crossed on purpose here (by the scoop): line_front is ignored.
+                carrot = max(before - p.enter_lookahead, z.drop_offset - p.enter_lookahead)
+                _, _, wz = self._steer(inp.pose, *z.point(carrot), p.enter_speed)
+                if inp.square_visible:
+                    # The camera sees the blue square: center it (corrects pose error across the axis).
+                    wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz - p.square_align_gain * inp.square_cx))
                 if self.gate_closed and not self._fits(inp.pose, p.enter_speed, wz, carrying=False):
                     # The body would touch the square's tape: back off with the retained cube, replan.
                     self.state = State.CARRY
@@ -583,7 +599,7 @@ class BehaviorFSM:
                 self._drop_until += p.gate_open_time
         if inp.now < self._gate_ready_at:
             return ZERO  # the gate is still opening
-        if y < z.exit_y and inp.now < self._drop_until:
+        if z.before(x, y) < z.exit_offset and inp.now < self._drop_until:
             return (-p.reverse_speed, 0.0, 0.0)
         # Counted only if the cube stayed in the square: it must have left the scoop.
         left_behind = not is_mine(inp.scoop_color, self.params.my_colors)

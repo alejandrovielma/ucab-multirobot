@@ -3,7 +3,8 @@
 > Procedimiento completo de la jornada (preparar la Pi, orden de las pruebas y tabla de resultados):
 > [docs/guia-pruebas-laboratorio.md](../../docs/guia-pruebas-laboratorio.md). Este archivo describe la herramienta.
 
-Herramienta en Python para probar en la Raspberry Pi 5 los motores, el sensor de línea y la cámara,
+Herramienta en Python para probar en la Raspberry Pi 5 (Ubuntu Server 26.04, placa de motores
+SunFounder Fusion HAT+, batería Li-ion 2S de 7,4 V y 2000 mAh) los motores, el sensor de línea y la cámara,
 y ver al robot acercarse solo a los cubos de su color. **No necesita ROS**: usa la misma cinemática,
 la misma detección de cubos y la misma máquina de estados que el resto del repositorio
 (`src/mobile_base`), así que lo que se valida aquí es lo que después corre en ROS.
@@ -17,31 +18,34 @@ explora, se acerca al cubo y **se detiene** cuando el cubo llega a donde estará
 - Hacer **todas las conexiones con el equipo apagado** y la batería desconectada. Revisar que no haya
   cables pelados ni contacto entre pines antes de conectar la batería (cortocircuitos).
 - **Medir el voltaje de la batería** con el multímetro y pasarlo con `--battery`. Con ese valor se
-  limita el PWM para que los motores TT (6 V) nunca reciban más de 6 V de promedio. Usar solo una
-  batería de 2 celdas (2S, hasta 8,4 V cargada): el DRV8833 del HAT no admite más de 10,8 V.
+  limita la potencia para que los motores TT (6 V) nunca reciban más de 6 V de promedio (con 8,4 V el
+  tope es 71 %). Usar solo la batería 2S (7,4 V nominal, 8,4 V cargada): la entrada de la Fusion HAT+
+  admite de 6,0 a 8,4 V.
 - La primera prueba de motores se hace **con el robot levantado** (ruedas en el aire).
 - `Ctrl+C` detiene los motores en cualquier modo. En `drive`, si no se pulsa ninguna tecla en 3 s
   el robot se detiene solo. Tener a alguien listo para levantar el robot en `chase`.
 
 ## Preparación de la Pi 5
 
-Recomendado: **Raspberry Pi OS Bookworm 64 bits**. En ese sistema la cámara CSI (IMX219) funciona con
-`picamera2`; en Ubuntu 24.04 no viene lista (Ubuntu soporta la cámara de la Pi oficialmente desde la
-25.04), así que ahí la cámara solo funciona con una webcam USB (`--camera v4l2`).
+Sistema elegido: **Ubuntu Server 26.04**. Los pasos completos, marcados como *por verificar* en esa
+versión, están en la [guía del laboratorio](../../docs/guia-pruebas-laboratorio.md#4-preparar-la-raspberry-pi-antes-de-ir-al-laboratorio):
 
 ```bash
 sudo apt update
-sudo apt install -y python3-lgpio python3-opencv python3-numpy python3-yaml python3-picamera2
+sudo apt install -y python3-lgpio python3-opencv python3-numpy python3-yaml gpiod i2c-tools
 ```
 
-Comprobar la cámara (Raspberry Pi OS):
+- **Motores (Fusion HAT+):** hacen falta el driver del kernel y la biblioteca `fusion_hat` de SunFounder.
+  Su instalador apunta a Raspberry Pi OS; en Ubuntu instalar antes los *headers* del kernel
+  (`sudo apt install linux-headers-$(uname -r)`) y, si falla la compilación del driver,
+  `cd ~/fusion-hat/driver && make && sudo make install`. Detalle en la guía, apartado 4.3. Sin la
+  biblioteca la herramienta avisa `fusion_hat not available` y los motores quedan en vacío.
+- **Sensor de línea:** sigue en GPIO5 con `lgpio` (la Fusion HAT+ no usa ese pin).
+- **Cámara:** pendiente de verificar en Ubuntu Server 26.04. La herramienta prueba, en este orden,
+  `picamera2`, GStreamer con `libcamerasrc` y V4L2 (una webcam USB con `--camera v4l2` sirve de alternativa).
 
-```bash
-rpicam-hello --list-cameras
-```
-
-Si no aparece ninguna cámara, editar `/boot/firmware/config.txt`, poner `camera_auto_detect=0` y
-agregar `dtoverlay=imx219,cam0` (o `cam1`, según el conector donde esté la cámara); reiniciar y repetir.
+La placa de motores se elige en el YAML (`motor_backend` de `hat_motor_driver`): `fusion_hat` por
+defecto, o `cokoino_drv8833` para el HAT anterior (2 x DRV8833 por `lgpio`, con sus pines `pins_*`).
 
 Copiar el código a la Pi (basta con las carpetas `tools/lab` y `src/mobile_base`):
 
@@ -69,16 +73,19 @@ Anotar el resultado de cada paso (sirve para corregir la configuración después
 python3 tools/lab/lab_robot.py motors --battery 8.1
 ```
 
-Mueve cada rueda 1 s hacia adelante y 1 s hacia atrás (`fl` delantera izquierda, `fr` delantera
-derecha, `rl` trasera izquierda, `rr` trasera derecha) y luego el robot completo: avanzar, lateral a
-la izquierda y girar antihorario.
+Mueve cada rueda 1 s hacia adelante y 1 s hacia atrás y anuncia el puerto que usa, por ejemplo
+`rueda fl (puerto M0): adelante` (`fl` delantera izquierda, `fr` delantera derecha, `rl` trasera
+izquierda, `rr` trasera derecha); luego mueve el robot completo: avanzar, lateral a la izquierda y
+girar antihorario. El aviso `GPIO dry run` es normal con la Fusion HAT+: los motores no usan los GPIO.
 
-- Si una rueda gira al revés: cambiar su signo en `wheel_signs` de
-  `src/mobile_base/config/phineas.yaml` (orden fl, fr, rl, rr).
-- Si se mueve otra rueda que la anunciada: los pines de `pins_fl`, `pins_fr`, `pins_rl`, `pins_rr`
-  en el mismo archivo no corresponden al cableado.
-- Si no se mueve nada: revisar la batería del HAT, el mensaje `gpiochip N` al arrancar y que no
-  aparezca `GPIO dry run`.
+El cableado de los puertos todavía no se conoce (por defecto fl M0, fr M1, rl M2, rr M3):
+
+- Anotar qué rueda física mueve cada puerto y si gira hacia atrás cuando el anuncio dice `adelante`.
+- Escribir en `hat_motor_driver` de `src/mobile_base/config/phineas.yaml` (o `ferb.yaml`)
+  `fusion_ports` con el puerto de cada rueda en el orden `[fl, fr, rl, rr]` y `fusion_reversed` con
+  `true` en las ruedas invertidas; repetir la prueba para confirmarlo.
+- Si no se mueve nada: revisar que no aparezca `fusion_hat not available`, que `i2cdetect -y 1`
+  muestre la HAT en `17` y que la batería esté conectada.
 
 ### 2. Sensor de línea
 
@@ -131,11 +138,12 @@ Si se detiene muy lejos o muy cerca del cubo, repetir con `--capture-cy` usando 
 
 | Mensaje | Causa probable | Qué hacer |
 |---|---|---|
-| `lgpio not available: falling back to GPIO dry run` | No está instalado `python3-lgpio` | `sudo apt install python3-lgpio` |
+| `fusion_hat not available: motors in dry run` | Falta la biblioteca de la Fusion HAT+ | Instalar el driver y la biblioteca (guía, apartado 4.3) |
+| `i2cdetect -y 1` no muestra `17` | HAT mal asentada, apagada o sin driver | Revisar con todo apagado; `dmesg \| grep fusion_hat`, `lsmod \| grep fusion_hat` |
+| `lgpio not available: falling back to GPIO dry run` (modos `line` y `chase`) | No está instalado `python3-lgpio` | `sudo apt install python3-lgpio` |
 | `no pinctrl-rp1 gpiochip found` | No es una Pi 5 o el kernel numera distinto | `gpiodetect` y pasar `--chip N` del que diga `pinctrl-rp1` |
-| `Permission denied` al abrir el gpiochip | El usuario no está en el grupo `gpio` | `sudo usermod -aG gpio $USER` y volver a entrar, o correr con `sudo` |
-| `no camera backend worked` y `picamera2: No module named 'picamera2'` | Falta `python3-picamera2` o no es Raspberry Pi OS | Instalarlo, o usar una webcam USB con `--camera v4l2` |
-| `picamera2: ... no cameras available` | La cámara no se detecta | Revisar el cable CSI (con todo apagado) y el `dtoverlay` de arriba |
+| `Permission denied` al abrir el gpiochip | El usuario no está en el grupo dueño de `/dev/gpiochip*` | `ls -l /dev/gpiochip*`, agregar el usuario a ese grupo y volver a entrar, o correr con `sudo` |
+| `no camera backend worked` | Ninguna vía de cámara funciona todavía en Ubuntu | Revisar el cable CSI (con todo apagado); probar una webcam USB con `--camera v4l2` |
 | El navegador no carga el video | Otra red, IP equivocada o puerto ocupado | `hostname -I`, misma red Wi-Fi, o `--port 8081` |
 
 ## Para probar en una laptop antes de ir

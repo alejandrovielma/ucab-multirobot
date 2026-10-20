@@ -4,7 +4,8 @@
 # Electronica: Raspberry Pi 5 + HAT Cokoino 4WD (DRV8833), bateria 2S 18650.
 # Sensores del plan: camara OV5647 (~54 grados), 4 TCRT5000 abajo, HC-SR04 al frente, FC-51 y TCS34725 en la pala,
 # MPU6050 (acelerometro + giroscopio, sin brujula).
-# Pala de un cubo con hueco en U de 40 mm de ancho y 48 mm de fondo (cubos de 30 mm), fija, con una
+# Pala de un cubo con hueco en U de 40 mm de ancho y 48 mm de fondo (validada con cubos de 30 mm;
+# los cubos reales ahora son de 2 x 2 cm: revalidar, ver tarea 13 de docs/team-todo.md), fija, con una
 # compuerta con servo (SG90) en la boca de la U que retiene el cubo mientras lo transporta.
 # Todas las medidas que no vienen del fabricante son estimadas: medir y ajustar.
 # template language: javascript

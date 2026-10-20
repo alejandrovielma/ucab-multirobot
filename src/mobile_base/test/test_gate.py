@@ -15,7 +15,9 @@ from mobile_base.core.track import Footprint, Track, path_inside, predict
 FP = Footprint()
 SOUTH = -math.pi / 2
 ARENA = Track((0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 2.0))
-ZONE = dict(zone_x=1.0, zone_square_y=0.4, zone_entry_y=1.2, zone_drop_y=0.9, zone_exit_y=1.1)
+# Square at y 0.0-0.8 with the boundary at y 0.8, approached heading south: entry y 1.2, drop 0.9, exit 1.1.
+ZONE = dict(zone_x=1.0, zone_y=0.4, zone_heading=-math.pi / 2, zone_square_depth=0.8, zone_entry_offset=0.4,
+            zone_drop_offset=0.1, zone_exit_offset=0.3)
 
 
 # ---- planner: spins and reverse are only offered with the gate closed
@@ -118,14 +120,14 @@ def test_drop_opens_the_gate_before_reversing():
     f.take_actions()
     z = f.params.zone
     t = 1.0
-    step(f, t, (z.x, z.entry_y, SOUTH), scoop="red")
+    step(f, t, z.pose(z.entry_offset), scoop="red")
     assert f.state is State.DELIVER
-    cmd = step(f, t + 0.1, (z.x, z.drop_y - 0.001, SOUTH), scoop="red")
+    cmd = step(f, t + 0.1, z.pose(z.drop_offset - 0.001), scoop="red")
     assert not f.gate_closed
     assert cmd == (0.0, 0.0, 0.0)  # waiting for the door to open
-    cmd = step(f, t + 0.1 + f.params.gate_open_time + 0.05, (z.x, z.drop_y - 0.001, SOUTH), scoop="red")
+    cmd = step(f, t + 0.1 + f.params.gate_open_time + 0.05, z.pose(z.drop_offset - 0.001), scoop="red")
     assert cmd[0] < 0.0
-    step(f, t + 3.0, (z.x, z.exit_y + 0.001, SOUTH), scoop="")
+    step(f, t + 3.0, z.pose(z.exit_offset + 0.001), scoop="")
     assert ZoneAction("release", delivered=True, color="red") in f.take_actions()
     assert not f.gate_closed
 
@@ -152,20 +154,21 @@ def test_with_the_gate_the_entry_must_be_precise_before_delivering():
     f = fsm()
     t = carrying_at(f)
     z = f.params.zone
-    step(f, t, (z.x + 0.05, z.entry_y, SOUTH + math.radians(27)), scoop="red")
+    step(f, t, (*z.point(z.entry_offset, across=0.05), SOUTH + math.radians(27)), scoop="red")
     assert f.state is State.CARRY
-    step(f, t + 0.1, (z.x + 0.01, z.entry_y, SOUTH + math.radians(5)), scoop="red")
+    step(f, t + 0.1, (*z.point(z.entry_offset, across=0.01), SOUTH + math.radians(5)), scoop="red")
     assert f.state is State.DELIVER
 
 
 def test_blocked_entry_backs_off_with_the_cube_and_replans():
-    wall = Track((0.0, 0.80, 2.0, 0.80, 2.0, 2.0, 0.0, 2.0))  # the "square tape" 1 cm past the body front
+    # An obstacle line 3.5 cm before the drop point (beyond drop_tolerance): the entry is really blocked.
+    wall = Track((0.0, 0.83, 2.0, 0.83, 2.0, 2.0, 0.0, 2.0))
     f = fsm(track=wall)
     t = carrying_at(f)
     z = f.params.zone
-    step(f, t, (z.x, z.entry_y, SOUTH), scoop="red")
+    step(f, t, z.pose(z.entry_offset), scoop="red")
     assert f.state is State.DELIVER
-    cmd = step(f, t + 0.1, (z.x, 0.905, SOUTH), scoop="red")  # forward would put the front past 0.80
+    cmd = step(f, t + 0.1, (z.x, 0.935, SOUTH), scoop="red")  # forward would put the front past 0.83
     assert f.state is State.CARRY
     assert f.gate_closed and f.carrying
     assert cmd[0] < 0.0

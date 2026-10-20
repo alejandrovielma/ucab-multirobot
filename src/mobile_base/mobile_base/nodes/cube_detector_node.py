@@ -6,7 +6,7 @@ from sensor_msgs.msg import Image
 
 from mobile_base.core.colors import DEFAULT_HUE_RANGES, ranges_from_flat
 from mobile_base.nodes.common import declare_dataclass, spin_node
-from mobile_base.vision import VisionParams, detect_cubes, image_to_bgr, scoop_content
+from mobile_base.vision import VisionParams, detect_cubes, detect_square, image_to_bgr, scoop_content
 from multirobot_interfaces.msg import CubeDetection, CubeDetectionArray
 
 
@@ -39,6 +39,11 @@ class CubeDetectorNode(Node):
             out.cubes.append(cube)
         out.scoop_color, fill = scoop_content(bgr, self.params)
         out.scoop_fill = float(fill)
+        square = detect_square(bgr, self.params)
+        out.square_visible = square.visible
+        out.square_cx = float(square.cx_norm)
+        out.square_cy = float(square.cy_norm)
+        out.square_area = float(square.area_px)
         self._pub.publish(out)
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Lab tool for the real robot without ROS (Raspberry Pi 5 + Cokoino HAT + IMX219 + line sensor).
+"""Lab tool for the real robot without ROS (Raspberry Pi 5 + Fusion HAT+ + IMX219 + line sensor).
 
-    python3 tools/lab/lab_robot.py motors              # each wheel forward then backward (wiring check)
+    python3 tools/lab/lab_robot.py motors              # each port/wheel forward then backward (wiring check)
     python3 tools/lab/lab_robot.py drive               # keyboard teleop over SSH
     python3 tools/lab/lab_robot.py line                # line sensor level
     python3 tools/lab/lab_robot.py camera              # camera + cube detection, view at http://<ip>:8080/
@@ -13,6 +13,7 @@ v4l2|file:<img>, --port 8080, --max-speed 0.10. Ctrl+C always stops the motors. 
 
 import argparse
 import math
+import os
 import select
 import sys
 import termios
@@ -25,7 +26,7 @@ from stream import FrameBuffer, serve
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
 from mobile_base.core.colors import ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
-from mobile_base.vision import VisionParams, detect_cubes, scoop_content  # noqa: E402
+from mobile_base.vision import VisionParams, detect_cubes, detect_square, scoop_content  # noqa: E402
 
 COLORS_BGR = {"red": (0, 0, 255), "orange": (0, 140, 255), "yellow": (0, 230, 230), "green": (0, 200, 0),
               "blue": (255, 80, 0), "purple": (200, 0, 160)}
@@ -41,7 +42,7 @@ def vision_params(cfg: dict) -> VisionParams:
     return VisionParams(hue_ranges=hue, **{k: v for k, v in det.items() if k in fields})
 
 
-def annotate(frame, detections, params: VisionParams, lines: list[str]):
+def annotate(frame, detections, params: VisionParams, lines: list[str], square=None):
     import cv2
 
     h, w = frame.shape[:2]
@@ -49,6 +50,11 @@ def annotate(frame, detections, params: VisionParams, lines: list[str]):
     x0 = int((1 - params.scoop_x_half) / 2 * w)
     x1 = int((1 + params.scoop_x_half) / 2 * w)
     cv2.rectangle(out, (x0, int(params.scoop_y_min * h)), (x1, int(params.scoop_y_max * h)), (200, 200, 200), 1)
+    if square is not None and square.visible:
+        sx, sy = int((square.cx_norm + 1) / 2 * w), int(square.cy_norm * h)
+        cv2.drawMarker(out, (sx, sy), (255, 0, 0), cv2.MARKER_CROSS, 40, 3)
+        cv2.putText(out, f"cuadro azul cx={square.cx_norm:+.2f}", (sx - 60, sy - 25),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
     for d in detections:
         cx, cy = int((d.cx_norm + 1) / 2 * w), int(d.cy_norm * h)
         size = int(math.sqrt(d.area_px) / 2)
@@ -79,16 +85,24 @@ class RawKeys:
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old)
 
 
+def open_motor_gpio(args, cfg):
+    """The Fusion HAT+ drives its motors over I2C: the Pi GPIO is only needed by the Cokoino HAT."""
+    if cfg["hat_motor_driver"].get("motor_backend", "fusion_hat") == "fusion_hat":
+        return open_gpio(None, dry_run=True)
+    return open_gpio(args.chip, args.dry_run)
+
+
 # ------------------------------------------------------------------ modes
 
 
 def mode_motors(args, cfg):
-    motors = Motors(cfg, open_gpio(args.chip, args.dry_run), args.max_speed)
+    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
     try:
         for wheel in WHEELS:
             for direction in (1.0, -1.0):
                 label = "adelante" if direction > 0 else "atras"
-                print(f"rueda {wheel}: {label} {args.seconds:.1f} s (duty {args.duty:.2f} del tope)", flush=True)
+                print(f"rueda {wheel} ({motors.port(wheel)}): {label} {args.seconds:.1f} s "
+                      f"(duty {args.duty:.2f} del tope)", flush=True)
                 motors.wheel(wheel, direction * args.duty)
                 time.sleep(args.seconds)
                 motors.stop()
@@ -105,10 +119,12 @@ def mode_motors(args, cfg):
 
 
 def mode_drive(args, cfg):
-    motors = Motors(cfg, open_gpio(args.chip, args.dry_run), args.max_speed)
-    keys = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "q": (0, 0, 1), "e": (0, 0, -1)}
+    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
+    # u/o: forward arcs (how the robot carries a cube; a spin in place can throw it out of the scoop).
+    keys = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "q": (0, 0, 1), "e": (0, 0, -1),
+            "u": (0.5, 0, 0.6), "o": (0.5, 0, -0.6)}
     speed, turn = args.max_speed, 1.0
-    print("w/s avanzar/retroceder, a/d lateral, q/e girar, espacio parar, +/- velocidad, x salir", flush=True)
+    print("w/s avanzar/retroceder, a/d lateral, q/e girar, u/o arco izq/der, espacio parar, +/- velocidad, x salir", flush=True)
     cmd = (0.0, 0.0, 0.0)
     last_key = time.monotonic()
     try:
@@ -149,13 +165,30 @@ def mode_line(args, cfg):
         time.sleep(0.1)
 
 
+def camera_status(frame, params: VisionParams):
+    """One console line (scoop window, blue square, cubes) and the square view, for the camera mode."""
+    dets = detect_cubes(frame, params)
+    scoop, fill = scoop_content(frame, params)
+    square = detect_square(frame, params)
+    found = ", ".join(f"{d.color}(cx {d.cx_norm:+.2f}, cy {d.cy_norm:.2f}, {d.area_px:.0f}px)" for d in dets)
+    sq = (f"cuadro azul (cx {square.cx_norm:+.2f}, cy {square.cy_norm:.2f}, {square.area_px:.0f}px)"
+          if square.visible else "sin cuadro")
+    return f"pala={scoop or '-'} {fill:.2f} | {sq} | {found or 'sin cubos'}", square
+
+
 def mode_camera(args, cfg):
     cam = Camera(args.camera)
     params = vision_params(cfg)
     frames = FrameBuffer()
     serve(frames, args.port)
     print(f"video en http://<ip-del-robot>:{args.port}/  (Ctrl+C para salir)", flush=True)
-    count, t0, last_print = 0, time.monotonic(), 0.0
+    count, t0, last_print, last_save = 0, time.monotonic(), 0.0, 0.0
+    saves = 0
+    if args.save_every > 0:
+        import cv2
+
+        os.makedirs(args.save_dir, exist_ok=True)
+        print(f"guardando una imagen cada {args.save_every:.0f} s en {args.save_dir}/", flush=True)
     while True:
         frame = cam.read()
         if frame is None:
@@ -164,19 +197,28 @@ def mode_camera(args, cfg):
             continue
         dets = detect_cubes(frame, params)
         scoop, fill = scoop_content(frame, params)
+        text, square = camera_status(frame, params)
         count += 1
         now = time.monotonic()
         fps = count / (now - t0)
-        frames.put(annotate(frame, dets, params, [f"{cam.backend} {fps:.1f} fps", f"pala: {scoop or '-'} {fill:.2f}"]))
+        shown = annotate(frame, dets, params, [f"{cam.backend} {fps:.1f} fps", f"pala: {scoop or '-'} {fill:.2f}"], square)
+        frames.put(shown)
         if now - last_print >= 1.0:
             last_print = now
-            found = ", ".join(f"{d.color}(cx {d.cx_norm:+.2f}, cy {d.cy_norm:.2f}, {d.area_px:.0f}px)" for d in dets)
-            print(f"{fps:4.1f} fps | pala={scoop or '-'} {fill:.2f} | {found or 'sin cubos'}", flush=True)
+            print(f"{fps:4.1f} fps | {text}", flush=True)
+        if args.save_every > 0 and saves < args.save_max and now - last_save >= args.save_every:
+            last_save = now
+            saves += 1
+            stamp = time.strftime("%H%M%S")
+            ok = cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}.png"), frame)  # raw, for calibration
+            ok = cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}_marcada.jpg"), shown) and ok
+            if not ok:  # imwrite returns False (no exception) on a full or read-only disk
+                LOG.warn(f"no se pudo guardar la imagen en {args.save_dir}/ (disco lleno o sin permiso?)")
 
 
 def mode_chase(args, cfg):
     gpio = open_gpio(args.chip, args.dry_run)
-    motors = Motors(cfg, gpio, args.max_speed)
+    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
     line = LineSensor(cfg, gpio)
     cam = Camera(args.camera)
     vparams = vision_params(cfg)
@@ -244,6 +286,10 @@ def main():
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
     parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
     parser.add_argument("--latch-timeout", type=float, default=3.0, help="drive mode: stop after N s with no key")
+    parser.add_argument("--save-every", type=float, default=0.0,
+                        help="camera mode: save the raw and the annotated frame every N seconds")
+    parser.add_argument("--save-dir", default="capturas", help="camera mode: folder for --save-every")
+    parser.add_argument("--save-max", type=int, default=200, help="camera mode: stop saving after N snapshots")
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
     parser.add_argument("--no-stop-at-capture", dest="stop_at_capture", action="store_false")
     args = parser.parse_args()

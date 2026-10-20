@@ -2,6 +2,10 @@
 
 The white board and the black border line have low saturation, so a saturation/value
 threshold keeps only painted cubes; shape filters reject elongated or tiny blobs.
+
+The delivery square is solid blue and Ferb collects blue cubes: the largest blue region much bigger
+than a cube (square_min_area) is the square. It is reported apart (detect_square) and never as a
+cube; detect_cubes drops blue blobs that are the square (that big, or overlapping its region).
 """
 
 import math
@@ -31,6 +35,18 @@ class VisionParams:
     scoop_y_min: float = 0.74
     scoop_y_max: float = 0.84
     scoop_min_fill: float = 0.30
+    # Delivery square: hue range of this color (blue), at least this many px. A 2 cm cube at the
+    # scoop mouth covers a few thousand px with the IMX219-120 at 640 x 480: calibrate on the robot.
+    square_color: str = "blue"
+    square_min_area: float = 12000.0  # px
+
+
+@dataclass(frozen=True)
+class SquareView:
+    visible: bool = False
+    cx_norm: float = 0.0  # [-1, 1], left negative (centroid)
+    cy_norm: float = 0.0  # [0, 1], 0 = top
+    area_px: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -49,13 +65,49 @@ def _dominant_hue(hues: np.ndarray) -> float:
     return float((ref + np.median(diffs)) % 180.0)
 
 
+def _painted(hsv: np.ndarray, params: VisionParams) -> np.ndarray:
+    return (hsv[..., 1] > params.s_min) & (hsv[..., 2] > params.v_min)
+
+
+def _open(mask: np.ndarray, params: VisionParams) -> np.ndarray:
+    kernel = np.ones((params.open_kernel, params.open_kernel), np.uint8)
+    return cv2.morphologyEx(mask.astype(np.uint8) * 255, cv2.MORPH_OPEN, kernel)
+
+
+def _square_region(hsv: np.ndarray, params: VisionParams):
+    """Largest region in the square's hue range: (contour, area), or (None, 0) when too small."""
+    hue = hsv[..., 0]
+    in_range = np.zeros(hue.shape, bool)
+    for low, high in params.hue_ranges.get(params.square_color, ()):
+        in_range |= (hue >= low) & (hue <= high)
+    mask = _open(in_range & _painted(hsv, params), params)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    best = max(contours, key=cv2.contourArea, default=None)
+    if best is None or cv2.contourArea(best) < params.square_min_area:
+        return None, 0.0
+    return best, float(cv2.contourArea(best))
+
+
+def detect_square(bgr: np.ndarray, params: VisionParams = VisionParams()) -> SquareView:
+    """The blue delivery square as seen by the robot camera (centroid of its largest region)."""
+    height, width = bgr.shape[:2]
+    contour, area = _square_region(cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV), params)
+    if contour is None:
+        return SquareView()
+    m = cv2.moments(contour)
+    cx, cy = m["m10"] / m["m00"], m["m01"] / m["m00"]
+    return SquareView(True, (cx / width) * 2.0 - 1.0, cy / height, area)
+
+
 def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list[Detection]:
     height, width = bgr.shape[:2]
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = ((hsv[..., 1] > params.s_min) & (hsv[..., 2] > params.v_min)).astype(np.uint8) * 255
-    kernel = np.ones((params.open_kernel, params.open_kernel), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = _open(_painted(hsv, params), params)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    square, _ = _square_region(hsv, params)
+    square_mask = np.zeros(mask.shape, np.uint8)
+    if square is not None:
+        cv2.drawContours(square_mask, [square], -1, 255, thickness=cv2.FILLED)
 
     detections = []
     for contour in contours:
@@ -82,6 +134,8 @@ def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list
         )
         if color is None:
             continue
+        if color == params.square_color and (area >= params.square_min_area or square_mask[blob > 0].any()):
+            continue  # the delivery square, not a cube
         cx = x + w / 2.0
         cy = y + h / 2.0
         detections.append(

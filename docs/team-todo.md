@@ -6,9 +6,11 @@ terminada, `powershell -File scripts/test_in_docker.ps1` debe seguir pasando.
 ## 1. Comportamiento de transporte y entrega (`CARRY`) — implementado
 
 Estado: implementado en la rama `feat/carry-delivery` (ver [odd/tasks/carry-delivery.md](../odd/tasks/carry-delivery.md)).
-Se eligió la reversa acotada bajo la llave del cuadro. Quedan pendientes: medir el cuadro real y
-ajustar `zone_*` en los YAML, y validar la entrada al cuadro con la cámara cenital real.
-Criterios originales:
+Se eligió la reversa acotada bajo la llave del cuadro. El cuadro real (azul, lado oeste) se midió el
+2026-10-15 y la zona se generalizó a cualquier rumbo de llegada: el robot entra mirando al oeste
+(ver [architecture.md](architecture.md#pista-y-zona-de-entrega)). Queda pendiente validar la entrada
+al cuadro con la cámara cenital real y la tarea 18.
+Criterios originales (escritos para la pista de Webots anterior, con entrada por el norte):
 
 Dónde: `BehaviorFSM._carry` en [src/mobile_base/mobile_base/core/behavior.py](../src/mobile_base/mobile_base/core/behavior.py)
 y el nodo `behavior_node.py` (clientes de servicio).
@@ -61,6 +63,9 @@ Criterios de aceptación:
 
 Dónde: [src/mobile_base/config/track.yaml](../src/mobile_base/config/track.yaml).
 
+Estado (2026-10-15): el polígono ya es el rectángulo interior medido a mano (x ±0,585, y ±0,352, sin el
+cuadro azul). Falta comprobarlo con la cámara cenital calibrada.
+
 Criterios de aceptación:
 - Con la cámara cenital calibrada (tarea 5), detectar el borde interior de la cinta, pasarlo por la
   homografía y guardar el polígono en metros. Medir también el cuadro y ajustar `zone_*`.
@@ -84,6 +89,96 @@ Opciones (requieren saber qué dice el reglamento sobre pisar o cruzar la cinta)
   centro del robot siga dentro del polígono con margen (cerca virtual evaluada en el centro).
 - No intentar capturar cubos a menos de ~12 cm del borde (con la pose y el polígono): se pierden esos cubos.
 - Probar en el robot real si un giro en el sitio muy lento conserva el cubo en la U.
+
+## 13. Re-adaptar el sistema a cubos de 2 x 2 cm y al cuadro azul de la pista real
+
+Cambio de requisito (2026-10-13): los cubos reales ahora miden **2 x 2 cm** (antes 3 cm) y el cuadro
+de entrega de la pista real es un **cuadrado azul**.
+
+Hecho (2026-10-15, rama `feat/track-v2-fusion-hat`, ver [odd/tasks/track-v2-fusion-hat.md](../odd/tasks/track-v2-fusion-hat.md)):
+- Pista medida: rectángulo de 120,6 x 74 cm con el cuadro azul al oeste; `track.yaml`, la zona de
+  entrega (generalizada a cualquier rumbo, entrada hacia el oeste) y los puntos de espera actualizados.
+- `vision.detect_square` reconoce el cuadro azul (región azul más grande que `square_min_area`) y
+  `detect_cubes` ya no lo informa como cubo; al entrar, el robot se alinea con el cuadro que ve.
+- Mundo de Webots regenerado desde `tools/sim/generate_track.py`: tablero de 1,82 x 0,94 m, textura,
+  14 cubos de 2 cm, marcador ArUco id 10 al oeste del cuadro y salidas mirando al oeste
+  (sin correr Webots todavía).
+
+Falta:
+
+- Correr una calibración en `calibracion_pala.wbt` con el cubo de 2 cm y ajustar el ancho de la U de
+  la pala impresa si la holgura de ~10 mm por lado degrada la retención (relacionado con la tarea 12).
+- Revisar los umbrales de detección: `min_area`/`max_area` en `vision.py` y en los YAML — un cubo de
+  2 cm ocupa menos píxeles a la misma distancia; recalibrar con la cámara real (tareas 3 y 7).
+- Calibrar con la cámara real `square_min_area` (12000 px por defecto) y el rango azul: el cuadro
+  debe verse como cuadro desde el punto de entrada y un cubo azul en la boca de la pala no debe
+  superar ese umbral.
+- Correr `pista_ucab.wbt` y comprobar la entrega hacia el oeste (no se ejecutó Webots en este cambio).
+- Actualizar la figura f13 (ver tarea 17 para el Documento Técnico).
+
+Criterios de aceptación: una corrida en Webots con cubos de 2 cm entrega ≥2 cubos sin perderlos en el
+transporte, y en el laboratorio `lab_robot.py chase` detecta el cubo de 2 cm a ≥20 cm sin detectar el
+cuadro azul como cubo.
+
+## 14. Driver de la Fusion HAT+ en Ubuntu y mapa de ruedas a puertos
+
+Dónde: la Pi 5 de cada robot (Ubuntu Server 26.04) y `fusion_ports` / `fusion_reversed` en
+`config/phineas.yaml` y `config/ferb.yaml`. Procedimiento en
+[guia-pruebas-laboratorio.md](guia-pruebas-laboratorio.md#43-driver-de-la-fusion-hat).
+
+Criterios de aceptación:
+- El instalador de SunFounder apunta a Raspberry Pi OS: en Ubuntu se instalan antes los *headers* del
+  kernel y, si falla la compilación del driver, se recompila a mano. Queda documentado qué funcionó.
+- `i2cdetect -y 1` muestra la HAT en 0x17 y `python3 -c "from fusion_hat.motor import Motor"` no falla.
+- `lab_robot.py motors` mueve cada puerto M0-M3; se anota qué rueda mueve cada uno y en qué sentido, y
+  se actualizan `fusion_ports` (orden fl, fr, rl, rr) y `fusion_reversed` en los dos YAML.
+
+## 15. Montaje de la cámara: altura, retroceso e inclinación
+
+Dónde: `Camera "camara"` en [RecolectorUCAB.proto](../src/multirobot_sim/protos/RecolectorUCAB.proto) y
+la ventana de la pala (`scoop_*`) en los YAML.
+
+Criterios de aceptación:
+- Se miden en el robot real la altura de la cámara, cuánto queda detrás del frente y su inclinación.
+- La cámara se inclina unos 25-30° hacia abajo para que la pala y el cubo en su boca entren en la
+  imagen (hoy mira casi horizontal; Webots supone 24° hacia abajo a 11 cm).
+- Se actualizan la cámara de Webots, `capture_cy` y la ventana `scoop_*`, y se repite la medición con
+  `calibracion_pala.wbt`.
+
+## 16. Margen blanco del tablero
+
+Dónde: `BOARD_X`, `BOARD_Y` en [tools/sim/generate_track.py](../tools/sim/generate_track.py).
+
+Criterios de aceptación:
+- Se mide el tablero real y la distancia de la cinta a sus bordes (hoy se supone 1,82 x 0,94 m).
+- Se regenera la textura con `python3 tools/sim/generate_track.py` y se ajustan las medidas del tablero
+  y la mesa en los dos mundos; las pruebas de `multirobot_sim` siguen pasando.
+
+## 17. Regenerar el Documento Técnico
+
+El .docx/.pdf de la raíz no se puede editar desde el repositorio: hay que regenerarlo desde su fuente
+con el hardware nuevo (Fusion HAT+, batería 2S de 7,4 V y 2000 mAh), la pista medida, los cubos de
+2 x 2 cm y la detección del cuadro azul.
+
+## 18. La entrega se detiene antes del punto de soltar — resuelto (2026-10-15)
+
+Solución: `drop_tolerance` = 2 cm en el comportamiento (mayor que los 1,5 cm que el filtro predice a la
+velocidad de entrada): a menos de 2 cm del punto de soltar, la suelta empieza. En el peor caso el cubo
+queda ~2 cm dentro del azul en lugar de 4. Prueba de integración en `test_delivery.py`
+(`test_behavior_and_gate_complete_a_delivery_on_the_real_track`): comportamiento + filtro sobre el
+polígono real completan la entrega; con tolerancia 0 la misma prueba se queda atascada en x = -0,477.
+
+
+Observado en una simulación cinemática (comportamiento + filtro de seguridad, sin Webots), con la
+geometría nueva y también con la anterior: el filtro predice 0,3 s de avance y la cerca virtual frena
+el cuerpo cuando su frente llega a ~1 cm de la frontera, pero el punto de soltar deja el frente a 3 mm.
+El robot queda en `DELIVER` sin llegar a `zone_drop_offset` (se detuvo 1,3 cm antes).
+
+Criterios de aceptación:
+- Decidir la solución (por ejemplo, dar por alcanzado el punto de soltar cuando el cuerpo ya no puede
+  avanzar y el cubo está dentro del azul, o alejar el punto de soltar unos milímetros) con una prueba
+  que reproduzca el bloqueo.
+- La prueba cinemática llega a soltar y salir del pasillo.
 
 ## 2. Validar los signos de las ruedas en Webots (prueba de desplazamiento lateral)
 
@@ -128,14 +223,16 @@ Criterios de aceptación:
   rumbo menor a 5°.
 - Publica `/phineas/pose` y `/ferb/pose` a 10 Hz o más.
 
-## 6. Prueba en banco del HAT con `lgpio`
+## 6. Prueba en banco de los motores (Fusion HAT+)
 
-Dónde: [src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py](../src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py).
+Dónde: [src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py](../src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py)
+(`motor_backend: fusion_hat`). Depende de la tarea 14.
 
 Criterios de aceptación:
 - Con el robot levantado (ruedas en el aire), cada motor gira en el sentido esperado al publicar
-  avance, lateral y giro en `cmd_vel`; si no, se corrige `wheel_signs` o los pines en el YAML.
-- Se confirma el número de `gpio_chip` correcto con `gpioinfo` en Ubuntu 24.04 sobre la Pi 5.
+  avance, lateral y giro en `cmd_vel`; si no, se corrige `fusion_reversed` (o `wheel_signs`) en el YAML.
+- El sensor de línea sigue en GPIO5: se confirma el número de `gpio_chip` con `gpioinfo` en Ubuntu
+  Server 26.04 sobre la Pi 5.
 - Si se deja de publicar `cmd_vel`, los motores se detienen en menos de 300 ms.
 - Se mide que el voltaje medio en bornes del motor no supera 6 V con la batería cargada.
 

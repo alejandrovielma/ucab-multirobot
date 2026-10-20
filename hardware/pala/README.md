@@ -10,8 +10,11 @@
 
 ## Qué es
 
-La pala validada en Webots: una U de **40 mm de ancho interior y 48 mm de fondo** (el cubo de 30 mm
-queda con 5 mm por lado), paredes de 3 mm que empiezan **2,5 mm sobre el piso** para no arrastrar, y un
+La pala validada en Webots: una U de **40 mm de ancho interior y 48 mm de fondo** (con el cubo de
+30 mm quedaba con 5 mm por lado). **Actualizado 2026-10-13: los cubos reales ahora miden 2 x 2 cm**,
+así que por lado sobran ~10 mm; la retención en giros y la ventana de verificación por cámara deben
+revalidarse con el cubo pequeño (tarea 13 de [docs/team-todo.md](../../docs/team-todo.md)).
+Paredes de 3 mm que empiezan **2,5 mm sobre el piso** para no arrastrar, y un
 embudo a 44° que abre la boca a unos 10 cm. El cubo entra empujado hasta la pared del fondo; al llegar
 al cuadro el robot **retrocede y el cubo se queda**, porque la U está abierta adelante.
 
