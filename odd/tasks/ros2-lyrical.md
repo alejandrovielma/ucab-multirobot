@@ -44,3 +44,8 @@ the host; Lyrical on the three Pis (team, in the lab).
 ## Progress
 - 2026-10-20: branch feat/ros2-lyrical created from feat/track-v2-fusion-hat (a1ee8ae).
 - 2026-10-20: T1 done; T2 blocked by the host network proxy (no test result yet).
+- 2026-10-20: native review of 9f4beb8 granted; reliability lens raised blocker
+  R3-docker-base-unverified (Lyrical image never built/tested). Not fixable by an edit: the suite has to
+  run. Third build attempt failed the same way (219 apt fetch failures); the system proxy on
+  127.0.0.1:8888 is an `ssh` process (port forward). Review left at correction_required, no correction
+  submitted. Next: run the suite once the proxy is off or stable, then reconcile the review.
