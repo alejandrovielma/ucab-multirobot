@@ -106,3 +106,15 @@ def test_cokoino_backend_still_available():
     assert motors.dry_run
     assert motors.port("fl") == "pines IN [17, 27]"
     motors.drive(0.1, 0.0, 0.0)
+
+
+def test_camera_status_line_reports_the_blue_square():
+    import numpy as np
+
+    from lab_robot import camera_status
+
+    frame = np.full((480, 640, 3), 255, np.uint8)
+    frame[300:470, 100:540] = (180, 60, 20)  # a big blue region: the delivery square
+    text, square = camera_status(frame, vision_params(load_config("phineas")))
+    assert square.visible
+    assert "cuadro azul" in text
