@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO / "src" / "mobile_base"))
 
 import yaml  # noqa: E402
 
-from mobile_base.core.fusion_hat import DEFAULT_PORTS, FusionMotorBank, load_motor_class, wiring_from  # noqa: E402
+from mobile_base.core.fusion_hat import DEFAULT_PORTS, load_motor_class, open_bank, wiring_from  # noqa: E402
 from mobile_base.core.kinematics import MecanumGeometry, duty_cap, hbridge_pwm, normalize, to_duty, wheel_speeds  # noqa: E402
 
 WHEELS = ("fl", "fr", "rl", "rr")
@@ -93,8 +93,7 @@ class Motors:
             self.wiring = wiring_from(hat.get("fusion_ports", DEFAULT_PORTS),
                                       hat.get("fusion_reversed", [False] * len(WHEELS)))
             motor_class = None if dry_run else load_motor_class(LOG)
-            if motor_class is not None:
-                self.bank = FusionMotorBank(motor_class, self.wiring)
+            self.bank = open_bank(motor_class, self.wiring, LOG)
             self.dry_run = self.bank is None
         elif self.backend == "cokoino_drv8833":
             self.frequency = hat["pwm_frequency"]
