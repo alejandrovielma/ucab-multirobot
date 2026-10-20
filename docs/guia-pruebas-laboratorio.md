@@ -167,10 +167,10 @@ dtoverlay=sunfounder-fusionhat
    ```bash
    sudo i2cdetect -y 1            # la HAT en la dirección 17 (o UU si el driver la tomó)
    lsmod | grep fusion_hat        # el módulo del driver está cargado
-   dmesg | grep -i fusion         # mensajes del driver, sin errores
+   sudo dmesg | grep -i fusion    # mensajes del driver (Ubuntu exige sudo para dmesg)
    cd ~ && python3 -c "from fusion_hat.motor import Motor; print('fusion_hat ok')"
    ```
-   Pendiente de confirmar en Phineas: que el módulo cargue solo después del reinicio.
+   Verificado en Phineas: después del reinicio el módulo carga solo y el `import` imprime `ok`.
 
 Anotar en la tabla de resultados la salida de estos comandos si algo falla. Interfaces y pines de la
 HAT: [documentación de SunFounder](https://docs.sunfounder.com/projects/fusion-hat/en/latest/hardware/interfaces.html).
