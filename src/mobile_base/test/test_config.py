@@ -47,3 +47,19 @@ def test_both_robots_share_the_same_square():
     za = {k: v for k, v in a["/phineas/behavior"]["ros__parameters"].items() if k.startswith("zone_")}
     zb = {k: v for k, v in b["/ferb/behavior"]["ros__parameters"].items() if k.startswith("zone_")}
     assert za == zb
+
+
+@pytest.mark.parametrize(("robot", "expected"), [("phineas", 0.14), ("ferb", 0.0)])
+def test_line_backoff_reaches_behavior_params(robot, expected):
+    behavior = load(robot)[f"/{robot}/behavior"]["ros__parameters"]
+    fields = {f.name for f in dataclasses.fields(BehaviorParams)}
+    values = {k: v for k, v in behavior.items() if k in fields and k != "my_colors"}
+    assert BehaviorParams(my_colors=("red",), **values).line_backoff == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("robot", "expected"), [("phineas", True), ("ferb", False)])
+def test_blind_reverse_reaches_safety_params(robot, expected):
+    # Safety-relevant: only Phineas (line sensor at the center) may reverse without the pose.
+    gate = load(robot)[f"/{robot}/safety_gate"]["ros__parameters"]
+    fields = {f.name for f in dataclasses.fields(SafetyParams)}
+    assert SafetyParams(**{k: v for k, v in gate.items() if k in fields}).blind_reverse is expected

@@ -1,5 +1,9 @@
 # Laboratorio de hoy (2026-10-20): lista de trabajo
 
+> **Resultado de la jornada:** A, B y C aprobados en Phineas; D parcial (detecta cubos, quedó un error
+> por reportar); E, F y G pendientes. Resumen y próximos pasos en
+> [estado-y-proximos-pasos.md](estado-y-proximos-pasos.md).
+
 Versión corta y actualizada del [plan de pruebas por fases](plan-pruebas-robot-real.md): solo lo que
 falta. Los comandos detallados están en la [guía del laboratorio](guia-pruebas-laboratorio.md).
 Todo se hace con `tools/lab/lab_robot.py`, **sin ROS**.

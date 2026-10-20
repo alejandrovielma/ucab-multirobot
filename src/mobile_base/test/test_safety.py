@@ -84,6 +84,20 @@ def test_reverse_is_never_passed_through():
     assert "forward only" in reason
 
 
+def test_blind_reverse_backs_off_the_line_without_pose():
+    # Centered line sensor (lab chase, no overhead pose): the behavior reverses off the tape.
+    gate = SafetyGate(SafetyParams(require_pose=False, blind_reverse=True))
+    cmd, reason = gate.filter(make_input(cmd=(-0.1, 0.0, 0.0), line_front=True, own_pose=None))
+    assert cmd == pytest.approx((-gate.params.max_reverse, 0.0, 0.0))
+    assert "blind reverse" in reason
+
+
+def test_blind_reverse_never_leaves_a_loose_cube_behind():
+    gate = SafetyGate(SafetyParams(require_pose=False, blind_reverse=True))
+    cmd, _ = gate.filter(make_input(cmd=(-0.1, 0.0, 0.0), own_pose=None, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+
+
 def test_peer_very_close_in_front_blocks_forward_and_turns_away():
     cmd, reason = SafetyGate(SafetyParams()).filter(make_input(peer_pose=peer_at(0.3, 0.0)))
     assert cmd[0] == pytest.approx(0.0)
