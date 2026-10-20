@@ -1,6 +1,6 @@
-# Test image: ROS 2 Jazzy plus the Python libraries used by the nodes.
+# Test image: ROS 2 Lyrical plus the Python libraries used by the nodes.
 # Webots and webots_ros2 are intentionally NOT installed: the simulation runs on the host.
-FROM ros:jazzy-ros-base
+FROM ros:lyrical-ros-base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and test the whole workspace inside a ROS 2 Jazzy container.
+# Build and test the whole workspace inside a ROS 2 Lyrical container (ROS_DISTRO selects the install).
 # Usage (inside the container, repo mounted at /ws): ./scripts/test_in_docker.sh
 # The sources are copied to a container-local workspace so build/, install/ and log/
 # never land on the (possibly Windows) bind mount and --symlink-install works.
@@ -19,7 +19,7 @@ fi
 
 set +u
 # shellcheck disable=SC1091
-source /opt/ros/jazzy/setup.bash
+source "/opt/ros/${ROS_DISTRO:-lyrical}/setup.bash"
 set -u
 
 rm -rf "${WORK_DIR}"
