@@ -97,7 +97,7 @@ class HatMotorDriverNode(Node):
     def _watchdog(self):
         stale = self._last_cmd is None or now_sec(self) - self._last_cmd > self.watchdog_timeout
         if stale and not self._stopped:
-            self.get_logger().warn("cmd_vel watchdog: stopping motors")
+            self.get_logger().warning("cmd_vel watchdog: stopping motors")
             self.stop()
 
     def stop(self):

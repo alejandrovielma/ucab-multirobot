@@ -11,7 +11,7 @@ class Gpio:
         self._handle = None
         self._claimed: list[int] = []
         if dry_run:
-            logger.warn("GPIO dry run: no hardware access")
+            logger.warning("GPIO dry run: no hardware access")
             return
         try:
             import lgpio  # noqa: PLC0415 - lazy on purpose

@@ -28,7 +28,7 @@ the host; Lyrical on the three Pis (team, in the lab).
 - [x] T1 Switch repository references from Jazzy to Lyrical; test scripts source the container's
       `$ROS_DISTRO` so they keep working on the old Jazzy WSL during the transition. (route: inline,
       mechanical edits in 7 files; structural check: `git grep -i jazzy` outside odd/ is empty)
-- [ ] T2 Verify: build the `ros:lyrical-ros-base` test image and run the full suite (colcon build +
+- [x] T2 Verify: build the `ros:lyrical-ros-base` test image and run the full suite (colcon build +
       test, module imports, robot.launch smoke). (route: per-action)
       BLOCKED 2026-10-20: the image build fails in `apt-get install` (HTTP 500 / unexpected EOF
       through the host proxy 127.0.0.1:8888 for archive.ubuntu.com); the base image pulled on the
@@ -49,3 +49,14 @@ the host; Lyrical on the three Pis (team, in the lab).
   run. Third build attempt failed the same way (219 apt fetch failures); the system proxy on
   127.0.0.1:8888 is an `ssh` process (port forward). Review left at correction_required, no correction
   submitted. Next: run the suite once the proxy is off or stable, then reconcile the review.
+- 2026-10-20: T2 done. The image built with apt retries (scratch copy of the Dockerfile with
+  `-o Acquire::Retries=10`, outside the repo, to survive the proxy). The first Lyrical run found two real
+  incompatibilities, both fixed:
+  1. rclpy in Lyrical has no `logger.warn()` (only `warning()`): the camera node died at launch. 7 call
+     sites moved to `warning()`; the lab tool's `Log` gains `warning()` because it is passed to
+     `mobile_base.gpio.Gpio`.
+  2. setuptools (Python 3.14) drops `tests_require`, so colcon fell back to unittest and ran 0 tests:
+     the 5 setup.py now declare `extras_require={"test": ["pytest"]}` (colcon maps the `test` extra).
+  Observed after the fix, in ros:lyrical-ros-base: `scripts/test_in_docker.ps1 -NoBuild` exit 0,
+  244 tests 0 failures, import smoke 37/37, robot.launch phineas and ferb OK; tools/lab 10 passed
+  on Python 3.14.4.

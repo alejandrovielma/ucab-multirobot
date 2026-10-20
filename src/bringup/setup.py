@@ -19,5 +19,5 @@ setup(
     maintainer_email="team@example.com",
     description="Launch files for the collector robots.",
     license="MIT",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
 )

@@ -34,5 +34,5 @@ setup(
     maintainer_email="team@example.com",
     description="Webots simulation of the collector robots.",
     license="MIT",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
 )
