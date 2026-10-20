@@ -55,3 +55,11 @@ def test_line_backoff_reaches_behavior_params(robot, expected):
     fields = {f.name for f in dataclasses.fields(BehaviorParams)}
     values = {k: v for k, v in behavior.items() if k in fields and k != "my_colors"}
     assert BehaviorParams(my_colors=("red",), **values).line_backoff == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("robot", "expected"), [("phineas", True), ("ferb", False)])
+def test_blind_reverse_reaches_safety_params(robot, expected):
+    # Safety-relevant: only Phineas (line sensor at the center) may reverse without the pose.
+    gate = load(robot)[f"/{robot}/safety_gate"]["ros__parameters"]
+    fields = {f.name for f in dataclasses.fields(SafetyParams)}
+    assert SafetyParams(**{k: v for k, v in gate.items() if k in fields}).blind_reverse is expected
