@@ -1,5 +1,7 @@
 # Plan de pruebas del robot real, por fases
 
+> Lista corta de lo que falta en la jornada del 2026-10-20: [lab-hoy.md](lab-hoy.md).
+
 Robot completo (2026-10-20): Raspberry Pi 5 con Ubuntu, SunFounder Fusion HAT+ con los 4 motores ya
 conectados, batería Li-ion 7,4 V 2000 mAh, cámara IMX219 funcionando, pala impresa montada y sensor de
 línea montado **en el centro del robot** (falta cablearlo).
