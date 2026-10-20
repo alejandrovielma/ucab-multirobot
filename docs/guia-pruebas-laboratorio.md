@@ -122,38 +122,55 @@ Si el grupo dueño de `/dev/gpiochip*` no aparece en `groups`, agregar el usuari
 
 ### 4.3 Driver de la Fusion HAT+
 
-La Fusion HAT+ necesita un driver del kernel y la biblioteca de Python `fusion_hat`. El instalador de
-SunFounder **está hecho para Raspberry Pi OS**; en Ubuntu hay reportes de que la compilación del driver
-falla si faltan los *headers* del kernel
-([foro de SunFounder](https://forum.sunfounder.com/t/cannot-compile-driver-for-fusion-hat-on-pi5-running-ubuntu-24-04-with-install-script/4302)).
-Todo este apartado está **por verificar en Ubuntu Server 26.04**.
+La Fusion HAT+ necesita un driver del kernel y la biblioteca de Python `fusion_hat`. Procedimiento
+**probado en Phineas el 2026-10-20** (Ubuntu Server 26.04, kernel `7.0.0-1020-raspi`, Python 3.14).
 
-1. Instalar primero los *headers* del kernel en uso:
+**No usar el instalador de una línea del fabricante en el laboratorio:** decide bajar desde Gitee (espejo
+chino) y la red de la UCAB corta la conexión (`curl: (35) Recv failure: Connection reset by peer`). Además
+instala `raspi-config`, que es de Raspberry Pi OS. Los pasos siguientes son los mismos de su
+[install.sh](https://raw.githubusercontent.com/sunfounder/fusion-hat/v1/install.sh), todo desde GitHub.
+
+1. Dependencias. Los paquetes `python3-*` van con `apt` porque para Python 3.14 en ARM no hay versiones
+   compiladas en PyPI: `pip` intentaría compilar `pygame` y falla sin las bibliotecas de SDL.
    ```bash
-   sudo apt install -y linux-headers-$(uname -r)
+   sudo apt install -y git python3-pip python3-dev i2c-tools dkms linux-headers-$(uname -r)
+   sudo apt install -y python3-pygame python3-pyaudio python3-evdev python3-spidev python3-smbus2 python3-gpiozero
    ```
-2. Descargar el instalador y **leerlo antes de ejecutarlo** (se ejecuta con `sudo`):
+2. Código del fabricante y biblioteca de Python (desde la carpeta raíz del repositorio, no desde `driver`):
    ```bash
-   curl -sSL -o install-fusion-hat.sh https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/main/install-fusion-hat.sh
-   less install-fusion-hat.sh
-   sudo bash install-fusion-hat.sh
+   git clone --depth=1 --branch v1 https://github.com/sunfounder/fusion-hat.git ~/fusion-hat
+   cd ~/fusion-hat && sudo pip3 install . --break-system-packages
    ```
-   Es lo mismo que el comando de una línea del fabricante,
-   `curl -sSL https://raw.githubusercontent.com/sunfounder/sunfounder-installer-scripts/main/install-fusion-hat.sh | sudo bash`,
-   pero permite revisar qué hace antes de darle permisos de administrador.
-3. Si la compilación del driver falla, recompilarlo a mano:
+   Termina con `Successfully installed ... fusion_hat-1.14.0 ...`. Las advertencias sobre `root` son normales.
+3. Driver del kernel (queda en DKMS: se recompila solo cuando se actualiza el kernel):
    ```bash
-   cd ~/fusion-hat/driver && make && sudo make install
+   cd ~/fusion-hat/driver && make all && sudo make install
    ```
-4. Reiniciar (`sudo reboot`) y comprobar:
+   Las advertencias `the compiler differs` y `Skipping BTF generation` son inofensivas.
+4. Cargar el driver al arrancar. Ubuntu arranca desde `/boot/firmware/current/` (línea
+   `os_prefix=current/` del `config.txt`), así que el overlay va en `current/overlays/`, **no** en
+   `/boot/firmware/overlays/` (no existe):
    ```bash
-   uname -a                       # versión del kernel
-   cat /etc/os-release            # versión de Ubuntu
-   i2cdetect -y 1                 # la HAT debe aparecer en la dirección 0x17
-   dmesg | grep fusion_hat        # mensajes del driver
+   sudo cp /boot/firmware/config.txt /boot/firmware/config.txt.bak
+   sudo cp /lib/firmware/sunfounder-fusionhat.dtbo /boot/firmware/current/overlays/
+   grep -n "sunfounder-fusionhat" /boot/firmware/config.txt || printf '
+[all]
+dtoverlay=sunfounder-fusionhat
+' | sudo tee -a /boot/firmware/config.txt
+   ```
+   La sección `[all]` evita que la línea quede dentro de una sección de otro modelo (`[pi4]`, `[cm4]`).
+   **Ojo:** al actualizar el kernel, Ubuntu reemplaza `current/` y el `.dtbo` copiado a mano se pierde;
+   si la HAT deja de responder después de una actualización, repetir el `cp` y reiniciar.
+5. Permisos: si `i2cdetect` solo funciona con `sudo`, ver el grupo de `ls -l /dev/i2c-1`, agregar el
+   usuario (`sudo usermod -aG i2c $USER`) y volver a entrar por SSH.
+6. Reiniciar (`sudo reboot`) y comprobar:
+   ```bash
+   sudo i2cdetect -y 1            # la HAT en la dirección 17 (o UU si el driver la tomó)
    lsmod | grep fusion_hat        # el módulo del driver está cargado
-   python3 -c "from fusion_hat.motor import Motor; print('fusion_hat ok')"
+   dmesg | grep -i fusion         # mensajes del driver, sin errores
+   cd ~ && python3 -c "from fusion_hat.motor import Motor; print('fusion_hat ok')"
    ```
+   Pendiente de confirmar en Phineas: que el módulo cargue solo después del reinicio.
 
 Anotar en la tabla de resultados la salida de estos comandos si algo falla. Interfaces y pines de la
 HAT: [documentación de SunFounder](https://docs.sunfounder.com/projects/fusion-hat/en/latest/hardware/interfaces.html).
