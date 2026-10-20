@@ -41,7 +41,7 @@ El diseño completo (hardware, pines, decisiones y alternativas) está en
 | Cerca virtual (*geofence*) con la pose cenital | Implementada con el rectángulo de la pista real medido a mano el 2026-10-15 ([config/track.yaml](src/mobile_base/config/track.yaml)); falta comprobarlo con la cámara cenital |
 | Zona de entrega | Generalizada a cualquier rumbo de llegada; en la pista real el robot entra al cuadro azul mirando al oeste. Detección del cuadro azul con la cámara (nunca se informa como cubo) y alineación al entrar. Con pruebas unitarias; **sin correr todavía en Webots** con la pista nueva |
 | Mundo de Webots | Regenerado desde las medidas reales (`tools/sim/generate_track.py`): tablero, textura, 14 cubos de 2 cm, marcador del cuadro; **sin ejecutar todavía** |
-| Nodos del robot real (motores, sensor de línea, cámara) | Escritos; arrancan sin hardware. Motores con la **Fusion HAT+** (y el HAT Cokoino como alternativa), **sin probar en la Pi 5**: falta instalar el driver en Ubuntu y mapear ruedas a puertos |
+| Robot real (Phineas, laboratorio del 2026-10-20) | Con `tools/lab/lab_robot.py`, sin ROS: driver de la **Fusion HAT+** instalado en Ubuntu 26.04, motores y mapa de ruedas **correctos**, sensor de línea **funciona** (montado en el centro: retrocede 14 cm antes de girar), cámara detecta cubos. Falta: pala, manejo, persecución y los nodos de ROS en la Pi. Detalle y tareas para el equipo en [docs/estado-y-proximos-pasos.md](docs/estado-y-proximos-pasos.md) |
 | Localizador con cámara cenital | Esqueleto y homografía con pruebas; falta la captura real |
 
 ## Cómo funciona
