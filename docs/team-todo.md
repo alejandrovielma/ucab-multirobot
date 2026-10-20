@@ -120,7 +120,10 @@ Criterios de aceptación: una corrida en Webots con cubos de 2 cm entrega ≥2 c
 transporte, y en el laboratorio `lab_robot.py chase` detecta el cubo de 2 cm a ≥20 cm sin detectar el
 cuadro azul como cubo.
 
-## 14. Driver de la Fusion HAT+ en Ubuntu y mapa de ruedas a puertos
+## 14. Driver de la Fusion HAT+ en Ubuntu y mapa de ruedas a puertos — hecho en Phineas (2026-10-20), falta Ferb
+
+Estado: en Phineas el driver carga al arrancar, `fusion_hat` importa y el mapa por defecto es correcto
+(`fusion_ports: [M0, M1, M2, M3]`, sin inversiones). Falta repetirlo en Ferb.
 
 Dónde: la Pi 5 de cada robot (Ubuntu Server 26.04) y `fusion_ports` / `fusion_reversed` en
 `config/phineas.yaml` y `config/ferb.yaml`. Procedimiento en
@@ -205,6 +208,9 @@ Criterios de aceptación:
 
 ## 4. Captura de la cámara real en la Pi 5 con Ubuntu
 
+Estado (2026-10-20): la IMX219 funciona en Ubuntu 26.04 con `lab_robot.py camera`; falta documentar qué
+vía usó (la herramienta imprime el backend en la consola) y llevarla a `camera_node.py`.
+
 Dónde: [src/mobile_base/mobile_base/nodes/camera_node.py](../src/mobile_base/mobile_base/nodes/camera_node.py).
 
 Criterios de aceptación:
@@ -224,6 +230,9 @@ Criterios de aceptación:
 - Publica `/phineas/pose` y `/ferb/pose` a 10 Hz o más.
 
 ## 6. Prueba en banco de los motores (Fusion HAT+)
+
+Estado (2026-10-20): sentidos correctos en Phineas con `lab_robot.py motors`; `gpio_chip` es 0
+(`gpiodetect`: `gpiochip0 [pinctrl-rp1]`). Falta la prueba por ROS (`cmd_vel`), el watchdog y el voltaje.
 
 Dónde: [src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py](../src/mobile_base/mobile_base/nodes/hat_motor_driver_node.py)
 (`motor_backend: fusion_hat`). Depende de la tarea 14.
@@ -255,3 +264,35 @@ Criterios de aceptación:
 - Se decide si hacen falta marcadores laterales (además del superior) para que la cámara cenital o la
   del otro robot los detecten de lado; si se agregan, se usan ids distintos y se documentan aquí y en
   el proto de Webots.
+
+## 19. Sensor de línea en el centro del robot (Phineas)
+
+El sensor quedó montado en el centro del robot, no 7,5 cm adelante como supone la simulación. Ya
+implementado: `line_backoff: 0.14` (retrocede 14 cm antes de girar al ver la cinta) y
+`blind_reverse: true` en `phineas.yaml`.
+
+Criterios de aceptación:
+- En Webots, con el `linea_frente` de Phineas en `translation 0 0 0.012` (`pista_ucab.wbt`), Phineas
+  nunca saca el cuerpo de la pista al llegar a la cinta explorando (10 minutos de simulación).
+- En el robot real, `chase` 5 veces seguidas sin que el cuerpo cruce la cinta.
+- Se mide la posición del sensor de Ferb y se ajustan sus `line_backoff` / `blind_reverse`.
+- Se anota qué lee el sensor sobre el cuadro azul (`blanco` o `NEGRO`).
+
+## 20. ROS 2 Lyrical con Webots en la laptop
+
+Criterios de aceptación:
+- WSL con Ubuntu 26.04 y `ros-lyrical-ros-base`, `ros-lyrical-webots-ros2` (README, secciones 2 y 3).
+- `ros2 launch bringup sim.launch.py` abre Webots R2025a y los dos robots se mueven; si `webots_ros2`
+  de Lyrical no es compatible con R2025a, se anota el error exacto y la versión de Webots que pide.
+
+## 21. Caracterizar la pala real
+
+La pala montada es una hoja ancha con los extremos en ángulo, sin el bolsillo en U de la simulación.
+
+Criterios de aceptación:
+- Dibujo acotado de la pala (ancho, alto, ángulos, distancia al frente del cuerpo).
+- Tabla con el cubo de 2 cm: empujar recto 50 cm, arco a la izquierda y a la derecha, giro en el sitio,
+  retroceder: ¿lo conserva?
+- `cy` del cubo pegado a la pala y del cubo donde la pala empieza a tomarlo (`capture_cy`), medidos con
+  `lab_robot.py camera`.
+- (Opcional, Webots) la pala modelada en el proto y la misma tabla en simulación.
