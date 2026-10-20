@@ -38,6 +38,35 @@ def test_border_triggers_turn_in_place_then_resumes():
     assert cmd[2] == pytest.approx(0.0)
 
 
+def test_line_backoff_reverses_before_spinning_without_pose():
+    # Line sensor at the robot center: the body front is already past the tape when it fires.
+    fsm = make_fsm(line_backoff=0.14, turn_min=1.0, turn_max=1.0)
+    tick(fsm, 0.0)
+    back = 0.14 / fsm.params.reverse_speed
+    assert tick(fsm, 0.1, line_front=True) == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
+    assert tick(fsm, 0.1 + back - 0.05)[0] == pytest.approx(-fsm.params.reverse_speed)
+    vx, _, wz = tick(fsm, 0.1 + back + 0.05)
+    assert vx == pytest.approx(0.0) and abs(wz) == pytest.approx(fsm.params.turn_speed)
+    assert tick(fsm, 0.1 + back + 0.9)[2] != 0.0  # the full turn still runs after the reverse
+    assert tick(fsm, 0.1 + back + 1.1)[0] == pytest.approx(fsm.params.explore_speed)
+
+
+def test_border_before_the_cube_also_backs_off():
+    fsm = make_fsm(line_backoff=0.14)
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    assert fsm.state is State.APPROACH
+    cmd = tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.3, 400.0)], line_front=True)
+    assert fsm.state is State.EXPLORE
+    assert cmd == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
+
+
+def test_zero_line_backoff_spins_at_once():
+    fsm = make_fsm(line_backoff=0.0)
+    tick(fsm, 0.0)
+    vx, _, wz = tick(fsm, 0.1, line_front=True)
+    assert vx == pytest.approx(0.0) and abs(wz) == pytest.approx(fsm.params.turn_speed)
+
+
 def test_turn_duration_is_within_bounds_and_seeded():
     durations = []
     for _ in range(2):

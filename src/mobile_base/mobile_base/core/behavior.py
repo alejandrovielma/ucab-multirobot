@@ -131,6 +131,9 @@ class BehaviorParams:
     gate_entry_heading_tolerance: float = math.radians(10.0)
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
     backoff_time: float = 3.0  # s, longest reverse looking for room to spin
+    # m reversed (timed, at reverse_speed) before turning away from the line while exploring or
+    # approaching: with the line sensor at the robot center the body front is already past the tape.
+    line_backoff: float = 0.0
     open_probe_distance: float = 0.5  # m, straight free distance probed per heading after the border
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
@@ -169,6 +172,7 @@ class BehaviorFSM:
         self._body = Footprint(params.body_front, params.body_rear, params.body_half_width)
         self._ignore_until = 0.0
         self._backoff_until: float | None = None
+        self._line_backoff_until = 0.0  # timed reverse after the line (works without a pose)
         self.plan: Plan | None = None
         self._plan_t0 = 0.0
         self._plan_kind = ""
@@ -309,6 +313,7 @@ class BehaviorFSM:
             self._give_up_cube(inp)
         self.state = State.EXPLORE
         self._turn_until = None
+        self._line_backoff_until = 0.0
         x, y, theta = inp.pose
         cx, cy = self._track.centroid
         err = relative_bearing(x, y, theta, cx, cy)
@@ -361,6 +366,15 @@ class BehaviorFSM:
         self._turn_prev_theta = pose[2]
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
         self._check_turn_room(now, pose)
+
+    def _start_line_turn(self, now: float, pose) -> None:
+        """Turn away from the line, reversing line_backoff first (timed, so it also works with pose=None)."""
+        p = self.params
+        self._start_turn(now, pose)
+        if p.line_backoff > 0.0:
+            reverse = p.line_backoff / p.reverse_speed
+            self._line_backoff_until = now + reverse
+            self._turn_until += reverse  # the turn (and its timeout) starts after the reverse
 
     def _free_distance(self, pose, heading: float) -> float:
         """How far the body can go straight along heading and stay inside the track."""
@@ -420,11 +434,13 @@ class BehaviorFSM:
             self._turn_until = None
         if self._turn_until is None:
             if inp.line_front:
-                self._start_turn(inp.now, inp.pose)
+                self._start_line_turn(inp.now, inp.pose)
             elif self._target(inp.cubes, inp.now) is not None:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
                 return self._approach(inp)
+        if inp.now < self._line_backoff_until:
+            return (-p.reverse_speed, 0.0, 0.0)  # body back inside the tape before spinning
         if self._backoff_until is not None:
             return (-p.reverse_speed, 0.0, 0.0)  # no room to spin: back off first (leaves any cube)
         if self._turn_until is not None:
@@ -447,7 +463,7 @@ class BehaviorFSM:
             # (Webots run 8: a cube just past the edge looped APPROACH <-> CAPTURE for minutes).
             self.state = State.EXPLORE
             self.note = "border before the cube"
-            self._start_turn(inp.now, inp.pose)
+            self._start_line_turn(inp.now, inp.pose)
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
             if not self._deliverable_from(inp.pose):

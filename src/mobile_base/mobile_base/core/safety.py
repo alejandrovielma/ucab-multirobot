@@ -8,6 +8,8 @@ Rules, applied in order every tick:
    Turning in place is allowed; vy and negative vx are removed. Exception: with the overhead pose
    and a track polygon reversing is no longer blind, so a slow reverse (max_reverse) is allowed
    when the body stays inside the track (and never while carrying: the cube would stay behind).
+   With blind_reverse (line sensor at the robot center, which the behavior backs off the tape by a
+   fixed line_backoff) a slow reverse is also allowed without the pose, never with a loose cube.
 4. Front line sensor on black -> no forward motion (turning allowed).
 5. Peer robot ahead (overhead-camera poses) -> slow down, stop, and turn away from it.
    If both robots stay blocked facing each other for deadlock_time, the robot
@@ -82,6 +84,7 @@ class SafetyParams:
     carry_arc_away_bearing: float = 25.0  # deg, peer this far off-axis: arc away instead of freezing
     carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
     max_reverse: float = 0.05  # m/s: delivery corridor with the lease, or anywhere the pose shows room behind
+    blind_reverse: bool = False  # allow max_reverse without the pose (centered line sensor, see rule 3)
     track_horizon: float = 0.3  # s, body geofence prediction
     body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
     body_rear: float = 0.095
@@ -145,6 +148,9 @@ class SafetyGate:
         if (delivering or on_track) and not loose_cube and vx < 0.0 and vy == 0.0:
             vx = max(vx, -p.max_reverse)
             reasons.append("delivery: reverse out" if delivering else "reverse (pose geofence)")
+        elif p.blind_reverse and not own_fresh and not loose_cube and vx < 0.0 and vy == 0.0:
+            vx = max(vx, -p.max_reverse)
+            reasons.append("blind reverse")
         elif vy != 0.0 or vx < 0.0:
             vx, vy = max(vx, 0.0), 0.0
             reasons.append("forward only")
