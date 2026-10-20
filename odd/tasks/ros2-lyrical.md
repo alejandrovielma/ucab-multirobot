@@ -60,3 +60,6 @@ the host; Lyrical on the three Pis (team, in the lab).
   Observed after the fix, in ros:lyrical-ros-base: `scripts/test_in_docker.ps1 -NoBuild` exit 0,
   244 tests 0 failures, import smoke 37/37, robot.launch phineas and ferb OK; tools/lab 10 passed
   on Python 3.14.4.
+- 2026-10-20: review recovered (scope_changed) as review-375f10d1d854e99c over 9f4beb8..c32d784; ended
+  `escalated` (unknown causality) on R2-pi-install-state-misrepresented, terminal native stop. The README
+  said the Pis already had Lyrical installed; reworded to say it is still pending (T4).

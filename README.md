@@ -315,9 +315,11 @@ también se puede correr `colcon test` directamente en `~/ws`.
 > cubos en la Pi 5 sin instalar ROS, seguir [docs/guia-pruebas-laboratorio.md](docs/guia-pruebas-laboratorio.md)
 > (procedimiento paso a paso) y [tools/lab/README.md](tools/lab/README.md) (la herramienta).
 
-En la Pi 5 de cada robot (Ubuntu Server 26.04 con ROS 2 Lyrical instalado de forma nativa, sin Docker,
-según la [guía oficial](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html), más la
-biblioteca `fusion_hat` y `python3-lgpio`):
+En la Pi 5 de cada robot (Ubuntu Server 26.04). **ROS 2 Lyrical todavía no está instalado en las Pi**:
+se instala de forma nativa, sin Docker, con la
+[guía oficial](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html), junto con la
+biblioteca `fusion_hat` y `python3-lgpio` (fase 8 de [docs/plan-pruebas-robot-real.md](docs/plan-pruebas-robot-real.md)).
+Ya instalado:
 
 ```bash
 ros2 launch bringup robot.launch.py robot:=phineas   # o robot:=ferb
