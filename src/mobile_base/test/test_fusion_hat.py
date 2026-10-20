@@ -108,3 +108,46 @@ def test_missing_library_means_dry_run_with_an_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "fusion_hat", None)  # import fails as if not installed
     assert load_motor_class(Logger()) is None
     assert errors and "fusion_hat" in errors[0]
+
+
+class Log:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, msg):
+        self.errors.append(msg)
+
+
+class DeadHat(PowerMotor):
+    """The library is installed but the HAT does not answer on I2C."""
+
+    def __init__(self, port):
+        raise OSError("[Errno 121] Remote I/O error")
+
+
+class FlakyMotor(PowerMotor):
+    """A transient I2C fault on one power() call."""
+
+    def power(self, value):
+        if self.port == "M1" and value != 0.0:
+            raise OSError("[Errno 5] Input/output error")
+        super().power(value)
+
+
+def test_a_hat_that_does_not_answer_means_dry_run_with_an_error():
+    from mobile_base.core.fusion_hat import open_bank
+
+    log = Log()
+    assert open_bank(DeadHat, wiring_from(DEFAULT_PORTS, (False,) * 4), log) is None
+    assert log.errors and "dry run" in log.errors[0]
+
+
+def test_an_i2c_fault_while_driving_is_logged_and_stops_the_motors_instead_of_raising():
+    from mobile_base.core.fusion_hat import open_bank
+
+    log = Log()
+    bank = open_bank(FlakyMotor, wiring_from(DEFAULT_PORTS, (False,) * 4), log)
+    assert bank.apply((0.3, 0.3, 0.3, 0.3), CAP) is False  # M1 (fr) failed, no exception
+    assert log.errors and "fr" in log.errors[0]
+    assert all(m.calls[-1] == ("stop",) for w, m in bank.motors.items() if w != "fr")
+    assert bank.apply((0.0, 0.0, 0.0, 0.0), CAP) is True

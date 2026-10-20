@@ -183,6 +183,7 @@ def mode_camera(args, cfg):
     serve(frames, args.port)
     print(f"video en http://<ip-del-robot>:{args.port}/  (Ctrl+C para salir)", flush=True)
     count, t0, last_print, last_save = 0, time.monotonic(), 0.0, 0.0
+    saves = 0
     if args.save_every > 0:
         import cv2
 
@@ -205,11 +206,14 @@ def mode_camera(args, cfg):
         if now - last_print >= 1.0:
             last_print = now
             print(f"{fps:4.1f} fps | {text}", flush=True)
-        if args.save_every > 0 and now - last_save >= args.save_every:
+        if args.save_every > 0 and saves < args.save_max and now - last_save >= args.save_every:
             last_save = now
+            saves += 1
             stamp = time.strftime("%H%M%S")
-            cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}.png"), frame)  # raw, for calibration
-            cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}_marcada.jpg"), shown)
+            ok = cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}.png"), frame)  # raw, for calibration
+            ok = cv2.imwrite(os.path.join(args.save_dir, f"cam_{stamp}_marcada.jpg"), shown) and ok
+            if not ok:  # imwrite returns False (no exception) on a full or read-only disk
+                LOG.warn(f"no se pudo guardar la imagen en {args.save_dir}/ (disco lleno o sin permiso?)")
 
 
 def mode_chase(args, cfg):
@@ -285,6 +289,7 @@ def main():
     parser.add_argument("--save-every", type=float, default=0.0,
                         help="camera mode: save the raw and the annotated frame every N seconds")
     parser.add_argument("--save-dir", default="capturas", help="camera mode: folder for --save-every")
+    parser.add_argument("--save-max", type=int, default=200, help="camera mode: stop saving after N snapshots")
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
     parser.add_argument("--no-stop-at-capture", dest="stop_at_capture", action="store_false")
     args = parser.parse_args()

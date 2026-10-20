@@ -15,7 +15,7 @@ TODO(team): map wheels to ports in the lab (tools/lab/lab_robot.py motors) befor
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
-from mobile_base.core.fusion_hat import DEFAULT_PORTS, FusionMotorBank, load_motor_class, wiring_from
+from mobile_base.core.fusion_hat import DEFAULT_PORTS, load_motor_class, open_bank, wiring_from
 from mobile_base.core.kinematics import MecanumGeometry, duty_cap, hbridge_pwm, normalize, to_duty, wheel_speeds
 from mobile_base.gpio import Gpio
 from mobile_base.nodes.common import declare_dataclass, now_sec, spin_node
@@ -54,8 +54,7 @@ class HatMotorDriverNode(Node):
         if self.backend == "fusion_hat":
             wiring = wiring_from(ports, reversed_)
             motor_class = None if dry_run else load_motor_class(self.get_logger())
-            if motor_class is not None:
-                self.bank = FusionMotorBank(motor_class, wiring)
+            self.bank = open_bank(motor_class, wiring, self.get_logger())
             dry = self.bank is None
             ports_text = ", ".join(f"{w} {port}{' (reversed)' if flip else ''}" for w, (port, flip) in wiring.items())
             self.get_logger().info(f"Fusion HAT+ ports: {ports_text}")

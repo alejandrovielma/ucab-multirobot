@@ -43,8 +43,9 @@ def duty_to_power(duty: float, cap: float) -> float:
 class FusionMotorBank:
     """The four motors of the HAT. motor_class is fusion_hat.motor.Motor (or a fake in tests)."""
 
-    def __init__(self, motor_class: Callable, wiring: Mapping[str, tuple[str, bool]]):
+    def __init__(self, motor_class: Callable, wiring: Mapping[str, tuple[str, bool]], logger=None):
         self.wiring = dict(wiring)
+        self.logger = logger
         self.motors = {}
         for wheel in WHEELS:
             port, flipped = self.wiring[wheel]
@@ -60,16 +61,45 @@ class FusionMotorBank:
         else:
             motor.set_power(percent)
 
-    def apply(self, duties: Sequence[float], cap: float) -> None:
-        for wheel, duty in zip(WHEELS, duties):
-            self.set_power(wheel, duty_to_power(duty, cap))
+    def _guarded(self, wheel: str, action: Callable[[], None]) -> bool:
+        # An I2C fault must not escape into the ROS callback: the executor would stop servicing the
+        # cmd_vel watchdog that exists to stop the wheels.
+        try:
+            action()
+            return True
+        except Exception as exc:  # noqa: BLE001 - any library/bus error, logged
+            if self.logger is not None:
+                self.logger.error(f"Fusion HAT+ motor {wheel} ({self.wiring[wheel][0]}) failed: {exc}")
+            return False
 
-    def stop(self) -> None:
-        for wheel, motor in self.motors.items():
+    def apply(self, duties: Sequence[float], cap: float) -> bool:
+        """False when a port failed; the other motors are then stopped (best effort)."""
+        ok = all([self._guarded(wheel, lambda w=wheel, d=duty: self.set_power(w, duty_to_power(d, cap)))
+                  for wheel, duty in zip(WHEELS, duties)])
+        if not ok:
+            self.stop()
+        return ok
+
+    def stop(self) -> bool:
+        def stop_one(wheel, motor):
             if callable(getattr(motor, "stop", None)):
                 motor.stop()
             else:
                 self.set_power(wheel, 0.0)
+
+        return all([self._guarded(wheel, lambda w=wheel, m=motor: stop_one(w, m)) for wheel, motor in self.motors.items()])
+
+
+def open_bank(motor_class: Callable | None, wiring: Mapping[str, tuple[str, bool]], logger):
+    """FusionMotorBank, or None (logged: the caller runs dry) without the library or when the HAT
+    does not answer while the motors are created."""
+    if motor_class is None:
+        return None
+    try:
+        return FusionMotorBank(motor_class, wiring, logger)
+    except Exception as exc:  # noqa: BLE001 - I2C error, HAT absent or not powered
+        logger.error(f"Fusion HAT+ not answering ({exc}): motors in dry run")
+        return None
 
 
 def load_motor_class(logger):
