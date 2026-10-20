@@ -19,6 +19,6 @@ setup(
     maintainer_email="team@example.com",
     description="Overhead ArUco localizer for the collector robots.",
     license="MIT",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
     entry_points={"console_scripts": ["aruco_localizer = overhead_localization.aruco_localizer_node:main"]},
 )

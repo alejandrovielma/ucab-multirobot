@@ -111,7 +111,7 @@ class BehaviorNode(Node):
             if self._request_client.service_is_ready():
                 self._request_client.call_async(RequestZone.Request(robot=self.robot))
             else:
-                self.get_logger().warn("/zone/request not available")
+                self.get_logger().warning("/zone/request not available")
             return
         if not self._release_client.service_is_ready():
             self.get_logger().error("/zone/release not available: the lease will only expire by timeout")

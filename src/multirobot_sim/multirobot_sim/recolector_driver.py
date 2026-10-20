@@ -119,7 +119,7 @@ class RecolectorDriver:
         data = read_camera_image(self._camera)
         if data is None:
             if now > CAMERA_MISSING_WARN_S:
-                self._node.get_logger().warn(
+                self._node.get_logger().warning(
                     f"camera has produced no image after {now:.1f} s", throttle_duration_sec=5.0
                 )
             return

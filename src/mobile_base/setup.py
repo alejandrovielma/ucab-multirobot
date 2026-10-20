@@ -19,7 +19,7 @@ setup(
     maintainer_email="team@example.com",
     description="Shared behavior, safety, vision and hardware nodes for the collector robots.",
     license="MIT",
-    tests_require=["pytest"],
+    extras_require={"test": ["pytest"]},
     entry_points={
         "console_scripts": [
             "behavior = mobile_base.nodes.behavior_node:main",

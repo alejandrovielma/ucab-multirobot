@@ -1,4 +1,4 @@
-# UCAB Multirobot: Phineas y Ferb (ROS 2 Jazzy + Webots)
+# UCAB Multirobot: Phineas y Ferb (ROS 2 Lyrical + Webots)
 
 Software de los robots recolectores del proyecto de Robótica de la UCAB. Dos robots móviles con ruedas
   mecanum, **Phineas** y **Ferb**, comparten una pista blanca delimitada por una línea negra, buscan cubos
@@ -195,25 +195,32 @@ porque necesita la tarjeta gráfica.
 Instalar [Webots R2025a](https://cyberbotics.com) en Windows, en la ruta por defecto
 `C:\Program Files\Webots`.
 
-### 2. Ubuntu 24.04 en WSL2
+### 2. Ubuntu 26.04 en WSL2
 
-En PowerShell como administrador:
+Todos los equipos del proyecto (laptop, las Pi de los robots y la de Perry) usan **ROS 2 Lyrical**, cuya
+plataforma principal es Ubuntu 26.04. No mezclar distribuciones de ROS 2 entre equipos: no se garantiza
+que se entiendan.
+
+En PowerShell como administrador, buscar el nombre exacto de la distribución 26.04 e instalarla:
 
 ```powershell
-wsl --install -d Ubuntu-24.04
+wsl --list --online
+```
+```powershell
+wsl --install -d Ubuntu-26.04
 ```
 
-Comprobar con `wsl -l -v` que aparece `Ubuntu-24.04` con `VERSION 2`. La distribución `docker-desktop`
-no sirve para esto.
+Comprobar con `wsl -l -v` que aparece con `VERSION 2`. La distribución `docker-desktop` no sirve para
+esto.
 
-### 3. ROS 2 Jazzy dentro de Ubuntu
+### 3. ROS 2 Lyrical dentro de Ubuntu
 
-Seguir la [guía oficial](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html) hasta
+Seguir la [guía oficial](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html) hasta
 instalar los paquetes, y luego:
 
 ```bash
-sudo apt install ros-jazzy-ros-base ros-dev-tools ros-jazzy-webots-ros2 python3-opencv
-echo 'source /opt/ros/jazzy/setup.bash' >> ~/.bashrc
+sudo apt install ros-lyrical-ros-base ros-dev-tools ros-lyrical-webots-ros2 python3-opencv
+echo 'source /opt/ros/lyrical/setup.bash' >> ~/.bashrc
 echo 'export WEBOTS_HOME=/mnt/c/Program\ Files/Webots' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -308,8 +315,11 @@ también se puede correr `colcon test` directamente en `~/ws`.
 > cubos en la Pi 5 sin instalar ROS, seguir [docs/guia-pruebas-laboratorio.md](docs/guia-pruebas-laboratorio.md)
 > (procedimiento paso a paso) y [tools/lab/README.md](tools/lab/README.md) (la herramienta).
 
-En la Pi 5 de cada robot (ROS 2 Jazzy, la biblioteca `fusion_hat` y `python3-lgpio`; el sistema elegido
-es Ubuntu Server 26.04 y la instalación de ROS 2 en esa versión está por verificar):
+En la Pi 5 de cada robot (Ubuntu Server 26.04). **ROS 2 Lyrical todavía no está instalado en las Pi**:
+se instala de forma nativa, sin Docker, con la
+[guía oficial](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html), junto con la
+biblioteca `fusion_hat` y `python3-lgpio` (fase 8 de [docs/plan-pruebas-robot-real.md](docs/plan-pruebas-robot-real.md)).
+Ya instalado:
 
 ```bash
 ros2 launch bringup robot.launch.py robot:=phineas   # o robot:=ferb

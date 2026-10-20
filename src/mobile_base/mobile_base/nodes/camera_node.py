@@ -34,7 +34,7 @@ class CameraNode(Node):
     def _tick(self):
         ok, frame = self.cap.read()
         if not ok:
-            self.get_logger().warn("camera read failed", throttle_duration_sec=5.0)
+            self.get_logger().warning("camera read failed", throttle_duration_sec=5.0)
             return
         msg = Image()
         msg.header.stamp = self.get_clock().now().to_msg()

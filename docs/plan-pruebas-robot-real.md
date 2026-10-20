@@ -203,11 +203,13 @@ salirse de la pista e ignorando los cubos de los otros colores y el cuadro azul.
 
 ## Fase 8. ROS 2 en la Pi (cuando las fases 0–7 estén aprobadas)
 
-ROS 2 Jazzy tiene paquetes oficiales para Ubuntu 24.04; la Pi tiene una versión más nueva, así que la
-vía prevista es correr ROS 2 Jazzy en un contenedor Docker en la Pi. Pasos, en otra jornada:
+Todos los equipos usan **ROS 2 Lyrical**, que tiene paquetes oficiales para Ubuntu 26.04 en arm64: en la
+Pi se instala de forma nativa, sin Docker. Pasos, en otra jornada:
 
-1. Instalar Docker en la Pi y levantar un contenedor `ros:jazzy` con acceso a I2C, GPIO, la cámara y la red.
-2. Compilar el repositorio dentro del contenedor (`colcon build`).
+1. Instalar ROS 2 Lyrical en la Pi con la
+   [guía oficial](https://docs.ros.org/en/lyrical/Installation/Ubuntu-Install-Debs.html)
+   (`ros-lyrical-ros-base` y `ros-dev-tools`).
+2. Compilar el repositorio en la Pi (`colcon build`).
 3. Lanzar los nodos del robot **sin cámara cenital ni coordinador**:
    `ros2 launch bringup robot.launch.py robot:=phineas require_pose:=false require_heartbeat:=false`.
 4. Mover el robot publicando en `cmd_vel` y comprobar que el filtro de seguridad frena en la línea.

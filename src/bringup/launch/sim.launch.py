@@ -1,7 +1,7 @@
 """Webots simulation: the track world, Phineas and Ferb, their logic nodes and the coordinator.
 
 ros2 launch bringup sim.launch.py
-Requires webots_ros2_driver (sudo apt install ros-jazzy-webots-ros2) and Webots R2025a.
+Requires webots_ros2_driver (sudo apt install ros-lyrical-webots-ros2) and Webots R2025a.
 The Webots plugin replaces the hardware nodes (motors, line sensor, camera) and emulates
 the overhead camera pose with GPS + InertialUnit, so the safety gate requires pose and heartbeat.
 """

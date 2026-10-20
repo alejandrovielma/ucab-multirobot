@@ -1,5 +1,5 @@
 #!/bin/bash
-source /opt/ros/jazzy/setup.bash; source ~/ws/install/setup.bash
+source "/opt/ros/${ROS_DISTRO:-lyrical}/setup.bash"; source ~/ws/install/setup.bash
 export WEBOTS_HOME="/mnt/c/Program Files/Webots"
 S=${OUT:-/tmp/scoop_shapes}; T=$(dirname "$(readlink -f "$0")")
 W=$(ros2 pkg prefix multirobot_sim)/share/multirobot_sim/worlds

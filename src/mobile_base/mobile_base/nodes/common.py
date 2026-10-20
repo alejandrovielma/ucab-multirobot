@@ -36,7 +36,7 @@ def declare_track(node: Node) -> Track:
     flat = node.declare_parameter("track_polygon", Parameter.Type.DOUBLE_ARRAY).value
     track = Track(flat)
     if not track.enabled:
-        node.get_logger().warn("no track_polygon: geofence disabled, only the line sensor keeps the robot in")
+        node.get_logger().warning("no track_polygon: geofence disabled, only the line sensor keeps the robot in")
     return track
 
 

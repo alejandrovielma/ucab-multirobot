@@ -2,7 +2,7 @@
 # Usage: powershell -File scripts/test_in_docker.ps1 [-NoBuild]
 param(
     [switch]$NoBuild,
-    [string]$Image = "phineas-ros-test:jazzy"
+    [string]$Image = "phineas-ros-test:lyrical"
 )
 
 $ErrorActionPreference = "Stop"

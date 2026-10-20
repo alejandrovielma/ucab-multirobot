@@ -26,8 +26,10 @@ class Log:
     def info(self, msg):
         print(f"[info] {msg}", flush=True)
 
-    def warn(self, msg):
+    def warning(self, msg):  # same name as the rclpy logger: mobile_base.gpio calls it
         print(f"[warn] {msg}", flush=True)
+
+    warn = warning
 
     def error(self, msg):
         print(f"[ERROR] {msg}", flush=True)

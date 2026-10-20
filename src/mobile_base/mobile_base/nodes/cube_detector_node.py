@@ -26,7 +26,7 @@ class CubeDetectorNode(Node):
         try:
             bgr = image_to_bgr(msg.height, msg.width, msg.encoding, msg.step, bytes(msg.data))
         except ValueError as exc:
-            self.get_logger().warn(str(exc), throttle_duration_sec=5.0)
+            self.get_logger().warning(str(exc), throttle_duration_sec=5.0)
             return
         out = CubeDetectionArray()
         out.stamp = msg.header.stamp
