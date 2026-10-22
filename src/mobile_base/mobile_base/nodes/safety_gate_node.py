@@ -27,6 +27,7 @@ class SafetyGateNode(Node):
         self._carrying = False
         self._gate_closed = False
         self._zone_occupant = ""
+        self._estop = False
         self._last_reason = ""
 
         self.create_subscription(Twist, "cmd_vel_nav", self._on_cmd, 10)
@@ -35,6 +36,9 @@ class SafetyGateNode(Node):
         self.create_subscription(RobotPose, peer_topic, self._on_peer_pose, 10)
         self.create_subscription(RobotState, "state", self._on_state, 10)
         self.create_subscription(String, "/zone/occupant", self._on_zone, ZONE_OCCUPANT_QOS)
+        # Transient local (latched): a gate restarted while the stop is on gets it again. From the CLI:
+        # ros2 topic pub --once --qos-durability transient_local estop std_msgs/msg/Bool "{data: true}"
+        self.create_subscription(Bool, "estop", self._on_estop, ZONE_OCCUPANT_QOS)
         self._pub = self.create_publisher(Twist, "cmd_vel", 10)
         self.create_timer(1.0 / rate_hz, self._tick)
 
@@ -59,6 +63,9 @@ class SafetyGateNode(Node):
         self._heartbeat_time = now_sec(self)
         self._zone_occupant = msg.data
 
+    def _on_estop(self, msg: Bool):
+        self._estop = msg.data
+
     def _tick(self):
         now = now_sec(self)
         fresh_cmd = self._cmd_time is not None and now - self._cmd_time <= self._cmd_timeout
@@ -74,6 +81,7 @@ class SafetyGateNode(Node):
                 carrying=self._carrying,
                 gate_closed=self._gate_closed,
                 holds_zone=self._zone_occupant == self._robot,
+                estop=self._estop,
             )
         )
         if reason != self._last_reason:

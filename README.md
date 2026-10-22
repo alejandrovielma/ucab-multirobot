@@ -2,10 +2,12 @@
 
 Software de los robots recolectores del proyecto de Robótica de la UCAB. Dos robots móviles con ruedas
   mecanum, **Phineas** y **Ferb**, comparten una pista blanca delimitada por una línea negra, buscan cubos
-  de 2 x 2 cm de sus colores y los llevan a una zona de transferencia — un cuadrado azul en la pista real
-  —, donde el brazo **Perry** los clasifica.
+  de 2 x 2 cm y los llevan a una zona de transferencia — un cuadrado azul en la pista real —, donde el
+  brazo **Perry** los clasifica.
 
-- Phineas recoge cubos **rojos, naranjas y amarillos**; Ferb, **verdes, azules y morados**.
+- Los dos robots recogen **todos los cubos que no son rojos** (naranjas, amarillos, verdes, azules y
+  morados). Los rojos se quedan en la pista: el robot los esquiva y, si uno entra en la pala, retrocede
+  para soltarlo. Regla vigente desde el 2026-10-22; antes cada robot tenía tres colores.
 - Los dos robots ejecutan **el mismo código**. Solo cambian su archivo de parámetros
   (`config/phineas.yaml` o `config/ferb.yaml`) y su espacio de nombres (`/phineas` o `/ferb`).
 - Los nodos que deciden (visión, comportamiento, seguridad) son idénticos en Webots y en el robot real.
@@ -94,6 +96,7 @@ flowchart LR
 
 | Regla | Por qué |
 |---|---|
+| Parada de emergencia (`estop` en true) → parada hasta que se quite | La interfaz del teléfono detiene el robot sin pasar por la lógica |
 | Sin latido del árbitro en 2 s → parada | Si se cae la red, ningún robot sigue moviéndose a ciegas |
 | Pose propia con más de 0,5 s → parada | La evasión depende de saber dónde están los dos |
 | Solo traslación hacia adelante (sin desplazamiento lateral ni reversa) | Hay un único sensor de línea, delantero: moverse de lado o atrás es ciego al borde |
@@ -134,8 +137,8 @@ borde interior de la cinta queda en x ±0,585 e y ±0,352; el interior azul del 
 antes de la línea y deja el cubo 4 cm dentro del azul. Detalle de la zona en
 [docs/architecture.md](docs/architecture.md#pista-y-zona-de-entrega).
 
-Los cubos miden **2 x 2 cm**. Phineas recoge los rojos, naranjas y amarillos; Ferb, los verdes, azules
-y morados.
+Los cubos miden **2 x 2 cm**. Los dos robots recogen todos los que no son rojos; los rojos se quedan en
+la pista.
 
 **Cómo ve el robot el cuadro azul.** El cuadro es del mismo azul que los cubos de Ferb. El detector toma
 la región azul más grande de la imagen y, si es mucho más grande que un cubo (`square_min_area`), la

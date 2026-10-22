@@ -49,6 +49,13 @@ def test_both_robots_share_the_same_square():
     assert za == zb
 
 
+@pytest.mark.parametrize("robot", ["phineas", "ferb"])
+def test_both_robots_collect_every_color_but_red(robot):
+    # Rule of 2026-10-22: red cubes stay on the track, everything else goes to the square.
+    colors = load(robot)[f"/{robot}/behavior"]["ros__parameters"]["my_colors"]
+    assert set(colors) == {"orange", "yellow", "green", "blue", "purple"}
+
+
 @pytest.mark.parametrize(("robot", "expected"), [("phineas", 0.14), ("ferb", 0.0)])
 def test_line_backoff_reaches_behavior_params(robot, expected):
     behavior = load(robot)[f"/{robot}/behavior"]["ros__parameters"]

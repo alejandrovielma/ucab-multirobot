@@ -48,6 +48,7 @@ Espacio de nombres `/<robot>`, con robot en {phineas, ferb}:
 | `pose` | multirobot_interfaces/RobotPose | plugin de Webots (GPS+InertialUnit, emula la cámara cenital) / overhead_localization | behavior, safety_gate de ambos robots |
 | `cmd_vel` | geometry_msgs/Twist | safety_gate | plugin de Webots / hat_motor_driver |
 | `cmd_vel_nav` | geometry_msgs/Twist | behavior | safety_gate |
+| `estop` | std_msgs/Bool (true = parada; se mantiene hasta un false; transient local, como `/zone/occupant`) | interfaz web (futuro `navigator`) o `ros2 topic pub --qos-durability transient_local` | safety_gate |
 | `cubes` | multirobot_interfaces/CubeDetectionArray (cubos, contenido de la pala y cuadro azul `square_*`) | cube_detector | behavior |
 | `state` | multirobot_interfaces/RobotState | behavior | coordinador, el otro robot (y safety_gate para saber si carga un cubo) |
 | `/zone/occupant` | std_msgs/String (latido 2 Hz, transient local; vacío = libre) | coordinador | behavior, safety_gate |
@@ -83,6 +84,8 @@ Solo cambia la capa de hardware; `robot_logic.launch.py` se incluye igual en los
 
 En este orden, en cada ciclo de 20 Hz:
 
+0. Parada de emergencia (`estop` en true): parada total hasta recibir `estop` en false. También cancela
+   una maniobra de escape de bloqueo en curso, para que no se reanude al quitar la parada.
 1. Sin latido de `/zone/occupant` durante más de 2 s: parada total.
 2. Pose propia con más de 0,5 s de antigüedad: parada total.
 3. Solo traslación hacia adelante: se eliminan `vy` y `vx` negativo (salvo la excepción de entrega, abajo). El robot tiene un único sensor

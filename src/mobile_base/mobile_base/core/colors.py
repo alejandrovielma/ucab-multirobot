@@ -48,8 +48,7 @@ def is_mine(color: str | None, my_colors: Iterable[str]) -> bool:
     return color is not None and color in set(my_colors)
 
 
-# Color ownership from the team plan; the YAML config is the source of truth at runtime.
-DEFAULT_ROBOT_COLORS: dict[str, list[str]] = {
-    "phineas": ["red", "orange", "yellow"],
-    "ferb": ["green", "blue", "purple"],
-}
+# Color ownership from the team plan (2026-10-22: both robots collect every color but red, which
+# stays on the track); the YAML config is the source of truth at runtime.
+_NOT_RED = ["orange", "yellow", "green", "blue", "purple"]
+DEFAULT_ROBOT_COLORS: dict[str, list[str]] = {"phineas": _NOT_RED, "ferb": _NOT_RED}

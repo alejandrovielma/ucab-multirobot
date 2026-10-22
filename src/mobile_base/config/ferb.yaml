@@ -4,7 +4,7 @@
 /ferb/behavior:
   ros__parameters:
     robot: ferb
-    my_colors: [green, blue, purple]
+    my_colors: [orange, yellow, green, blue, purple]  # every color but red (rule of 2026-10-22); red cubes stay on the track
     peer_pose_topic: /phineas/pose
     rate_hz: 10.0
     cube_timeout: 0.5
@@ -58,6 +58,11 @@
     skip_time: 3.0
     backoff_time: 3.0
     line_backoff: 0.0  # set when Ferb's sensor position is measured
+    avoid_cy: 0.45  # cube of another color (red) lower in the image than this is in the scoop path: steer around it; calibrate
+    avoid_cx: 0.3  # |cx_norm| of the scoop path at that distance; calibrate
+    avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
+    shed_distance: 0.08  # red cube in the U (48 mm deep): reverse this far, then turn away
+    shed_confirm: 0.3  # s the red must stay in the scoop window (red and orange are neighbor hues)
     open_probe_distance: 0.5
     # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
     # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the
