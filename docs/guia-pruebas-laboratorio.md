@@ -420,6 +420,7 @@ Copiar y llenar (una por robot).
 | Síntoma o mensaje | Causa probable | Qué hacer |
 |---|---|---|
 | `fusion_hat not available: motors in dry run` | Falta la biblioteca de la HAT | Paso 4.3 |
+| `camera in use by PID ...` (o `Pipeline handler in use by another process`) | Otro proceso tiene la cámara: casi siempre un `lab_robot.py camera` que siguió corriendo tras cortarse el SSH (libcamera deja usar la cámara a un solo proceso) | `kill <PID>` con el número que muestra el mensaje, o `sudo reboot` |
 | `i2cdetect -y 1` no muestra `17` | La HAT no está bien asentada, está apagada o el driver no cargó | Apagar, revisar la HAT; `dmesg \| grep fusion_hat`, `lsmod \| grep fusion_hat` |
 | La compilación del driver falla al instalar | Faltan los *headers* del kernel (Ubuntu) | `sudo apt install linux-headers-$(uname -r)` y `cd ~/fusion-hat/driver && make && sudo make install` |
 | `lgpio not available: falling back to GPIO dry run` en el modo `line` | Falta `python3-lgpio` | Paso 4.2 |

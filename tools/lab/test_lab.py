@@ -118,3 +118,33 @@ def test_camera_status_line_reports_the_blue_square():
     text, square = camera_status(frame, vision_params(load_config("phineas")))
     assert square.visible
     assert "cuadro azul" in text
+
+
+def test_camera_holders_finds_another_process_with_the_camera_open(tmp_path):
+    from hardware import camera_holders
+
+    def proc(pid, cmdline, *targets):
+        fd = tmp_path / str(pid) / "fd"
+        fd.mkdir(parents=True)
+        (tmp_path / str(pid) / "cmdline").write_bytes(cmdline.encode().replace(b" ", b"\0"))
+        for i, target in enumerate(targets):
+            (fd / str(i)).symlink_to(target)
+
+    proc(100, "python3 tools/lab/lab_robot.py camera", "/dev/media1", "/dev/null")
+    proc(200, "bash", "/dev/pts/0")
+    proc(300, "python3 me", "/dev/video0")  # this process: never reported
+    assert camera_holders(proc_root=tmp_path, me=300) == [(100, "python3 tools/lab/lab_robot.py camera")]
+
+
+def test_camera_holders_without_proc_reports_nothing(tmp_path):
+    from hardware import camera_holders
+
+    assert camera_holders(proc_root=tmp_path / "missing") == []
+
+
+def test_busy_camera_fails_at_once_naming_the_process(monkeypatch):
+    import hardware
+
+    monkeypatch.setattr(hardware, "camera_holders", lambda: [(1448, "python3 tools/lab/lab_robot.py camera")])
+    with pytest.raises(RuntimeError, match=r"camera in use by PID 1448"):
+        Camera("auto")

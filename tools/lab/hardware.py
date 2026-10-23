@@ -5,6 +5,7 @@ so what is tested here is what the ROS nodes run. Every class has a dry-run mode
 checked on a laptop before touching the robot.
 """
 
+import os
 import pathlib
 import sys
 import time
@@ -164,6 +165,29 @@ class LineSensor:
         return self.raw() == self.active_level
 
 
+def camera_holders(proc_root="/proc", me: int | None = None) -> list[tuple[int, str]]:
+    """Other processes with a camera device (/dev/media*, /dev/video*) open, as (pid, command line).
+    Processes of other users cannot be inspected without root and are skipped."""
+    root = pathlib.Path(proc_root)
+    me = os.getpid() if me is None else me
+    holders = []
+    try:
+        entries = sorted(root.iterdir(), key=lambda e: e.name)
+    except OSError:  # no /proc (not Linux) or not readable: nothing to report, let the backends try
+        return holders
+    for entry in entries:
+        if not entry.name.isdigit() or int(entry.name) == me:
+            continue
+        try:
+            targets = [os.readlink(fd) for fd in (entry / "fd").iterdir()]
+            if any(t.startswith(("/dev/media", "/dev/video")) for t in targets):
+                cmd = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+                holders.append((int(entry.name), cmd))
+        except OSError:  # process ended or not ours
+            continue
+    return holders
+
+
 class Camera:
     """640x480 BGR frames from the first backend that works: picamera2 (Raspberry Pi OS), a
     GStreamer libcamerasrc pipeline, or a V4L2 index (USB webcam). 'file:<path>' replays an image.
@@ -185,6 +209,12 @@ class Camera:
             self._open_file(source[5:])
             return
         names = list(attempts) if source == "auto" else [source]
+        holders = camera_holders()
+        if holders:
+            # libcamera lets one process use the camera: every backend would fail (and GStreamer/V4L2
+            # wait about a minute for frames that never come), so stop now and say who holds it.
+            who = ", ".join(f"PID {pid} ({cmd})" for pid, cmd in holders)
+            raise RuntimeError(f"camera in use by {who}: stop it (kill <PID>) or reboot the Pi")
         errors = []
         for name in names:
             try:

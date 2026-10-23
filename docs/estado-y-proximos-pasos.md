@@ -3,6 +3,9 @@
 Actualizado: 2026-10-20, después de la primera jornada de laboratorio con el robot completo.
 Detalle de cada tarea y su criterio de aceptación: [team-todo.md](team-todo.md).
 
+> **Paso a paso desde el 2026-10-23** (recuperar la Pi, pruebas pendientes, ROS 2 en la Pi):
+> [guia-siguientes-pasos.md](guia-siguientes-pasos.md).
+
 ## 1. Qué funciona hoy en el robot real (Phineas)
 
 | Parte | Estado | Evidencia |
@@ -10,7 +13,7 @@ Detalle de cada tarea y su criterio de aceptación: [team-todo.md](team-todo.md)
 | Pi 5 con Ubuntu Server 26.04 | Funciona | Arranca, SSH, `git pull` desde GitHub |
 | Driver de la Fusion HAT+ | **Funciona** | HAT en I2C 0x17, módulo `fusion_hat` carga solo al arrancar, `fusion_hat` 1.14.0 importa. Pasos probados en la [guía 4.3](guia-pruebas-laboratorio.md#43-driver-de-la-fusion-hat) |
 | Motores y mapa de ruedas | **Funciona** | `motors --battery 8.4`: cada rueda en su puerto y sentido; avanzar, lateral izquierda y girar antihorario correctos. `fusion_ports: [M0, M1, M2, M3]`, `fusion_reversed` todo `false` (sin cambios) |
-| Sensor de línea (GPIO5, `gpiochip0`) | **Funciona** | `line`: `blanco` sobre el tablero, `NEGRO (linea)` sobre la cinta. Montado **en el centro del robot** |
+| Sensor de línea (GPIO5, `gpiochip0`) | **Funciona** | `line`: `blanco` sobre el tablero, `NEGRO (linea)` sobre la cinta, **`blanco` sobre el cuadro azul** (2026-10-23). Montado **en el centro del robot** |
 | Cámara IMX219 | Funciona | Imagen en vivo; detecta los cubos |
 | Detección de colores y cuadro azul | Parcial | Detecta cubos; faltan los datos por color y distancia, y un error que quedó por reportar |
 | Pala, manejo en la pista, persecución | Sin probar | Bloques E, F y G de [lab-hoy.md](lab-hoy.md) |
