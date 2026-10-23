@@ -63,6 +63,7 @@
     avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
     shed_distance: 0.08  # red cube in the U (48 mm deep): reverse this far, then turn away
     shed_confirm: 0.3  # s the red must stay in the scoop window (red and orange are neighbor hues)
+    square_border_cy: 0.0  # off until Ferb's camera and line sensor are set up and calibrated
     open_probe_distance: 0.5
     # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
     # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the
