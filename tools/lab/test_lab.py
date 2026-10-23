@@ -134,3 +134,17 @@ def test_camera_holders_finds_another_process_with_the_camera_open(tmp_path):
     proc(200, "bash", "/dev/pts/0")
     proc(300, "python3 me", "/dev/video0")  # this process: never reported
     assert camera_holders(proc_root=tmp_path, me=300) == [(100, "python3 tools/lab/lab_robot.py camera")]
+
+
+def test_camera_holders_without_proc_reports_nothing(tmp_path):
+    from hardware import camera_holders
+
+    assert camera_holders(proc_root=tmp_path / "missing") == []
+
+
+def test_busy_camera_fails_at_once_naming_the_process(monkeypatch):
+    import hardware
+
+    monkeypatch.setattr(hardware, "camera_holders", lambda: [(1448, "python3 tools/lab/lab_robot.py camera")])
+    with pytest.raises(RuntimeError, match=r"camera in use by PID 1448"):
+        Camera("auto")

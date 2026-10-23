@@ -171,7 +171,11 @@ def camera_holders(proc_root="/proc", me: int | None = None) -> list[tuple[int, 
     root = pathlib.Path(proc_root)
     me = os.getpid() if me is None else me
     holders = []
-    for entry in sorted(root.iterdir(), key=lambda e: e.name):
+    try:
+        entries = sorted(root.iterdir(), key=lambda e: e.name)
+    except OSError:  # no /proc (not Linux) or not readable: nothing to report, let the backends try
+        return holders
+    for entry in entries:
         if not entry.name.isdigit() or int(entry.name) == me:
             continue
         try:
