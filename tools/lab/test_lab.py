@@ -79,6 +79,17 @@ def test_fusion_backend_drives_the_ports_from_the_yaml(monkeypatch):
     assert all(abs(m.power_log[-1]) <= motors.cap * 100.0 + 1e-9 for m in motors.bank.motors.values())
 
 
+def test_fusion_backend_applies_the_start_power_from_the_yaml(monkeypatch):
+    import hardware
+
+    monkeypatch.setattr(hardware, "load_motor_class", lambda log: FakeMotor)
+    cfg = load_config("phineas")
+    cfg["hat_motor_driver"]["fusion_start_power"] = [30.0, 30.0, 30.0, 30.0]
+    motors = Motors(cfg, open_gpio(None, dry_run=True), max_speed=0.10)
+    motors.drive(0.02, 0.0, 0.0)  # slow: without the start power this is ~4 % and the wheels stall
+    assert all(m.power_log[-1] > 30.0 for m in motors.bank.motors.values())
+
+
 def test_fusion_backend_dry_run_never_loads_the_library(monkeypatch):
     import hardware
 

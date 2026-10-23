@@ -96,7 +96,8 @@ class Motors:
             self.wiring = wiring_from(hat.get("fusion_ports", DEFAULT_PORTS),
                                       hat.get("fusion_reversed", [False] * len(WHEELS)))
             motor_class = None if dry_run else load_motor_class(LOG)
-            self.bank = open_bank(motor_class, self.wiring, LOG)
+            self.bank = open_bank(motor_class, self.wiring, LOG, hat.get("fusion_start_power", [0.0] * len(WHEELS)),
+                                  hat.get("fusion_trim", [1.0] * len(WHEELS)))
             self.dry_run = self.bank is None
         elif self.backend == "cokoino_drv8833":
             self.frequency = hat["pwm_frequency"]

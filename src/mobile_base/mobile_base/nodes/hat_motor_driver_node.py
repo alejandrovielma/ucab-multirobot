@@ -41,6 +41,8 @@ class HatMotorDriverNode(Node):
         # Fusion HAT+ parameters.
         ports = p("fusion_ports", list(DEFAULT_PORTS)).value
         reversed_ = p("fusion_reversed", [False, False, False, False]).value
+        start_power = p("fusion_start_power", [0.0, 0.0, 0.0, 0.0]).value
+        trim = p("fusion_trim", [1.0, 1.0, 1.0, 1.0]).value
         # Cokoino parameters.
         self.pwm_frequency = p("pwm_frequency", 1000.0).value
         nsleep_pins = p("nsleep_pins", [12, 13]).value
@@ -54,7 +56,7 @@ class HatMotorDriverNode(Node):
         if self.backend == "fusion_hat":
             wiring = wiring_from(ports, reversed_)
             motor_class = None if dry_run else load_motor_class(self.get_logger())
-            self.bank = open_bank(motor_class, wiring, self.get_logger())
+            self.bank = open_bank(motor_class, wiring, self.get_logger(), start_power, trim)
             dry = self.bank is None
             ports_text = ", ".join(f"{w} {port}{' (reversed)' if flip else ''}" for w, (port, flip) in wiring.items())
             self.get_logger().info(f"Fusion HAT+ ports: {ports_text}")

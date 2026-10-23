@@ -2,6 +2,7 @@
 """Lab tool for the real robot without ROS (Raspberry Pi 5 + Fusion HAT+ + IMX219 + line sensor).
 
     python3 tools/lab/lab_robot.py motors              # each port/wheel forward then backward (wiring check)
+    python3 tools/lab/lab_robot.py threshold [--all]   # power at which each wheel (or the robot) starts moving
     python3 tools/lab/lab_robot.py drive               # keyboard teleop over SSH
     python3 tools/lab/lab_robot.py line                # line sensor level
     python3 tools/lab/lab_robot.py camera              # camera + cube detection, view at http://<ip>:8080/
@@ -116,6 +117,50 @@ def mode_motors(args, cfg):
     finally:
         motors.stop()
         motors.gpio.close()
+
+
+def mode_threshold(args, cfg):
+    """Power at which each wheel starts turning (fusion_start_power): it rises by --step percent every
+    --step-time seconds; press any key as soon as the wheel turns steadily (x: it never did). With --all
+    the four wheels rise together forward: on the floor, the power at which the whole robot moves."""
+    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
+    if motors.bank is None:
+        print("sin la Fusion HAT+ no hay nada que medir", flush=True)
+        return
+    top = motors.cap * 100.0
+    groups = [("todas", WHEELS)] if args.all else [(w, (w,)) for w in WHEELS]
+    found = {}
+    print(f"La potencia sube de a {args.step:.0f} % cada {args.step_time:.1f} s hasta {top:.0f} %. "
+          "Presiona cualquier tecla apenas gire de forma continua (x: no giro).", flush=True)
+    try:
+        with RawKeys() as raw:
+            for name, wheels in groups:
+                hits = []
+                for direction in (1.0, -1.0) if not args.all else (1.0,):
+                    label = "adelante" if direction > 0 else "atras"
+                    power, hit = 0.0, None
+                    while power < top:
+                        power = min(top, power + args.step)
+                        for wheel in wheels:  # raw percent: no start power or trim on top of it
+                            motors.bank.set_power(wheel, direction * power)
+                        print(f"\r{name} {label}: {power:5.1f} %   ", end="", flush=True)
+                        key = raw.get(args.step_time)
+                        if key:
+                            hit = None if key == "x" else power
+                            break
+                    motors.stop()
+                    print(f"-> {'no giro' if hit is None else f'{hit:.0f} %'}", flush=True)
+                    hits.append(hit)
+                    time.sleep(0.8)
+                found[name] = max((h for h in hits if h is not None), default=None)
+    finally:
+        motors.stop()
+        motors.gpio.close()
+    print("resultado:", ", ".join(f"{k} {'no giro' if v is None else f'{v:.0f} %'}" for k, v in found.items()),
+          flush=True)
+    if not args.all and all(found.get(w) is not None for w in WHEELS):
+        print(f"fusion_start_power: [{', '.join(f'{found[w]:.1f}' for w in WHEELS)}]  "
+              "(medido en el aire: en el piso suele hacer falta mas, comprobar con --all)", flush=True)
 
 
 def mode_drive(args, cfg):
@@ -281,7 +326,7 @@ def mode_chase(args, cfg):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["motors", "drive", "line", "camera", "chase"])
+    parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase"])
     parser.add_argument("--robot", default="phineas", choices=["phineas", "ferb"])
     parser.add_argument("--dry-run", action="store_true", help="no GPIO access (laptop check)")
     parser.add_argument("--chip", type=int, default=None, help="gpiochip number (default: autodetect)")
@@ -292,6 +337,9 @@ def main():
                         help="measured battery voltage (V): sets the PWM cap that keeps the TT motors <= 6 V")
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
     parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
+    parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
+    parser.add_argument("--step-time", type=float, default=0.7, help="threshold mode: seconds per step")
+    parser.add_argument("--all", action="store_true", help="threshold mode: all four wheels together (on the floor)")
     parser.add_argument("--latch-timeout", type=float, default=3.0, help="drive mode: stop after N s with no key")
     parser.add_argument("--save-every", type=float, default=0.0,
                         help="camera mode: save the raw and the annotated frame every N seconds")
@@ -303,7 +351,7 @@ def main():
     cfg = load_config(args.robot)
     if args.battery is not None:
         cfg["hat_motor_driver"]["battery_voltage"] = args.battery
-    modes = {"motors": mode_motors, "drive": mode_drive, "line": mode_line, "camera": mode_camera,
+    modes = {"motors": mode_motors, "threshold": mode_threshold, "drive": mode_drive, "line": mode_line, "camera": mode_camera,
              "chase": mode_chase}
     try:
         modes[args.mode](args, cfg)

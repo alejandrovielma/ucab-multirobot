@@ -44,6 +44,58 @@ def test_duty_maps_to_percent_with_the_battery_cap():
     assert duty_to_power(0.9, CAP) == pytest.approx(CAP * 100.0)  # clamped to the cap
 
 
+def test_start_power_spreads_non_zero_duties_over_start_to_cap():
+    # A TT motor stalls below its start power: 0.12 m/s (25 % power) would barely move the robot.
+    top = CAP * 100.0
+    assert duty_to_power(CAP, CAP, start=30.0) == pytest.approx(top)  # the cap is unchanged
+    assert duty_to_power(CAP / 2, CAP, start=30.0) == pytest.approx(30.0 + (top - 30.0) / 2)
+    assert duty_to_power(-CAP / 2, CAP, start=30.0) == pytest.approx(-(30.0 + (top - 30.0) / 2))
+    assert duty_to_power(0.0, CAP, start=30.0) == 0.0  # stopped stays stopped
+
+
+def test_tiny_duties_are_zero_instead_of_jumping_to_the_start_power():
+    assert duty_to_power(0.01 * CAP, CAP, start=30.0) == 0.0
+    assert duty_to_power(0.05 * CAP, CAP, start=30.0) > 30.0
+
+
+def test_trim_shortens_one_wheel_span_and_never_passes_the_cap():
+    top = CAP * 100.0
+    assert duty_to_power(CAP, CAP, start=30.0, trim=0.8) == pytest.approx(30.0 + (top - 30.0) * 0.8)
+    assert duty_to_power(CAP, CAP, start=95.0) == pytest.approx(top)  # a start above the cap is clamped
+
+
+@pytest.mark.parametrize(
+    "start, trim",
+    [
+        ([30.0] * 3, [1.0] * 4),  # one wheel missing
+        ([30.0, 30.0, 30.0, -1.0], [1.0] * 4),
+        ([30.0, 30.0, 30.0, 100.0], [1.0] * 4),
+        ([30.0] * 4, [1.0, 1.0, 1.0, 1.2]),  # trim may only slow a wheel down
+        ([30.0] * 4, [1.0, 1.0, 1.0, 0.0]),
+    ],
+)
+def test_bad_calibration_is_rejected(start, trim):
+    with pytest.raises(ValueError):
+        FusionMotorBank(PowerMotor, wiring_from(DEFAULT_PORTS, (False,) * 4), start_power=start, trim=trim)
+
+
+def test_bank_applies_each_wheel_start_power_and_trim():
+    bank = FusionMotorBank(PowerMotor, wiring_from(DEFAULT_PORTS, (False,) * 4),
+                           start_power=(20.0, 30.0, 25.0, 35.0), trim=(1.0, 0.9, 1.0, 1.0))
+    bank.apply((CAP / 2,) * 4, CAP)
+    top = CAP * 100.0
+    assert bank.motors["fl"].calls[-1] == ("power", pytest.approx(20.0 + (top - 20.0) / 2))
+    assert bank.motors["fr"].calls[-1] == ("power", pytest.approx(30.0 + (top - 30.0) * 0.9 / 2))
+    assert bank.motors["rr"].calls[-1] == ("power", pytest.approx(35.0 + (top - 35.0) / 2))
+
+
+def test_open_bank_raises_on_a_bad_calibration_instead_of_running_dry():
+    from mobile_base.core.fusion_hat import open_bank
+
+    with pytest.raises(ValueError):
+        open_bank(PowerMotor, wiring_from(DEFAULT_PORTS, (False,) * 4), Log(), start_power=(30.0,) * 3)
+
+
 @pytest.mark.parametrize("duty", [-5.0, -1.0, 1.0, 3.0])
 def test_power_never_exceeds_100_percent(duty):
     assert -100.0 <= duty_to_power(duty, 1.0) <= 100.0
