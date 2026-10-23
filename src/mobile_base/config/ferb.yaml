@@ -58,7 +58,7 @@
     skip_time: 3.0
     backoff_time: 3.0
     line_backoff: 0.0  # set when Ferb's sensor position is measured
-    square_border_cy: 0.55  # same shared square as Phineas; provisional until calibrated on Ferb
+    square_border_cy: 0.0  # off until Ferb's camera and line sensor are set up and calibrated
     open_probe_distance: 0.5
     # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
     # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the
