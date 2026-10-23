@@ -21,6 +21,13 @@ drops the cube. At the drop point it opens (waits gate_open_time) and the robot 
 While carrying, a cube not seen in the scoop for scoop_lost_timeout ends the transport (lease
 released with delivered=false), and a delivery counts only if the cube left the scoop after reversing.
 
+Cubes of other colors (red on the real track) must stay where they are. While exploring, one in the
+scoop's path (below avoid_cy, within avoid_cx of the image center) is turned away from, for at most
+avoid_timeout; while approaching, one in the path closer than the target makes the robot skip the
+target for skip_time. One seen inside the U for shed_confirm (scoop_color, not carrying) makes the
+robot reverse shed_distance (at least line_backoff on the line) and turn away, the same timed reverse
+as line_backoff (the gate allows it with the pose: no cube of ours in the scoop).
+
 Body geofence (overhead pose + track polygon; same model as the safety gate): the scoop may step on
 the tape, the body may not. Without a cube, a forward move that leaves no room to spin counts as the
 border line; a spin with no room tries the other way or backs off first (reverse is allowed with the
@@ -134,6 +141,12 @@ class BehaviorParams:
     # m reversed (timed, at reverse_speed) before turning away from the line while exploring or
     # approaching: with the line sensor at the robot center the body front is already past the tape.
     line_backoff: float = 0.0
+    # Cubes of other colors (see the module docstring); calibrate avoid_* with the real camera.
+    avoid_cy: float = 0.45  # a cube lower in the image than this is about to enter the scoop
+    avoid_cx: float = 0.3  # |cx_norm| of the scoop's path at that distance
+    avoid_timeout: float = 3.0  # s turning away (~200 deg at turn_speed) before ignoring it for skip_time
+    shed_distance: float = 0.08  # m reversed so a cube in the U (48 mm deep) ends past the scoop tips
+    shed_confirm: float = 0.3  # s the foreign color must stay in the scoop before backing off
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
     # or approaching a cube (never carrying or delivering), a blue square seen with square_cy at or
     # above this value is reacted to as the line (line_backoff reverse, then spin). 0 disables it.
@@ -201,6 +214,9 @@ class BehaviorFSM:
         self.gate_closed = False
         self._gate_ready_at = 0.0
         self._carry_backoff_until = 0.0
+        self._foreign_since: float | None = None  # foreign cube seen in the scoop since (not yet confirmed)
+        self._avoid_since: float | None = None  # turning away from a foreign cube since
+        self._avoid_ignore_until = 0.0
         self._actions: list[ZoneAction] = []
 
     @property
@@ -229,6 +245,25 @@ class BehaviorFSM:
                 inp = dataclasses.replace(inp, line_front=True)
                 if edge_only and self.state is State.EXPLORE and self._target(inp.cubes, inp.now) is not None:
                     inp = dataclasses.replace(inp, line_front=False)
+        p = self.params
+        foreign_in_scoop = (
+            self.state in (State.EXPLORE, State.APPROACH, State.CAPTURE)
+            and self._turn_until is None  # not while already backing off and turning away from it
+            and inp.scoop_color
+            and not is_mine(inp.scoop_color, p.my_colors)
+        )
+        if not foreign_in_scoop:
+            self._foreign_since = None
+        else:
+            # Confirmed over shed_confirm: red and orange are neighbor hues, one misread frame must not abort a capture.
+            self._foreign_since = inp.now if self._foreign_since is None else self._foreign_since
+            if inp.now - self._foreign_since >= p.shed_confirm:
+                self._foreign_since = None
+                self.state = State.EXPLORE
+                self.note = f"{inp.scoop_color} cube in the scoop: back off"
+                # On the line the body must also get back inside before the spin (line_backoff).
+                backoff = max(p.shed_distance, p.line_backoff) if inp.line_front else p.shed_distance
+                self._start_line_turn(inp.now, inp.pose, backoff)
         handler = {
             State.EXPLORE: self._explore,
             State.APPROACH: self._approach,
@@ -350,6 +385,15 @@ class BehaviorFSM:
         mine = [c for c in cubes if is_mine(c.color, self.params.my_colors)]
         return max(mine, key=lambda c: c.area_px, default=None)
 
+    def _blocking(self, cubes: Sequence[Cube]) -> Cube | None:
+        """Closest cube of another color in the scoop's path."""
+        p = self.params
+        ahead = [
+            c for c in cubes
+            if not is_mine(c.color, p.my_colors) and c.cy_norm > p.avoid_cy and abs(c.cx_norm) < p.avoid_cx
+        ]
+        return max(ahead, key=lambda c: c.cy_norm, default=None)
+
     def _start_turn(self, now: float, pose) -> None:
         p = self.params
         self._turn_dir = self._rng.choice((-1.0, 1.0))
@@ -371,12 +415,13 @@ class BehaviorFSM:
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
         self._check_turn_room(now, pose)
 
-    def _start_line_turn(self, now: float, pose) -> None:
-        """Turn away from the line, reversing line_backoff first (timed, so it also works with pose=None)."""
+    def _start_line_turn(self, now: float, pose, backoff: float | None = None) -> None:
+        """Turn away, reversing backoff (line_backoff by default) first (timed, so it also works with pose=None)."""
         p = self.params
+        backoff = p.line_backoff if backoff is None else backoff
         self._start_turn(now, pose)
-        if p.line_backoff > 0.0:
-            reverse = p.line_backoff / p.reverse_speed
+        if backoff > 0.0:
+            reverse = backoff / p.reverse_speed
             self._line_backoff_until = now + reverse
             self._turn_until += reverse  # the turn (and its timeout) starts after the reverse
 
@@ -454,6 +499,18 @@ class BehaviorFSM:
             return (-p.reverse_speed, 0.0, 0.0)  # no room to spin: back off first (leaves any cube)
         if self._turn_until is not None:
             return (0.0, 0.0, self._turn_dir * p.turn_speed)
+        obstacle = self._blocking(inp.cubes) if inp.now >= self._avoid_ignore_until else None
+        if obstacle is None:
+            self._avoid_since = None
+        else:
+            self._avoid_since = inp.now if self._avoid_since is None else self._avoid_since
+            if inp.now - self._avoid_since <= p.avoid_timeout:
+                # Turn away from it (cube on the right, cx > 0: counterclockwise) until it leaves the path.
+                return (0.0, 0.0, math.copysign(p.turn_speed, obstacle.cx_norm))
+            # Still ahead after turning that long: it turns with the robot (stuck in the scoop, or a
+            # misread part of the robot), so dodging it never ends. Ignore it for a while.
+            self._avoid_ignore_until = inp.now + p.skip_time
+            self._avoid_since = None
         return (p.explore_speed, 0.0, 0.0)
 
     def _approach(self, inp: BehaviorInput) -> Command:
@@ -474,6 +531,13 @@ class BehaviorFSM:
             self.state = State.EXPLORE
             self.note = "border before the cube" if inp.line_front else "blue square ahead"
             self._start_line_turn(inp.now, inp.pose)
+            return self._explore(inp)
+        obstacle = self._blocking(inp.cubes)
+        if obstacle is not None and obstacle.cy_norm > target.cy_norm:
+            # Pushing on would take the other cube along: skip the target and steer around.
+            self._ignore_until = inp.now + p.skip_time
+            self.state = State.EXPLORE
+            self.note = f"{obstacle.color} cube in the way"
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
             if not self._deliverable_from(inp.pose):

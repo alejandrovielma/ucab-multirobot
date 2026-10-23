@@ -4,7 +4,7 @@
 /phineas/behavior:
   ros__parameters:
     robot: phineas
-    my_colors: [red, orange, yellow]
+    my_colors: [orange, yellow, green, blue, purple]  # every color but red (rule of 2026-10-22); red cubes stay on the track
     peer_pose_topic: /ferb/pose
     rate_hz: 10.0
     cube_timeout: 0.5
@@ -58,6 +58,11 @@
     skip_time: 3.0
     backoff_time: 3.0
     line_backoff: 0.14  # line sensor at the robot center: reverse the body front (0.095) plus spin sweep room (~0.125 body sweep radius) so the body is back inside before spinning
+    avoid_cy: 0.45  # cube of another color (red) lower in the image than this is in the scoop path: steer around it; calibrate
+    avoid_cx: 0.3  # |cx_norm| of the scoop path at that distance; calibrate
+    avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
+    shed_distance: 0.08  # red cube in the U (48 mm deep): reverse this far, then turn away
+    shed_confirm: 0.3  # s the red must stay in the scoop window (red and orange are neighbor hues)
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).
     # Enabled on purpose: a wrong value only makes the robot turn away early, while 0.0 (off) lets the
     # body drive into the square through its open side when there is no overhead pose (lab tests).

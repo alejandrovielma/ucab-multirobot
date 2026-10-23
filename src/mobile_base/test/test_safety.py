@@ -32,6 +32,29 @@ def test_passes_command_when_everything_is_fine():
     assert reason == "ok"
 
 
+def test_emergency_stop_wins_over_everything_and_clears():
+    gate = SafetyGate(SafetyParams(require_heartbeat=False, require_pose=False, blind_reverse=True))
+    for cmd in (FORWARD, (0.0, 0.0, 1.0), (-0.05, 0.0, 0.0)):
+        assert gate.filter(make_input(cmd=cmd, estop=True)) == ((0.0, 0.0, 0.0), "stop: emergency stop")
+    assert gate.filter(make_input())[0] == pytest.approx(FORWARD)
+
+
+def test_emergency_stop_cancels_a_deadlock_escape():
+    gate = SafetyGate(SafetyParams(has_priority=False, deadlock_time=1.0, escape_time=1.5))
+
+    def at(t, **kw):  # peer dead ahead at 0.3 m, facing us
+        return make_input(now=t, own_pose=Pose2D(0.0, 0.0, 0.0, stamp=t), peer_pose=peer_at(0.3, 0.0, stamp=t), **kw)
+
+    for t in (10.0, 10.5):
+        gate.filter(at(t))
+    assert "deadlock" in gate.filter(at(11.1))[1]  # escape running until 12.6
+    gate.filter(at(11.2, estop=True))
+    # Still pushing forward against the peer: without the reset the escape would restart at once.
+    assert "deadlock" not in gate.filter(at(11.3))[1]
+    assert "deadlock" not in gate.filter(at(12.2))[1]
+    assert "deadlock" in gate.filter(at(12.4))[1]  # a fresh deadlock_time after the stop
+
+
 def test_stale_heartbeat_stops():
     cmd, reason = SafetyGate(SafetyParams()).filter(make_input(heartbeat_age=2.5))
     assert cmd == (0.0, 0.0, 0.0)

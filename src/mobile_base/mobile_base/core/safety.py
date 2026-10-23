@@ -1,6 +1,7 @@
 """SafetyGate: last filter between the behavior command and the motors.
 
 Rules, applied in order every tick:
+0. Emergency stop (the estop topic, from the phone interface) -> full stop until it is cleared.
 1. Coordinator heartbeat lost (when required) -> full stop.
 2. Own pose stale (when required) -> full stop.
 3. Forward-only translation: the robot has a single FRONT line sensor, so strafing or
@@ -112,6 +113,7 @@ class SafetyInput:
     carrying: bool = False
     holds_zone: bool = False  # /zone/occupant == this robot
     gate_closed: bool = False  # scoop gate closed: the cube is retained
+    estop: bool = False  # emergency stop requested (latched by the node until cleared)
 
 
 class SafetyGate:
@@ -127,6 +129,11 @@ class SafetyGate:
 
     def filter(self, inp: SafetyInput) -> tuple[Command, str]:
         p = self.params
+        if inp.estop:
+            # A deadlock escape must not resume when the stop is cleared: the deadlock is timed afresh.
+            self._escape_until = None
+            self._blocked_since = None
+            return STOP, "stop: emergency stop"
         if p.require_heartbeat and (inp.heartbeat_age is None or inp.heartbeat_age > p.heartbeat_timeout):
             return STOP, "stop: coordinator heartbeat lost"
         own_fresh = self._is_fresh(inp.own_pose, inp.now)
