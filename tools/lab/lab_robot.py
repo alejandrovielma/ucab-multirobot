@@ -246,8 +246,15 @@ def mode_chase(args, cfg):
             frame = cam.read()
             dets = detect_cubes(frame, vparams) if frame is not None else []
             cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
+            # The line sensor reads the blue square as white: the camera keeps the body out of it.
+            square = detect_square(frame, vparams) if frame is not None else None
             black = line.black()
-            want = fsm.step(BehaviorInput(now=now, cubes=cubes, line_front=black))
+            want = fsm.step(BehaviorInput(
+                now=now, cubes=cubes, line_front=black,
+                square_visible=square is not None and square.visible,
+                square_cx=square.cx_norm if square is not None else 0.0,
+                square_cy=square.cy_norm if square is not None else 0.0,
+                square_area=square.area_px if square is not None else 0.0))
             cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
                                                    heartbeat_age=None, carrying=fsm.carrying))
             if fsm.state is not previous:

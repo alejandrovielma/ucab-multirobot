@@ -58,6 +58,7 @@
     skip_time: 3.0
     backoff_time: 3.0
     line_backoff: 0.14  # line sensor at the robot center: reverse the body front (0.095) plus spin sweep room (~0.125 body sweep radius) so the body is back inside before spinning
+    square_border_cy: 0.55  # provisional: calibrate with the robot facing the square at 30 and 10 cm (the camera is low and looks forward; cubes next to the scoop appear at cy ~0.80)
     open_probe_distance: 0.5
     # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
     # rectangle center, x east, y north. The robot approaches heading west (pi); offsets are of the

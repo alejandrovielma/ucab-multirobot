@@ -67,6 +67,66 @@ def test_zero_line_backoff_spins_at_once():
     assert vx == pytest.approx(0.0) and abs(wz) == pytest.approx(fsm.params.turn_speed)
 
 
+def tick_square(fsm, now, square_cy, cubes=(), scoop=""):
+    # The line sensor reads the blue square as white: only the camera sees it.
+    return fsm.step(
+        BehaviorInput(
+            now=now,
+            cubes=list(cubes),
+            line_front=False,
+            scoop_color=scoop,
+            square_visible=True,
+            square_cx=0.0,
+            square_cy=square_cy,
+            square_area=5000.0,
+        )
+    )
+
+
+def test_close_blue_square_is_a_border_while_exploring():
+    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14)
+    tick(fsm, 0.0)
+    assert tick_square(fsm, 0.1, 0.6) == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
+
+
+def test_far_blue_square_keeps_exploring():
+    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14)
+    tick(fsm, 0.0)
+    assert tick_square(fsm, 0.1, 0.4) == pytest.approx((fsm.params.explore_speed, 0.0, 0.0))
+
+
+def test_square_border_disabled_by_default():
+    fsm = make_fsm(square_border_cy=0.0, line_backoff=0.14)
+    tick(fsm, 0.0)
+    assert tick_square(fsm, 0.1, 0.9) == pytest.approx((fsm.params.explore_speed, 0.0, 0.0))
+
+
+def test_close_blue_square_is_a_border_while_approaching():
+    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14)
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    assert fsm.state is State.APPROACH
+    cmd = tick_square(fsm, 0.1, 0.6, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    assert fsm.state is State.EXPLORE
+    assert fsm.note == "blue square ahead"
+    assert cmd == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
+
+
+def test_blue_square_is_not_a_border_while_carrying():
+    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_time=0.1)
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
+    tick(fsm, 0.5, scoop="red")
+    assert fsm.state is State.CARRY
+    plain = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_time=0.1)
+    tick(plain, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    tick(plain, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
+    tick(plain, 0.5, scoop="red")
+    cmd = tick_square(fsm, 0.6, 0.9, scoop="red")
+    assert fsm.state is State.CARRY
+    assert cmd == pytest.approx(tick(plain, 0.6, scoop="red"))
+    assert cmd[0] >= 0.0
+
+
 def test_turn_duration_is_within_bounds_and_seeded():
     durations = []
     for _ in range(2):

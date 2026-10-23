@@ -134,6 +134,10 @@ class BehaviorParams:
     # m reversed (timed, at reverse_speed) before turning away from the line while exploring or
     # approaching: with the line sensor at the robot center the body front is already past the tape.
     line_backoff: float = 0.0
+    # The line sensor reads the blue square as white and its track side has no tape: while exploring
+    # or approaching a cube (never carrying or delivering), a blue square seen with square_cy at or
+    # above this value is reacted to as the line (line_backoff reverse, then spin). 0 disables it.
+    square_border_cy: float = 0.0
     open_probe_distance: float = 0.5  # m, straight free distance probed per heading after the border
     # Delivery square (see core/delivery.py); flat so each one is a ROS parameter.
     zone_x: float = DeliveryZone.x
@@ -424,6 +428,11 @@ class BehaviorFSM:
                 return True
         return inp.now >= self._turn_until
 
+    def _square_ahead(self, inp: BehaviorInput) -> bool:
+        """The blue square is close in the camera: a border for the body (only the scoop may enter)."""
+        cy = self.params.square_border_cy
+        return cy > 0.0 and inp.square_visible and inp.square_cy >= cy
+
     def _explore(self, inp: BehaviorInput) -> Command:
         p = self.params
         if self._backoff_until is not None and (inp.now >= self._backoff_until or self._room_to_spin(inp.pose)):
@@ -433,7 +442,7 @@ class BehaviorFSM:
         if self._turn_until is not None and self._turn_done(inp):
             self._turn_until = None
         if self._turn_until is None:
-            if inp.line_front:
+            if inp.line_front or self._square_ahead(inp):
                 self._start_line_turn(inp.now, inp.pose)
             elif self._target(inp.cubes, inp.now) is not None:
                 self.state = State.APPROACH
@@ -458,11 +467,12 @@ class BehaviorFSM:
             return ZERO
         self._last_seen = inp.now
         self._target_color = target.color
-        if inp.line_front:
+        square = self._square_ahead(inp)
+        if inp.line_front or square:
             # Cube on or beyond the border: give up and turn away. Checked before the capture
             # (Webots run 8: a cube just past the edge looped APPROACH <-> CAPTURE for minutes).
             self.state = State.EXPLORE
-            self.note = "border before the cube"
+            self.note = "border before the cube" if inp.line_front else "blue square ahead"
             self._start_line_turn(inp.now, inp.pose)
             return self._explore(inp)
         if target.cy_norm > p.capture_cy:
