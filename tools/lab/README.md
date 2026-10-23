@@ -87,6 +87,20 @@ El cableado de los puertos todavía no se conoce (por defecto fl M0, fr M1, rl M
 - Si no se mueve nada: revisar que no aparezca `fusion_hat not available`, que `i2cdetect -y 1`
   muestre la HAT en `17` y que la batería esté conectada.
 
+### 1b. Movimiento en el piso, sin el cable de SSH
+
+El cable Ethernet que se usa para el SSH tira del robot y lo desvía. Después de entrar por `ssh`:
+
+```bash
+bash tools/lab/prueba_piso.sh            # 0,2 m/s, 15 s para desconectar, 2 s por paso
+bash tools/lab/prueba_piso.sh 0.08 15 2  # velocidad, espera y segundos por paso
+```
+
+Lanza en segundo plano avanzar, lateral a la izquierda y girar antihorario (sigue aunque se corte el
+SSH), dice cuánto se va a mover y el nombre del `.log`. Desconectar el cable durante la cuenta
+regresiva, volver a conectarlo cuando el robot se detenga y leer el `.log`. Anotar si avanza recto, si
+el lateral es puro y cuánto gira.
+
 ### 2. Sensor de línea
 
 ```bash
