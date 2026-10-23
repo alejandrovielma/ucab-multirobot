@@ -3,6 +3,9 @@
 Actualizado: 2026-10-20, después de la primera jornada de laboratorio con el robot completo.
 Detalle de cada tarea y su criterio de aceptación: [team-todo.md](team-todo.md).
 
+> **Paso a paso desde el 2026-10-23** (recuperar la Pi, pruebas pendientes, ROS 2 en la Pi):
+> [guia-siguientes-pasos.md](guia-siguientes-pasos.md).
+
 ## 1. Qué funciona hoy en el robot real (Phineas)
 
 | Parte | Estado | Evidencia |
