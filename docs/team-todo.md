@@ -276,7 +276,9 @@ Criterios de aceptación:
   nunca saca el cuerpo de la pista al llegar a la cinta explorando (10 minutos de simulación).
 - En el robot real, `chase` 5 veces seguidas sin que el cuerpo cruce la cinta.
 - Se mide la posición del sensor de Ferb y se ajustan sus `line_backoff` / `blind_reverse`.
-- Se anota qué lee el sensor sobre el cuadro azul (`blanco` o `NEGRO`).
+- Sensor sobre el cuadro azul: **lee `blanco`** (Phineas, 2026-10-23). La entrega no se ve afectada; sin
+  cámara cenital nada impide que el cuerpo entre al cuadro por su lado abierto (ver opción de tratar el
+  cuadro visto por la cámara como borde).
 
 ## 20. ROS 2 Lyrical con Webots en la laptop
 
