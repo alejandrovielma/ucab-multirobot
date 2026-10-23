@@ -97,9 +97,13 @@ def open_motor_gpio(args, cfg):
 
 
 def mode_motors(args, cfg):
-    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
+    motors = Motors(cfg, open_motor_gpio(args, cfg), max(args.max_speed, args.speed), args.dry_run)
+    if args.delay > 0.0:
+        # Time to unplug the Ethernet cable used for SSH: a dragging cable makes the robot drift.
+        print(f"empieza en {args.delay:.0f} s", flush=True)
+        time.sleep(args.delay)
     try:
-        for wheel in WHEELS:
+        for wheel in () if args.only_robot else WHEELS:
             for direction in (1.0, -1.0):
                 label = "adelante" if direction > 0 else "atras"
                 print(f"rueda {wheel} ({motors.port(wheel)}): {label} {args.seconds:.1f} s "
@@ -108,7 +112,8 @@ def mode_motors(args, cfg):
                 time.sleep(args.seconds)
                 motors.stop()
                 time.sleep(0.5)
-        for name, cmd in (("avanzar", (0.08, 0, 0)), ("lateral izquierda", (0, 0.08, 0)), ("girar antihorario", (0, 0, 0.8))):
+        v = args.speed  # turn rate keeps the original 0.8 rad/s at 0.08 m/s
+        for name, cmd in (("avanzar", (v, 0, 0)), ("lateral izquierda", (0, v, 0)), ("girar antihorario", (0, 0, 10.0 * v))):
             print(f"robot: {name} {args.seconds:.1f} s", flush=True)
             motors.drive(*cmd)
             time.sleep(args.seconds)
@@ -337,6 +342,9 @@ def main():
                         help="measured battery voltage (V): sets the PWM cap that keeps the TT motors <= 6 V")
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
     parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
+    parser.add_argument("--speed", type=float, default=0.08, help="motors mode: m/s of the forward and strafe steps")
+    parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
+    parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
     parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
     parser.add_argument("--step-time", type=float, default=0.7, help="threshold mode: seconds per step")
     parser.add_argument("--all", action="store_true", help="threshold mode: all four wheels together (on the floor)")
