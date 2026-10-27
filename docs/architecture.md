@@ -88,27 +88,29 @@ En este orden, en cada ciclo de 20 Hz:
    una maniobra de escape de bloqueo en curso, para que no se reanude al quitar la parada.
 1. Sin latido de `/zone/occupant` durante más de 2 s: parada total.
 2. Pose propia con más de 0,5 s de antigüedad: parada total.
-3. Solo traslación hacia adelante: se eliminan `vy` y `vx` negativo (salvo la excepción de entrega, abajo). El robot tiene un único sensor
-   de línea delantero, así que desplazarse de lado o retroceder es ciego al borde (en Webots, el
-   esquive lateral sacó a los dos robots del tablero). Girar en el sitio sí está permitido.
-4. Línea negra al frente: se anula el avance; girar sigue permitido (salvo la excepción de entrega).
-5. Otro robot a menos de 60° a cada lado del frente (cono de 120° en total): frena linealmente entre 0,60 m y 0,40 m, se detiene
-   por debajo de 0,40 m (las palas se tocan a unos 0,38 m entre centros) y gira alejándose de él.
-   Si los dos quedan bloqueados de frente más de 3 s, el robot **sin prioridad** (Ferb) gira 1,5 s
-   para salir; si lleva un cubo se queda quieto, porque cualquier maniobra lo sacaría de la pala.
-6. Con cubo en la pala: solo giros en arco (avance mínimo 0,05 m/s, giro máximo 0,6 rad/s). Girar en
-   el sitio expulsa el cubo de la pala fija (comprobado en Webots). Dos excepciones: con la línea al
-   frente manda la línea (no avanza y puede girar en el sitio aunque el cubo se caiga; en Webots, salir
-   de la línea en arco con el cubo sacó al robot del tablero), y con otro robot al costado (a 25° o más
-   del frente y a 0,30 m o más) se aleja en arco en vez de quedarse congelado. Al llegar a la línea con
-   cubo, `behavior` da el transporte por perdido, devuelve la llave si la tenía y vuelve a explorar.
+3. Movimiento en asterisco (regla del equipo, 2026-10-27): trasladarse en cualquier dirección o girar
+   en el sitio, nunca las dos cosas. Un comando con traslación y giro se queda solo con el giro. Toda
+   traslación que no sea hacia adelante (de lado, diagonal, atrás) se limita a `max_side_speed`
+   (0,05 m/s): el único sensor de línea está en el centro, así que la ve cuando el cuerpo ya pasó.
+4. Línea negra: no se permite trasladarse hacia la cinta, que se supone en la dirección en que el robot
+   se trasladaba cuando apareció la línea (adelante si todavía no se había movido). Alejarse por donde
+   vino y girar sí; así, al retroceder de una cinta en una esquina, no cruza la otra (salvo la
+   excepción de entrega).
+5. Otro robot a menos de 60° a cada lado de la dirección de avance (o del frente si gira o está
+   quieto): frena entre 0,60 m y 0,40 m, no se traslada hacia él por debajo de 0,40 m (las palas se
+   tocan a unos 0,38 m entre centros) y gira en el sitio alejándose. Alejarse de él, de lado o hacia
+   atrás, nunca se frena. Si los dos quedan bloqueados de frente más de 3 s, el robot **sin
+   prioridad** (Ferb) gira 1,5 s para salir; si lleva un cubo se queda quieto.
+6. Con cubo en la pala: giros en el sitio de `carry_max_turn` (0,4 rad/s) como máximo; un giro rápido
+   expulsa el cubo de la pala fija (comprobado en Webots). Si aun así se escapa, `behavior` deja de
+   verlo en la pala, abandona el transporte y lo recaptura (lo tiene delante). Con la línea manda la
+   línea: al llegar a ella con cubo, `behavior` da el transporte por perdido, devuelve la llave si la
+   tenía y vuelve a explorar.
 
 **Excepción de entrega.** Mientras el robot tiene la llave del cuadro (`/zone/occupant` igual a su
 nombre) y su propia pose cenital está dentro del pasillo de entrega mirando hacia el cuadro (al oeste
-en la pista real, ±60°), puede cruzar con la pala la línea del cuadro y, cuando ya no lleva el cubo,
-retroceder a 0,05 m/s como máximo.
-El filtro lo decide con entradas que lee él mismo (pose y llave), no con lo que diga `behavior`, así
-que un error en el comportamiento no habilita la reversa en otra parte de la pista. El pasillo y el
+en la pista real, ±60°), puede cruzar con la pala la línea del cuadro. El filtro lo decide con
+entradas que lee él mismo (pose y llave), no con lo que diga `behavior`. El pasillo y el
 cuadro están en `zone_*` de los YAML; un test exige que coincidan entre `behavior` y `safety_gate`.
 
 ## Verificación de la captura con la cámara
@@ -184,8 +186,9 @@ defecto, varias veces un cubo de 2 cm en la boca de la pala; calibrar con la cá
 `detect_cubes` descarta las manchas azules que son el cuadro (de ese tamaño o que se solapan con su
 región), así que el cuadro nunca se informa como cubo. `cube_detector` publica `square_visible`,
 `square_cx`, `square_cy` y `square_area` en el mismo mensaje `cubes`. Mientras `DELIVER` avanza (no al
-retroceder) y el cuadro es visible, `behavior` suma `−square_align_gain · square_cx` (0,8) al giro,
-acotado por `carry_max_turn`: corrige el error lateral de la pose cenital con lo que ve el robot.
+retroceder) y el cuadro es visible, `behavior` suma un desplazamiento lateral de
+`−square_align_gain · enter_speed · square_cx` (0,8 · 0,05 m/s por unidad), acotado por `enter_speed`:
+corrige de lado, sin girar, el error lateral de la pose cenital con lo que ve el robot.
 
 ## Motores: Fusion HAT+
 

@@ -5,9 +5,14 @@ Software de los robots recolectores del proyecto de Robótica de la UCAB. Dos ro
   de 2 x 2 cm y los llevan a una zona de transferencia — un cuadrado azul en la pista real —, donde el
   brazo **Perry** los clasifica.
 
-- Los dos robots recogen **todos los cubos que no son rojos** (naranjas, amarillos, verdes, azules y
-  morados). Los rojos se quedan en la pista: el robot los esquiva y, si uno entra en la pala, retrocede
-  para soltarlo. Regla vigente desde el 2026-10-22; antes cada robot tenía tres colores.
+- **Misión** (regla del 2026-10-27): la interfaz de órdenes le da a cada robot uno o varios colores
+  **objetivo** y los colores **prohibidos**. Gana puntos por cada cubo objetivo que deja en el cuadro y
+  pierde puntos por tocar un prohibido. Solo captura y lleva los objetivo; los demás (prohibidos y
+  neutros) se pueden mover en la pista pero nunca al cuadro: los esquiva y, si uno tapa una y otra vez
+  un objetivo, lo aparta. Sin misión el robot se queda quieto.
+- **Movimiento en asterisco** (regla del 2026-10-27): el robot se traslada en cualquier dirección
+  (adelante, atrás, de lado, en diagonal) o gira en su propio eje, nunca las dos cosas a la vez. Todo
+  cambio de rumbo es un giro en el sitio; no hay arcos.
 - Los dos robots ejecutan **el mismo código**. Solo cambian su archivo de parámetros
   (`config/phineas.yaml` o `config/ferb.yaml`) y su espacio de nombres (`/phineas` o `/ferb`).
 - Los nodos que deciden (visión, comportamiento, seguridad) son idénticos en Webots y en el robot real.
@@ -83,10 +88,11 @@ flowchart LR
    por tener poca saturación. El cuadro de entrega azul se informa aparte (ver
    [Pista y hardware](#pista-y-hardware)), nunca como cubo.
 2. **`behavior`** es una máquina de estados:
-   `EXPLORE` (avanza y gira al ver el borde) → `APPROACH` (se orienta hacia el cubo propio más grande)
-   → `CAPTURE` (empuja para meterlo en la pala) → `CARRY` (va en arco al punto de entrada del cuadro y
-   pide la llave) → `DELIVER` (entra al cuadro, retrocede dejando el cubo y devuelve la llave).
-   Publica un comando *deseado*.
+   `IDLE` (sin misión, quieto) → `EXPLORE` (avanza; al ver el borde retrocede y gira en el sitio) →
+   `APPROACH` (gira en el sitio hasta centrar el cubo objetivo más grande y avanza recto) → `CAPTURE`
+   (empuja para meterlo en la pala) → `CARRY` (pide la llave y va al punto de entrada del cuadro con
+   tramos rectos y giros lentos en el sitio) → `DELIVER` (encara el cuadro, entra corrigiendo de lado,
+   retrocede dejando el cubo y devuelve la llave). Publica un comando *deseado*.
 3. **`safety_gate`** es el único nodo que escribe en los motores. Recibe el comando deseado y lo recorta
    según las reglas de seguridad. Así ninguna lógica nueva puede saltárselas (patrón *safety filter*).
 4. **`zone_arbiter`** (en la Pi de Perry) presta la llave del cuadro con caducidad de 60 s, publica un
@@ -99,14 +105,15 @@ flowchart LR
 | Parada de emergencia (`estop` en true) → parada hasta que se quite | La interfaz del teléfono detiene el robot sin pasar por la lógica |
 | Sin latido del árbitro en 2 s → parada | Si se cae la red, ningún robot sigue moviéndose a ciegas |
 | Pose propia con más de 0,5 s → parada | La evasión depende de saber dónde están los dos |
-| Solo traslación hacia adelante (sin desplazamiento lateral ni reversa) | Hay un único sensor de línea, delantero: moverse de lado o atrás es ciego al borde |
-| Línea negra al frente → no avanza, puede girar | No salir de la pista |
+| Asterisco: trasladarse o girar en el sitio, nunca las dos cosas; un comando con las dos se queda con el giro | Regla del equipo (2026-10-27): los arcos no se cumplían bien en el robot real |
+| Toda traslación que no sea hacia adelante (de lado, diagonal, atrás) va a ≤ 0,05 m/s | El único sensor de línea está en el centro: de lado o atrás ve la cinta cuando el cuerpo ya la pasó |
+| Línea negra → no se traslada hacia la cinta (la dirección en que venía), sí alejándose y girando | No salir de la pista; al retroceder de una cinta no puede cruzar otra en una esquina |
 | Punto delantero fuera del polígono de la pista (pose cenital) → cuenta como línea; con el centro ya fuera, solo avanza hacia adentro | Un único sensor no distingue el blanco de adentro del de afuera: en Webots el sensor quedó pasado la cinta tras un giro y el robot salió del tablero |
 | (comportamiento) La captura cuenta solo si la cámara ve un cubo propio en la ventana entre las paredes de la pala; una entrega cuenta solo si el cubo salió de la pala al retroceder | Empujar 1 s y suponer éxito contó 5 entregas con 1 cubo en el cuadro (corrida 7) |
 | Excepción: con la llave del cuadro y dentro del pasillo de entrega, cruza la cinta del cuadro y retrocede a ≤ 0,05 m/s sin cubo | Es la única forma de dejar el cubo con una pala fija; el filtro lo verifica con su propia pose y la llave |
-| Otro robot a menos de 0,60 m al frente → frena y gira alejándose; a 0,40 m se detiene | Las palas se tocan a unos 0,38 m entre centros |
+| Otro robot a menos de 0,60 m en la dirección de avance → frena y gira en el sitio alejándose; a 0,40 m no se traslada hacia él | Las palas se tocan a unos 0,38 m entre centros |
 | Bloqueo mutuo de más de 3 s → Ferb gira para salir, Phineas espera | Una regla asimétrica evita que los dos cedan a la vez (*livelock*) |
-| Con cubo: solo giros en arco; con la línea al frente manda la línea (gira en el sitio y el cubo se pierde) | Girar en el sitio expulsa el cubo de la pala fija, pero salir del tablero es peor (pasó en Webots) |
+| Con cubo: giros en el sitio lentos (≤ 0,4 rad/s); con la línea manda la línea | Un giro rápido expulsa el cubo de la pala fija (Webots); si se escapa, la cámara lo ve y el robot lo recaptura |
 
 Detalle y contrato de tópicos en [docs/architecture.md](docs/architecture.md).
 
@@ -137,8 +144,7 @@ borde interior de la cinta queda en x ±0,585 e y ±0,352; el interior azul del 
 antes de la línea y deja el cubo 4 cm dentro del azul. Detalle de la zona en
 [docs/architecture.md](docs/architecture.md#pista-y-zona-de-entrega).
 
-Los cubos miden **2 x 2 cm**. Los dos robots recogen todos los que no son rojos; los rojos se quedan en
-la pista.
+Los cubos miden **2 x 2 cm**. Qué colores recoge cada robot lo decide la misión (ver arriba).
 
 **Cómo ve el robot el cuadro azul.** El cuadro es del mismo azul que los cubos de Ferb. El detector toma
 la región azul más grande de la imagen y, si es mucho más grande que un cubo (`square_min_area`), la
