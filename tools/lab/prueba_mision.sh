@@ -17,16 +17,21 @@ duration=${3:-60}
 delay=${4:-15}
 speed=${5:-0.08}
 
-if pgrep -f "tools/lab/lab_robot.py" > /dev/null; then
-    echo "ya hay un lab_robot.py corriendo (PID $(pgrep -f tools/lab/lab_robot.py | tr '\n' ' ')): terminarlo con kill <PID>" >&2
+# Anchored: only a python3 process running the tool, not a shell whose command line mentions it.
+running=$(pgrep -f "^python3 tools/lab/lab_robot.py" | tr '\n' ' ' || true)
+if [ -n "$running" ]; then
+    echo "ya hay un lab_robot.py corriendo (PID $running): terminarlo con kill <PID>" >&2
     exit 1
 fi
-# Bad color names fail here, before the countdown, instead of in the background.
-python3 -c "import sys; sys.path.insert(0, 'src/mobile_base'); from mobile_base.core.colors import parse_colors; parse_colors('$target'); parse_colors('$avoid')"
+# Bad color names fail here, before the countdown, instead of in the background. The colors travel as
+# arguments, never pasted into code (a quote in them would inject it).
+python3 -c 'import sys; sys.path.insert(0, "src/mobile_base"); from mobile_base.core.colors import parse_colors
+for text in sys.argv[1:]: parse_colors(text)' "$target" "$avoid"
 
 log="prueba-mision-$(date +%Y%m%d-%H%M%S)-${target//,/_}.log"
-setsid nohup bash -c "sleep $delay; exec timeout --signal=INT $duration python3 tools/lab/lab_robot.py chase \
-    --target '$target' --avoid '$avoid' --max-speed $speed" > "$log" 2>&1 < /dev/null &
+setsid nohup bash -c 'sleep "$1"; exec timeout --signal=INT "$2" python3 tools/lab/lab_robot.py chase \
+    --target "$3" --avoid "$4" --max-speed "$5"' _ "$delay" "$duration" "$target" "$avoid" "$speed" \
+    > "$log" 2>&1 < /dev/null &
 
 cat <<EOF
 Mision: buscar [$target], evitar [${avoid:-ninguno}], a $speed m/s durante $duration s; empieza en $delay s (PID $!).

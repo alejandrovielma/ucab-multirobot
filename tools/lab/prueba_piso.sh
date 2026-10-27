@@ -15,8 +15,10 @@ seconds=${3:-2}
 shift $(($# < 3 ? $# : 3))
 
 # Two programs driving the HAT at once fight over the motors.
-if pgrep -f "tools/lab/lab_robot.py" > /dev/null; then
-    echo "ya hay un lab_robot.py corriendo (PID $(pgrep -f tools/lab/lab_robot.py | tr '\n' ' ')): terminarlo con kill <PID>" >&2
+# Anchored: only a python3 process running the tool, not a shell whose command line mentions it.
+running=$(pgrep -f "^python3 tools/lab/lab_robot.py" | tr '\n' ' ' || true)
+if [ -n "$running" ]; then
+    echo "ya hay un lab_robot.py corriendo (PID $running): terminarlo con kill <PID>" >&2
     exit 1
 fi
 
