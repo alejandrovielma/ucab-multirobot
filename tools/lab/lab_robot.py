@@ -103,7 +103,10 @@ def mode_motors(args, cfg):
         print(f"empieza en {args.delay:.0f} s", flush=True)
         time.sleep(args.delay)
     try:
-        for wheel in () if args.only_robot else WHEELS:
+        order = [w.strip() for w in args.wheels.split(",")]
+        if any(w not in WHEELS for w in order):
+            raise SystemExit(f"--wheels: usar {','.join(WHEELS)} separadas por comas, no {args.wheels!r}")
+        for wheel in () if args.only_robot else order:
             for direction in (1.0, -1.0):
                 label = "adelante" if direction > 0 else "atras"
                 print(f"rueda {wheel} ({motors.port(wheel)}): {label} {args.seconds:.1f} s "
@@ -113,7 +116,7 @@ def mode_motors(args, cfg):
                 motors.stop()
                 time.sleep(0.5)
         v = args.speed  # turn rate keeps the original 0.8 rad/s at 0.08 m/s
-        for name, cmd in (("avanzar", (v, 0, 0)), ("lateral izquierda", (0, v, 0)), ("girar antihorario", (0, 0, 10.0 * v))):
+        for name, cmd in () if args.only_wheels else (("avanzar", (v, 0, 0)), ("lateral izquierda", (0, v, 0)), ("girar antihorario", (0, 0, 10.0 * v))):
             print(f"robot: {name} {args.seconds:.1f} s", flush=True)
             motors.drive(*cmd)
             time.sleep(args.seconds)
@@ -343,6 +346,8 @@ def main():
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
     parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
     parser.add_argument("--speed", type=float, default=0.08, help="motors mode: m/s of the forward and strafe steps")
+    parser.add_argument("--wheels", default=",".join(WHEELS), help="motors mode: order of the one-wheel steps")
+    parser.add_argument("--only-wheels", action="store_true", help="motors mode: skip the whole-robot steps")
     parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
     parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
     parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
