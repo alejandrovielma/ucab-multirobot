@@ -122,8 +122,11 @@ cuadro azul como cubo.
 
 ## 14. Driver de la Fusion HAT+ en Ubuntu y mapa de ruedas a puertos — hecho en Phineas (2026-10-20), falta Ferb
 
-Estado: en Phineas el driver carga al arrancar, `fusion_hat` importa y el mapa por defecto es correcto
-(`fusion_ports: [M0, M1, M2, M3]`, sin inversiones). Falta repetirlo en Ferb.
+Estado: en Phineas el driver carga al arrancar y `fusion_hat` importa. El mapa por defecto **no** era
+correcto: medido rueda por rueda el 2026-10-27, `fusion_ports: [M3, M0, M2, M1]` y
+`fusion_reversed: [false, true, false, true]`. Falta medirlo en Ferb con
+`lab_robot.py motors --robot ferb --wheels fr,rr,fl,rl --only-wheels`, mirando una rueda por paso:
+mover el robot completo no basta para detectar un mapa cruzado.
 
 Dónde: la Pi 5 de cada robot (Ubuntu Server 26.04) y `fusion_ports` / `fusion_reversed` en
 `config/phineas.yaml` y `config/ferb.yaml`. Procedimiento en

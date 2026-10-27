@@ -193,8 +193,10 @@ Los robots usan la SunFounder Fusion HAT+. Su microcontrolador (I2C 0x17) genera
 puertos de motor M0-M3; la biblioteca `fusion_hat` los maneja con `Motor('M0').power(-100..100)` (el
 ejemplo del fabricante usa `set_power`; se admiten las dos) y `set_is_reverse`. La lógica pura está en
 [core/fusion_hat.py](../src/mobile_base/mobile_base/core/fusion_hat.py): rueda → puerto e inversión
-(`fusion_ports`, `fusion_reversed`, orden fl, fr, rl, rr; por defecto M0-M3 sin invertir porque el
-cableado aún no se identificó) y duty → porcentaje (`duty · 100`, nunca más que el tope ni ±100).
+(`fusion_ports`, `fusion_reversed`, orden fl, fr, rl, rr; en Phineas, medido el 2026-10-27:
+`[M3, M0, M2, M1]` con las ruedas derechas invertidas; en Ferb aún sin medir, M0-M3 sin invertir) y
+duty → porcentaje (`duty · 100`, nunca más que el tope ni ±100; con `fusion_start_power` y
+`fusion_trim` por rueda, ver [core/fusion_hat.py](../src/mobile_base/mobile_base/core/fusion_hat.py)).
 La batería 2S llega a 8,4 V cargada y los motores TT son de 6 V, así que el tope de duty sigue siendo
 6,0 / 8,4 = 0,71. Si la biblioteca no está instalada, el nodo registra un error y funciona en vacío.
 El backend `cokoino_drv8833` (HAT anterior por `lgpio`) se conserva con `motor_backend`.
