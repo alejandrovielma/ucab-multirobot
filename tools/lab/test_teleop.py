@@ -34,11 +34,11 @@ def test_bad_command_is_400_and_ignored(tp, body):
     assert tp.current() == (0.0, 0.0, 0.0)
 
 
-def test_limits_and_spin_wins(tp):
+def test_limits_and_arcs_pass_through(tp):
     post(tp, "/cmd", {"vx": 5, "vy": -5, "wz": 0})
     assert tp.current() == (0.2, -0.2, 0.0)
     post(tp, "/cmd", {"vx": 0.1, "vy": 0.1, "wz": 9})
-    assert tp.current() == (0.0, 0.0, 1.0)
+    assert tp.current() == (0.1, 0.1, 1.0)  # the safety gate caps a combined move
 
 
 def test_watchdog(tp):

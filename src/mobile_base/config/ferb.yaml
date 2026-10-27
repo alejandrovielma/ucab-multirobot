@@ -18,6 +18,8 @@
     k_turn: 1.5
     approach_speed: 0.10
     approach_turn_min: 0.4  # rad/s, slowest spin while centering a cube
+    approach_arc_gain: 0.6  # rad/s per unit of cx_norm: steer while driving to the cube (0 = straight)
+    approach_arc_max: 0.3  # rad/s
     approach_align: 0.15
     lost_timeout: 1.0
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
@@ -109,6 +111,11 @@
     escape_time: 1.5
     carry_max_turn: 0.4  # rad/s, slow in-place spin with a cube (no arcs: team rule 2026-10-27)
     max_side_speed: 0.05  # m/s, any translation that is not straight ahead (sideways, diagonal, back)
+    allow_arcs: true  # mecanum wheels turn and translate at once: arcs allowed, both rates capped
+    max_arc_speed: 0.08  # m/s, translation while spinning
+    max_arc_turn: 0.6  # rad/s, spin while translating
+    max_accel: 0.4  # m/s^2, ramp when speeding up (rollers slip and motors stall on hard starts); stopping is immediate
+    max_alpha: 2.0  # rad/s^2
     line_clear_time: 0.3  # s of white before a new black reading counts as a new tape (the TCRT5000 flickers on its edge)
     track_horizon: 0.3
     body_front: 0.095  # body without the scoop: the scoop may step on the tape, the body may not

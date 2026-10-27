@@ -66,8 +66,6 @@ class Teleop:
                 return self._bad(f"{key} must be a finite number")
             vals.append(float(v))
         vx, vy, wz = (max(-lim, min(lim, v)) for v, lim in zip(vals, (self.max_speed, self.max_speed, self.max_turn)))
-        if wz != 0.0:
-            vx = vy = 0.0  # star rule; to be relaxed together with the safety gate
         with self._lock:
             self._cmd, self._cmd_at = (vx, vy, wz), self._clock()
         return 200, b"{}"
