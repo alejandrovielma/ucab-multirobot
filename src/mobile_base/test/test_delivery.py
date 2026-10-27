@@ -43,19 +43,19 @@ def test_carry_without_pose_holds_still():
     assert fsm.state is State.CARRY
 
 
-def test_carry_steers_toward_entry_in_an_arc():
+def test_carry_spins_slowly_toward_the_entry_then_drives_straight():
     fsm = carrying_fsm()
-    # Robot south-west of the entry facing east; the entry point is ahead and to the left.
-    vx, vy, wz = tick(fsm, 1.0, (-0.5, -0.2, 0.0))
-    assert vx >= fsm.params.carry_min_speed
-    assert vy == 0.0
-    assert wz > 0.0
+    # Robot south-west of the entry facing east; the entry point is ahead and to the left (~44 deg).
+    assert tick(fsm, 1.0, (-0.5, -0.2, 0.0)) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))
+    ex, ey = zone(fsm).entry_point
+    facing = math.atan2(ey + 0.2, ex + 0.5)
+    assert tick(fsm, 1.1, (-0.5, -0.2, facing)) == pytest.approx((fsm.params.carry_speed, 0.0, 0.0))
 
 
 def test_carry_turns_toward_entry_when_it_is_behind():
     fsm = carrying_fsm()
     vx, _, wz = tick(fsm, 1.0, (-0.1, 0.0, 0.0))  # facing east, entry behind
-    assert vx == pytest.approx(fsm.params.carry_min_speed)
+    assert vx == 0.0
     assert abs(wz) == pytest.approx(fsm.params.carry_max_turn)
 
 
@@ -102,9 +102,9 @@ def test_without_lease_goes_to_its_waiting_point_not_the_entry():
     z = zone(fsm)
     on_axis = z.pose(0.585)  # on the axis at x 0.0, facing west, straight at the entry
     _, _, wz_to_wait = tick(fsm, 1.0, on_axis)
-    _, _, wz_to_entry = tick(fsm, 1.1, on_axis, holds_zone=True)
+    to_entry = tick(fsm, 1.1, on_axis, holds_zone=True)
     assert wz_to_wait < 0.0  # the waiting point is north, on the right when facing west: turn right
-    assert wz_to_entry == pytest.approx(0.0)
+    assert to_entry == pytest.approx((fsm.params.carry_speed, 0.0, 0.0))
 
 
 def test_holds_still_at_waiting_point_without_lease():
@@ -118,8 +118,8 @@ def test_holds_still_at_waiting_point_without_lease():
 def test_entry_without_lease_is_not_a_place_to_stop():
     fsm = carrying_fsm(wait_x=0.0, wait_y=0.22)
     z = zone(fsm)
-    vx, _, _ = tick(fsm, 2.0, z.pose(z.entry_offset))
-    assert vx > 0.0
+    cmd = tick(fsm, 2.0, z.pose(z.entry_offset))
+    assert cmd != (0.0, 0.0, 0.0)  # on its way to the waiting point (spinning toward it first)
     assert fsm.state is State.CARRY
 
 
@@ -141,27 +141,37 @@ def test_enter_ignores_the_square_tape():
     assert fsm.state is State.DELIVER
 
 
-def test_enter_steers_back_to_the_square_axis():
+def test_enter_slides_back_to_the_square_axis_without_turning():
     fsm = carrying_fsm()
     z = zone(fsm)
     tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
-    # Facing the square 5 cm to the left of the axis: the axis is on the robot's right -> negative wz.
-    _, _, wz = tick(fsm, 2.1, z.pose(0.2, across=0.05), holds_zone=True)
-    assert wz < 0.0
+    # Facing the square 5 cm to the left of the axis: the axis is on the robot's right -> negative vy.
+    vx, vy, wz = tick(fsm, 2.1, z.pose(0.2, across=0.05), holds_zone=True)
+    assert vx > 0.0 and vy < 0.0 and wz == 0.0
+
+
+def test_enter_spins_back_when_the_heading_drifts_off_the_axis():
+    fsm = carrying_fsm()
+    z = zone(fsm)
+    tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
+    x, y, theta = z.pose(0.2)
+    cmd = tick(fsm, 2.1, (x, y, theta + 0.3), holds_zone=True)
+    assert cmd == pytest.approx((0.0, 0.0, -fsm.params.carry_max_turn))
 
 
 def test_enter_aligns_with_the_blue_square_seen_by_the_camera():
-    # On the axis the pose alone says "straight"; the square seen to the right adds a right turn.
+    # On the axis the pose alone says "straight"; the square seen to the right adds a slide right.
     fsm = carrying_fsm()
     z = zone(fsm)
+    p = fsm.params
     tick(fsm, 2.0, z.pose(z.entry_offset), holds_zone=True)
-    _, _, wz_blind = tick(fsm, 2.1, z.pose(0.2), holds_zone=True)
-    _, _, wz_seen = tick(fsm, 2.2, z.pose(0.2), holds_zone=True, square_visible=True, square_cx=0.25)
-    assert wz_blind == pytest.approx(0.0)
-    assert wz_seen == pytest.approx(-fsm.params.square_align_gain * 0.25)
-    # Bounded by the carry turn limit.
-    _, _, wz_far = tick(fsm, 2.3, z.pose(0.2, across=0.05), holds_zone=True, square_visible=True, square_cx=1.0)
-    assert wz_far == pytest.approx(-fsm.params.carry_max_turn)
+    blind = tick(fsm, 2.1, z.pose(0.2), holds_zone=True)
+    seen = tick(fsm, 2.2, z.pose(0.2), holds_zone=True, square_visible=True, square_cx=0.25)
+    assert blind == pytest.approx((p.enter_speed, 0.0, 0.0))
+    assert seen[1] == pytest.approx(-p.square_align_gain * p.enter_speed * 0.25) and seen[2] == 0.0
+    # Bounded by the entry speed.
+    far = tick(fsm, 2.3, z.pose(0.2, across=0.05), holds_zone=True, square_visible=True, square_cx=1.0)
+    assert far[1] == pytest.approx(-p.enter_speed)
 
 
 def test_square_alignment_is_not_used_while_reversing_out():

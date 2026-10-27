@@ -48,7 +48,12 @@ def is_mine(color: str | None, my_colors: Iterable[str]) -> bool:
     return color is not None and color in set(my_colors)
 
 
-# Color ownership from the team plan (2026-10-22: both robots collect every color but red, which
-# stays on the track); the YAML config is the source of truth at runtime.
-_NOT_RED = ["orange", "yellow", "green", "blue", "purple"]
-DEFAULT_ROBOT_COLORS: dict[str, list[str]] = {"phineas": _NOT_RED, "ferb": _NOT_RED}
+def parse_colors(text: str, known: Iterable[str] = DEFAULT_HUE_RANGES) -> tuple[str, ...]:
+    """Mission colors from "blue, green" (the ROS parameter and the lab tool): ("blue", "green").
+
+    An unknown name raises ValueError instead of silently making a mission nobody can complete."""
+    colors = tuple(c.strip().lower() for c in text.split(",") if c.strip())
+    unknown = [c for c in colors if c not in set(known)]
+    if unknown:
+        raise ValueError(f"unknown color(s) {unknown}: use {', '.join(known)}")
+    return colors

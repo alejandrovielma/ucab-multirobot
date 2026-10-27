@@ -6,7 +6,7 @@
     python3 tools/lab/lab_robot.py drive               # keyboard teleop over SSH
     python3 tools/lab/lab_robot.py line                # line sensor level
     python3 tools/lab/lab_robot.py camera              # camera + cube detection, view at http://<ip>:8080/
-    python3 tools/lab/lab_robot.py chase               # autonomous: explore and approach cubes of my color
+    python3 tools/lab/lab_robot.py chase --target blue --avoid red   # autonomous, with a mission
 
 Common options: --robot phineas|ferb, --dry-run (no GPIO), --chip N, --camera auto|picamera2|gstreamer|
 v4l2|file:<img>, --port 8080, --max-speed 0.10. Ctrl+C always stops the motors. See tools/lab/README.md.
@@ -25,7 +25,7 @@ from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_
 from stream import FrameBuffer, serve
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
-from mobile_base.core.colors import ranges_from_flat  # noqa: E402
+from mobile_base.core.colors import parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
 from mobile_base.vision import VisionParams, detect_cubes, detect_square, scoop_content  # noqa: E402
 
@@ -96,6 +96,21 @@ def open_motor_gpio(args, cfg):
 # ------------------------------------------------------------------ modes
 
 
+def robot_steps(v: float, seconds: float, star: bool) -> list[tuple[str, tuple[float, float, float]]]:
+    """Whole-robot steps of the motors mode. --star: the 8 translations and both spins of the team's
+    motion rule, in pairs that bring the robot back, so the leftover offset shows the drift."""
+    if not star:
+        return [("avanzar", (v, 0.0, 0.0)), ("lateral izquierda", (0.0, v, 0.0)),
+                ("girar antihorario", (0.0, 0.0, 10.0 * v))]  # 0.8 rad/s at 0.08 m/s, as before
+    d = v * math.sqrt(0.5)
+    w = (math.pi / 2.0) / seconds  # a quarter turn per step
+    return [("adelante", (v, 0.0, 0.0)), ("atras", (-v, 0.0, 0.0)),
+            ("izquierda", (0.0, v, 0.0)), ("derecha", (0.0, -v, 0.0)),
+            ("diagonal adelante-izquierda", (d, d, 0.0)), ("diagonal atras-derecha", (-d, -d, 0.0)),
+            ("diagonal adelante-derecha", (d, -d, 0.0)), ("diagonal atras-izquierda", (-d, d, 0.0)),
+            ("girar antihorario 90 grados", (0.0, 0.0, w)), ("girar horario 90 grados", (0.0, 0.0, -w))]
+
+
 def mode_motors(args, cfg):
     motors = Motors(cfg, open_motor_gpio(args, cfg), max(args.max_speed, args.speed), args.dry_run)
     if args.delay > 0.0:
@@ -115,8 +130,7 @@ def mode_motors(args, cfg):
                 time.sleep(args.seconds)
                 motors.stop()
                 time.sleep(0.5)
-        v = args.speed  # turn rate keeps the original 0.8 rad/s at 0.08 m/s
-        for name, cmd in () if args.only_wheels else (("avanzar", (v, 0, 0)), ("lateral izquierda", (0, v, 0)), ("girar antihorario", (0, 0, 10.0 * v))):
+        for name, cmd in () if args.only_wheels else robot_steps(args.speed, args.seconds, args.star):
             print(f"robot: {name} {args.seconds:.1f} s", flush=True)
             motors.drive(*cmd)
             time.sleep(args.seconds)
@@ -173,11 +187,13 @@ def mode_threshold(args, cfg):
 
 def mode_drive(args, cfg):
     motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
-    # u/o: forward arcs (how the robot carries a cube; a spin in place can throw it out of the scoop).
+    # Star motion (team rule 2026-10-27): translations in 8 directions or a spin in place, never both.
+    d = math.sqrt(0.5)
     keys = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "q": (0, 0, 1), "e": (0, 0, -1),
-            "u": (0.5, 0, 0.6), "o": (0.5, 0, -0.6)}
+            "u": (d, d, 0), "o": (d, -d, 0), "j": (-d, d, 0), "l": (-d, -d, 0)}
     speed, turn = args.max_speed, 1.0
-    print("w/s avanzar/retroceder, a/d lateral, q/e girar, u/o arco izq/der, espacio parar, +/- velocidad, x salir", flush=True)
+    print("w/s avanzar/retroceder, a/d lateral, u/o diagonal adelante izq/der, j/l diagonal atras izq/der, "
+          "q/e girar en el sitio, espacio parar, +/- velocidad, x salir", flush=True)
     cmd = (0.0, 0.0, 0.0)
     last_key = time.monotonic()
     try:
@@ -278,18 +294,23 @@ def mode_chase(args, cfg):
     bcfg = cfg["behavior"]
     fields = BehaviorParams.__dataclass_fields__
     values = {k: v for k, v in bcfg.items() if k in fields and k != "my_colors"}
+    targets = parse_colors(args.target if args.target is not None else bcfg.get("my_colors", ""))
+    avoid = parse_colors(args.avoid if args.avoid is not None else bcfg.get("avoid_colors", ""))
+    if not targets:
+        raise SystemExit("sin mision: pasar --target (por ejemplo --target blue --avoid red)")
     values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
                   approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))
     if args.capture_cy is not None:
         values["capture_cy"] = args.capture_cy
-    fsm = BehaviorFSM(BehaviorParams(my_colors=tuple(bcfg["my_colors"]), **values))
+    fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values))
+    fsm.set_mission(targets, avoid)
     gcfg = cfg["safety_gate"]
     gfields = SafetyParams.__dataclass_fields__
     gate = SafetyGate(SafetyParams(**{**{k: v for k, v in gcfg.items() if k in gfields},
                                       "require_pose": False, "require_heartbeat": False}))
     frames = FrameBuffer()
     serve(frames, args.port)
-    print(f"persiguiendo {bcfg['my_colors']}; video en http://<ip-del-robot>:{args.port}/ ; Ctrl+C para parar",
+    print(f"objetivo {list(targets)}, prohibidos {list(avoid)}; video en http://<ip-del-robot>:{args.port}/ ; Ctrl+C para parar",
           flush=True)
     t0 = time.monotonic()
     previous = None
@@ -302,8 +323,9 @@ def mode_chase(args, cfg):
             # The line sensor reads the blue square as white: the camera keeps the body out of it.
             square = detect_square(frame, vparams) if frame is not None else None
             black = line.black()
+            scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
             want = fsm.step(BehaviorInput(
-                now=now, cubes=cubes, line_front=black,
+                now=now, cubes=cubes, line_front=black, scoop_color=scoop,
                 square_visible=square is not None and square.visible,
                 square_cx=square.cx_norm if square is not None else 0.0,
                 square_cy=square.cy_norm if square is not None else 0.0,
@@ -311,7 +333,8 @@ def mode_chase(args, cfg):
             cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
                                                    heartbeat_age=None, carrying=fsm.carrying))
             if fsm.state is not previous:
-                print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}", flush=True)
+                note = f" ({fsm.note})" if fsm.note else ""
+                print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)
                 previous = fsm.state
             if fsm.state is State.CAPTURE and args.stop_at_capture:
                 motors.stop()
@@ -324,8 +347,9 @@ def mode_chase(args, cfg):
             motors.drive(*cmd)
             if frame is not None:
                 frames.put(annotate(frame, dets, vparams,
-                                    [f"{fsm.state.value} linea={int(black)}",
-                                     f"cmd vx={cmd[0]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
+                                    [f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
+                                     f"prohibidos tocados={fsm.forbidden_touches}",
+                                     f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
             time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
     finally:
         motors.stop()
@@ -348,6 +372,8 @@ def main():
     parser.add_argument("--speed", type=float, default=0.08, help="motors mode: m/s of the forward and strafe steps")
     parser.add_argument("--wheels", default=",".join(WHEELS), help="motors mode: order of the one-wheel steps")
     parser.add_argument("--only-wheels", action="store_true", help="motors mode: skip the whole-robot steps")
+    parser.add_argument("--star", action="store_true",
+                        help="motors mode: robot steps in the 8 translation directions and both spins, in return pairs")
     parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
     parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
     parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
@@ -359,6 +385,8 @@ def main():
     parser.add_argument("--save-dir", default="capturas", help="camera mode: folder for --save-every")
     parser.add_argument("--save-max", type=int, default=200, help="camera mode: stop saving after N snapshots")
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
+    parser.add_argument("--target", default=None, help="chase: target colors, comma separated (the mission)")
+    parser.add_argument("--avoid", default=None, help="chase: forbidden colors, comma separated")
     parser.add_argument("--no-stop-at-capture", dest="stop_at_capture", action="store_false")
     args = parser.parse_args()
     cfg = load_config(args.robot)

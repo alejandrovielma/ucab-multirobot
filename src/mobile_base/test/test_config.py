@@ -13,7 +13,7 @@ from mobile_base.core.safety import SafetyParams
 
 CONFIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "config"
 NODE_ONLY = {
-    "behavior": {"robot", "my_colors", "peer_pose_topic", "rate_hz", "cube_timeout"},
+    "behavior": {"robot", "my_colors", "avoid_colors", "peer_pose_topic", "rate_hz", "cube_timeout"},
     "safety_gate": {"peer_pose_topic", "rate_hz", "cmd_timeout"},
 }
 PARAMS = {"behavior": BehaviorParams, "safety_gate": SafetyParams}
@@ -50,10 +50,11 @@ def test_both_robots_share_the_same_square():
 
 
 @pytest.mark.parametrize("robot", ["phineas", "ferb"])
-def test_both_robots_collect_every_color_but_red(robot):
-    # Rule of 2026-10-22: red cubes stay on the track, everything else goes to the square.
-    colors = load(robot)[f"/{robot}/behavior"]["ros__parameters"]["my_colors"]
-    assert set(colors) == {"orange", "yellow", "green", "blue", "purple"}
+def test_both_robots_start_without_a_mission(robot):
+    # The mission (target and forbidden colors) comes from the command interface; until then the
+    # robot stays still, so it cannot touch a cube that turns out to be forbidden.
+    behavior = load(robot)[f"/{robot}/behavior"]["ros__parameters"]
+    assert behavior["my_colors"] == "" and behavior["avoid_colors"] == ""
 
 
 @pytest.mark.parametrize(("robot", "expected"), [("phineas", 0.14), ("ferb", 0.0)])
@@ -70,11 +71,3 @@ def test_square_border_cy_reaches_behavior_params(robot, expected):
     fields = {f.name for f in dataclasses.fields(BehaviorParams)}
     values = {k: v for k, v in behavior.items() if k in fields and k != "my_colors"}
     assert BehaviorParams(my_colors=("red",), **values).square_border_cy == pytest.approx(expected)
-
-
-@pytest.mark.parametrize(("robot", "expected"), [("phineas", True), ("ferb", False)])
-def test_blind_reverse_reaches_safety_params(robot, expected):
-    # Safety-relevant: only Phineas (line sensor at the center) may reverse without the pose.
-    gate = load(robot)[f"/{robot}/safety_gate"]["ros__parameters"]
-    fields = {f.name for f in dataclasses.fields(SafetyParams)}
-    assert SafetyParams(**{k: v for k, v in gate.items() if k in fields}).blind_reverse is expected

@@ -103,14 +103,15 @@ class Footprint:
         ]
 
 
-def predict(pose, vx: float, wz: float, t: float) -> tuple[float, float, float]:
-    """Exact unicycle motion (constant vx, wz) during t seconds."""
+def predict(pose, vx: float, wz: float, t: float, vy: float = 0.0) -> tuple[float, float, float]:
+    """Exact motion with constant body velocities (vx forward, vy left, wz) during t seconds."""
     x, y, theta = pose
+    c, s = math.cos(theta), math.sin(theta)
     if abs(wz) < 1e-9:
-        return x + vx * t * math.cos(theta), y + vx * t * math.sin(theta), theta
-    r = vx / wz
+        return x + (vx * c - vy * s) * t, y + (vx * s + vy * c) * t, theta
     theta2 = theta + wz * t
-    return x + r * (math.sin(theta2) - math.sin(theta)), y - r * (math.cos(theta2) - math.cos(theta)), theta2
+    c2, s2 = math.cos(theta2), math.sin(theta2)
+    return (x + (vx * (s2 - s) + vy * (c2 - c)) / wz, y + (-vx * (c2 - c) + vy * (s2 - s)) / wz, theta2)
 
 
 TOLERANCE = 0.002  # m of penetration accepted on top of the current one (pose noise, sampling)
@@ -152,6 +153,7 @@ def path_inside(
     horizon: float,
     steps: int = 6,
     limit: float | None = None,
+    vy: float = 0.0,
 ) -> bool:
     """True when the motion never puts the body deeper over the edge than limit + TOLERANCE.
 
@@ -161,6 +163,6 @@ def path_inside(
         return True
     allowed = (penetration(track, footprint, pose) if limit is None else limit) + TOLERANCE
     for k in range(1, steps + 1):
-        if penetration(track, footprint, predict(pose, vx, wz, horizon * k / steps)) > allowed:
+        if penetration(track, footprint, predict(pose, vx, wz, horizon * k / steps, vy)) > allowed:
             return False
     return True

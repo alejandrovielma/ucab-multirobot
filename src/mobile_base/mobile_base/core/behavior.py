@@ -1,41 +1,56 @@
 """Behavior finite state machine of a collector robot (pure logic, time passed in).
 
-EXPLORE  -> drive forward; on the border line turn in place a random 135-225 deg (measured with the
-            overhead pose; a random time when there is no pose).
-APPROACH -> steer toward the largest (closest) cube of my colors.
+Motion rule (team, 2026-10-27): the robot translates in any direction or spins in place, never both;
+every change of heading is a spin. The safety gate enforces it; this module only asks for such moves.
+
+Mission: target colors to collect (set_mission, or my_colors at start) and colors whose touch costs
+points. Without targets the robot stays still (IDLE). Only target cubes are captured and carried;
+forbidden and neutral cubes may be moved on the track but never into the square.
+
+IDLE     -> all zeros until a mission with at least one target color arrives.
+EXPLORE  -> drive forward; on the border line back off line_backoff and spin a random 135-225 deg
+            (measured with the overhead pose; a random time when there is no pose).
+APPROACH -> spin in place until the largest (closest) target cube is centered, then drive straight.
 CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop; it counts only if the
-            camera then sees a cube of my color inside the U (scoop_color), otherwise APPROACH again.
-CARRY    -> ask for the zone lease; with it, drive in arcs to the entry point in front of the delivery
-            square (overhead pose; core/delivery.py, approach heading west on the real track); without it, wait at this robot's own waiting point, away from
-            the entry so the robot holding the lease can get through. Reaching the border line
-            ends the transport: the turn away from it drops the cube (back to EXPLORE).
-DELIVER  -> with the lease: drive along the approach axis into the square until the cube is inside,
-            then reverse out (the U is open at the front, so the cube stays) and release the lease.
+            camera then sees a target cube inside the U (scoop_color), otherwise APPROACH again.
+CARRY    -> ask for the zone lease; with it, go to the entry point in front of the delivery square
+            with straights and slow spins (overhead pose; core/delivery.py, approach heading west on
+            the real track); without it, wait at this robot's own waiting point, away from the entry
+            so the robot holding the lease can get through. Reaching the border line ends the
+            transport: the spin away from it drops the cube (back to EXPLORE).
+DELIVER  -> with the lease: face the square and translate along its axis (sideways corrections, no
+            steering) until the cube is inside, then reverse out (the U is open at the front, so the
+            cube stays) and release the lease.
 STOP     -> all zeros.
 
 Scoop gate (has_gate): a servo door at the mouth of the U. Open while exploring and capturing; it
 closes once the camera confirms the capture (the robot waits gate_close_time), and with it closed the
-cube is retained, so the carry plan may spin in place and reverse and the border line no longer
-drops the cube. At the drop point it opens (waits gate_open_time) and the robot reverses out.
+cube is retained, so the carry plan may spin fast and reverse and the border line no longer drops the
+cube. At the drop point it opens (waits gate_open_time) and the robot reverses out.
 
 While carrying, a cube not seen in the scoop for scoop_lost_timeout ends the transport (lease
-released with delivered=false), and a delivery counts only if the cube left the scoop after reversing.
+released with delivered=false): a slow spin can still throw it out, and the camera then finds it
+again right in front and recaptures it. A delivery counts only if the cube left the scoop after
+reversing.
 
-Cubes of other colors (red on the real track) must stay where they are. While exploring, one in the
-scoop's path (below avoid_cy, within avoid_cx of the image center) is turned away from, for at most
-avoid_timeout; while approaching, one in the path closer than the target makes the robot skip the
-target for skip_time. One seen inside the U for shed_confirm (scoop_color, not carrying) makes the
-robot reverse shed_distance (at least line_backoff on the line) and turn away, the same timed reverse
-as line_backoff (the gate allows it with the pose: no cube of ours in the scoop).
+Non-target cubes. While exploring, one in the scoop's path (below avoid_cy, within avoid_cx of the
+image center) is spun away from, for at most avoid_timeout; while approaching, one in the path closer
+than the target makes the robot skip the target for skip_time. A target that keeps hiding behind one
+(clear_after skips within clear_window) is reached by pushing through for clear_time. One seen inside
+the U for shed_confirm (scoop_color, not carrying) is backed off shed_distance (at least line_backoff
+on the line) before turning away, or spun out of the scoop (clear_turn) while clearing the way.
+
+Corners: corner_hits line events within corner_window without a pose make the next border reaction a
+doubled backoff and a half turn (random 135-225 deg turns kept pointing at the other tape).
 
 Body geofence (overhead pose + track polygon; same model as the safety gate): the scoop may step on
 the tape, the body may not. Without a cube, a forward move that leaves no room to spin counts as the
-border line; a spin with no room tries the other way or backs off first (reverse is allowed with the
-pose). With a cube the robot follows a plan from core/planner.py (forward arcs and straights that
-keep the body inside) to the entry, or to its waiting point without the lease; it replans when it
-drifts, and with no plan it drops the cube by backing off. A cube is captured only if a plan to the
-entry exists from the pose after the capture push (otherwise it is skipped for skip_time). With the
-center already outside, the robot drives back toward the track centroid.
+border line; a spin with no room tries the other way or backs off first. With a cube the robot follows
+a plan from core/planner.py (straights and slow in-place spins that keep the body inside) to the
+entry, or to its waiting point without the lease; it replans when it drifts, and with no plan it drops
+the cube by backing off. A cube is captured only if a plan to the entry exists from the pose after the
+capture push (otherwise it is skipped for skip_time). With the center already outside, the robot spins
+toward the track centroid and drives back.
 
 The output is the DESIRED command; the SafetyGate filters it before the motors. Requests to the
 zone arbiter are returned as ZoneAction items (take_actions) so this module stays free of ROS.
@@ -59,6 +74,7 @@ ZERO: Command = (0.0, 0.0, 0.0)
 
 
 class State(str, Enum):
+    IDLE = "IDLE"
     EXPLORE = "EXPLORE"
     APPROACH = "APPROACH"
     CAPTURE = "CAPTURE"
@@ -93,7 +109,7 @@ class BehaviorParams:
     turn_angle_max: float = math.radians(225.0)
     k_turn: float = 1.5  # rad/s per unit of cx_norm
     approach_speed: float = 0.10  # m/s
-    approach_min_scale: float = 0.3  # forward scale when the cube is at the image edge
+    approach_turn_min: float = 0.4  # rad/s, slowest spin while centering a cube (slower stalls the motors)
     approach_align: float = 0.15  # |cx_norm| below which the cube counts as straight ahead
     lost_timeout: float = 1.0  # s
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
@@ -103,20 +119,17 @@ class BehaviorParams:
     gate_close_time: float = 0.4  # s, SG90 needs ~0.25 s for 134 deg at 4.8 V
     gate_open_time: float = 0.4  # s
     scoop_lost_timeout: float = 1.0  # s without seeing the cube in the scoop while carrying
-    # Transport: arcs only (the gate enforces the same limits).
+    # Transport: straights and slow in-place spins (no arcs: team rule 2026-10-27).
     carry_speed: float = 0.08  # m/s
-    carry_min_speed: float = 0.05  # m/s
-    carry_max_turn: float = 0.6  # rad/s
-    k_heading: float = 1.5  # rad/s per rad of heading error
-    arrive_radius: float = 0.10  # m, waiting point reached (> turning radius, or the robot orbits it)
-    lead_in: float = 0.10  # m, aim this far past the entry (toward the square) when close to the axis
-    lead_in_width: float = 0.20  # m, "close to the axis"
+    carry_max_turn: float = 0.4  # rad/s, spin with a cube in the fixed scoop (keep <= the gate's)
+    heading_tolerance: float = 0.1  # rad, heading error that makes the robot spin before translating
+    arrive_radius: float = 0.10  # m, waiting point reached
     wait_x: float = 0.0  # m, waiting point while the other robot holds the lease (per robot)
     wait_y: float = 0.22
     request_period: float = 1.0  # s, retry while denied
     enter_speed: float = 0.05  # m/s
     enter_lookahead: float = 0.10  # m, carrot distance along the square axis
-    square_align_gain: float = 0.8  # rad/s per unit of square_cx while entering (camera alignment)
+    square_align_gain: float = 0.8  # sideways speed (fraction of enter_speed) per unit of square_cx while entering
     reverse_speed: float = 0.04  # m/s
     drop_timeout: float = 6.0  # s, give up reversing (the cube is already inside)
     # The safety gate predicts 0.3 s ahead (1.5 cm at enter_speed) and stops the robot that close to a
@@ -132,8 +145,8 @@ class BehaviorParams:
     plan_max_expansions: int = 30000
     plan_retry: float = 2.0  # s before planning again after a failure
     plan_give_up: float = 6.0  # s of failed planning (holding still) before dropping the cube
-    entry_heading_tolerance: float = math.radians(30.0)  # planned arrival heading at the entry
-    gate_entry_across_tolerance: float = 0.02  # m off the axis; with the gate (spins allowed) the entry is precise
+    # Entry pose the planner lines up to (spins are always allowed now, so the entry is precise).
+    gate_entry_across_tolerance: float = 0.02  # m off the axis
     gate_entry_along_band: float = 0.05  # m around zone_entry_offset
     gate_entry_heading_tolerance: float = math.radians(10.0)
     skip_time: float = 3.0  # s, ignore cubes after skipping one at the border
@@ -147,6 +160,12 @@ class BehaviorParams:
     avoid_timeout: float = 3.0  # s turning away (~200 deg at turn_speed) before ignoring it for skip_time
     shed_distance: float = 0.08  # m reversed so a cube in the U (48 mm deep) ends past the scoop tips
     shed_confirm: float = 0.3  # s the foreign color must stay in the scoop before backing off
+    clear_after: int = 2  # skips of a target behind the same kind of obstacle before pushing through
+    clear_window: float = 20.0  # s
+    clear_time: float = 5.0  # s pushing through (a cube caught meanwhile is spun out of the scoop)
+    clear_turn: float = math.pi / 2  # rad, spin that throws the caught cube aside
+    corner_hits: int = 3  # line events within corner_window (no pose): next reaction is a half turn
+    corner_window: float = 10.0  # s
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
     # or approaching a cube (never carrying or delivering), a blue square seen with square_cy at or
     # above this value is reacted to as the line (line_backoff reverse, then spin). 0 disables it.
@@ -197,7 +216,10 @@ class BehaviorFSM:
         self._plan_failing_since: float | None = None
         self._zone = params.zone
         self._rng = rng or random.Random()
-        self.state = State.EXPLORE
+        self.targets: tuple[str, ...] = tuple(params.my_colors)
+        self.avoid: tuple[str, ...] = ()
+        self.forbidden_touches = 0  # forbidden cubes caught in the scoop (each one costs points)
+        self.state = State.EXPLORE if self.targets else State.IDLE
         self.note = ""  # why the last transition happened (logged by the node)
         self._turn_until: float | None = None
         self._turn_dir = 1.0
@@ -217,6 +239,10 @@ class BehaviorFSM:
         self._foreign_since: float | None = None  # foreign cube seen in the scoop since (not yet confirmed)
         self._avoid_since: float | None = None  # turning away from a foreign cube since
         self._avoid_ignore_until = 0.0
+        self._aligning = False  # APPROACH: spinning to center the target (hysteresis)
+        self._skips: list[float] = []  # times a target was skipped behind another cube
+        self._clear_until = 0.0  # pushing through to a target until then
+        self._line_hits: list[float] = []  # border reactions, for the corner guard
         self._actions: list[ZoneAction] = []
 
     @property
@@ -226,12 +252,31 @@ class BehaviorFSM:
     def stop(self) -> None:
         self.state = State.STOP
 
+    def set_mission(self, targets: Sequence[str], avoid: Sequence[str] = ()) -> None:
+        """Colors to collect and colors whose touch costs points; no targets = stay still (IDLE).
+
+        A cube already carried that is no longer a target stops counting as held, so the transport
+        ends after scoop_lost_timeout (lease released, nothing delivered)."""
+        self.targets = tuple(targets)
+        self.avoid = tuple(avoid)
+
     def take_actions(self) -> list[ZoneAction]:
         """Zone arbiter calls requested since the last call (the node performs them)."""
         actions, self._actions = self._actions, []
         return actions
 
     def step(self, inp: BehaviorInput) -> Command:
+        if self.state is not State.STOP:
+            if not self.targets:
+                if self.state is not State.IDLE:
+                    if self.carrying:
+                        self._give_up_cube(inp)
+                    self.state = State.IDLE
+                    self.note = "no mission"
+                return ZERO
+            if self.state is State.IDLE:
+                self.state = State.EXPLORE
+                self.note = "mission received"
         if self.state not in (State.DELIVER, State.STOP) and self._track.enabled and inp.pose is not None:
             x, y, theta = inp.pose
             if not self._track.contains(x, y):
@@ -250,7 +295,7 @@ class BehaviorFSM:
             self.state in (State.EXPLORE, State.APPROACH, State.CAPTURE)
             and self._turn_until is None  # not while already backing off and turning away from it
             and inp.scoop_color
-            and not is_mine(inp.scoop_color, p.my_colors)
+            and not is_mine(inp.scoop_color, self.targets)
         )
         if not foreign_in_scoop:
             self._foreign_since = None
@@ -259,11 +304,19 @@ class BehaviorFSM:
             self._foreign_since = inp.now if self._foreign_since is None else self._foreign_since
             if inp.now - self._foreign_since >= p.shed_confirm:
                 self._foreign_since = None
+                if inp.scoop_color in self.avoid:
+                    self.forbidden_touches += 1
                 self.state = State.EXPLORE
-                self.note = f"{inp.scoop_color} cube in the scoop: back off"
-                # On the line the body must also get back inside before the spin (line_backoff).
-                backoff = max(p.shed_distance, p.line_backoff) if inp.line_front else p.shed_distance
-                self._start_line_turn(inp.now, inp.pose, backoff)
+                if inp.now < self._clear_until and not inp.line_front:
+                    # Clearing the way to a target: spin the cube out of the scoop, off the path.
+                    self._clear_until = 0.0
+                    self.note = f"{inp.scoop_color} cube pushed aside"
+                    self._start_fixed_turn(inp.now, inp.pose, p.clear_turn)
+                else:
+                    self.note = f"{inp.scoop_color} cube in the scoop: back off"
+                    # On the line the body must also get back inside before the spin (line_backoff).
+                    backoff = max(p.shed_distance, p.line_backoff) if inp.line_front else p.shed_distance
+                    self._start_line_turn(inp.now, inp.pose, backoff)
         handler = {
             State.EXPLORE: self._explore,
             State.APPROACH: self._approach,
@@ -271,30 +324,31 @@ class BehaviorFSM:
             State.CARRY: self._carry,
             State.DELIVER: self._deliver,
             State.STOP: lambda _inp: ZERO,
+            State.IDLE: lambda _inp: ZERO,
         }[self.state]
         return handler(inp)
 
-    def _fits(self, pose, vx: float, wz: float, carrying: bool) -> bool:
+    def _fits(self, pose, vx: float, wz: float, carrying: bool, vy: float = 0.0) -> bool:
         """Same test as SafetyGate._body_fits (carrying kept for symmetry with the gate)."""
         if pose is None or not self._track.enabled:
             return True
-        return path_inside(self._track, self._body, pose, vx, wz, self.params.track_horizon)
+        return path_inside(self._track, self._body, pose, vx, wz, self.params.track_horizon, vy=vy)
 
     def _at_entry(self, pose) -> bool:
         p = self.params
         z = self._zone
         error = abs(math.remainder(pose[2] - z.heading, 2.0 * math.pi))
-        if p.has_gate:
-            # Spins are allowed with the gate, so the plan can line up precisely: the square is only
-            # 22 cm wide inside and the body may not touch its tape (Webots run 19: 5 cm and 27 deg off
-            # the axis, a body corner on the tape, stuck for 7 minutes).
+        if self._track.enabled:
+            # The plan may spin in place, so it lines up precisely: the square is only 22 cm wide
+            # inside and the body may not touch its tape (Webots run 19: 5 cm and 27 deg off the
+            # axis, a body corner on the tape, stuck for 7 minutes).
             along, across = z.along_across(pose[0], pose[1])
             return (
                 abs(across) <= p.gate_entry_across_tolerance
                 and abs(-along - z.entry_offset) <= p.gate_entry_along_band
                 and error <= p.gate_entry_heading_tolerance
             )
-        return z.in_corridor(pose[0], pose[1]) and error <= p.entry_heading_tolerance
+        return z.in_corridor(pose[0], pose[1]) and error <= p.gate_entry_heading_tolerance
 
     def _plan_to(self, kind: str, pose) -> Plan | None:
         p = self.params
@@ -308,10 +362,10 @@ class BehaviorFSM:
             target = (p.wait_x, p.wait_y)
         return plan_arcs(
             self._track, self._body, pose, goal, target,
-            straight_speed=p.carry_speed, arc_speed=p.carry_min_speed, turn=p.carry_max_turn,
+            straight_speed=p.carry_speed, arc_speed=None, turn=p.carry_max_turn,
             max_expansions=p.plan_max_expansions,
-            # With the gate the cube is retained: spins and reverse are allowed too.
-            spin_speed=p.turn_speed if p.has_gate else None,
+            # With the gate the cube is retained: fast spins and reverse; without it, slow spins only.
+            spin_speed=p.turn_speed if p.has_gate else p.carry_max_turn,
             reverse_speed=p.reverse_speed if p.has_gate else None,
         )
 
@@ -361,7 +415,7 @@ class BehaviorFSM:
         return (self.params.explore_speed, 0.0, 0.0)
 
     def _still_holding(self, inp: BehaviorInput) -> bool:
-        if is_mine(inp.scoop_color, self.params.my_colors):
+        if is_mine(inp.scoop_color, self.targets):
             self._scoop_seen = inp.now
         return inp.now - self._scoop_seen <= self.params.scoop_lost_timeout
 
@@ -382,7 +436,7 @@ class BehaviorFSM:
     def _target(self, cubes: Sequence[Cube], now: float) -> Cube | None:
         if now < self._ignore_until:
             return None
-        mine = [c for c in cubes if is_mine(c.color, self.params.my_colors)]
+        mine = [c for c in cubes if is_mine(c.color, self.targets)]
         return max(mine, key=lambda c: c.area_px, default=None)
 
     def _blocking(self, cubes: Sequence[Cube]) -> Cube | None:
@@ -390,7 +444,7 @@ class BehaviorFSM:
         p = self.params
         ahead = [
             c for c in cubes
-            if not is_mine(c.color, p.my_colors) and c.cy_norm > p.avoid_cy and abs(c.cx_norm) < p.avoid_cx
+            if not is_mine(c.color, self.targets) and c.cy_norm > p.avoid_cy and abs(c.cx_norm) < p.avoid_cx
         ]
         return max(ahead, key=lambda c: c.cy_norm, default=None)
 
@@ -415,11 +469,33 @@ class BehaviorFSM:
         self._turn_until = now + 2.0 * self._turn_goal / p.turn_speed  # guard if the pose freezes
         self._check_turn_room(now, pose)
 
-    def _start_line_turn(self, now: float, pose, backoff: float | None = None) -> None:
-        """Turn away, reversing backoff (line_backoff by default) first (timed, so it also works with pose=None)."""
+    def _start_fixed_turn(self, now: float, pose, angle: float) -> None:
+        """Spin `angle` rad either way (measured with the pose, timed without it)."""
         p = self.params
-        backoff = p.line_backoff if backoff is None else backoff
-        self._start_turn(now, pose)
+        self._turn_dir = self._rng.choice((-1.0, 1.0))
+        self._turn_goal = angle if pose is not None else None
+        self._turn_prev_theta = pose[2] if pose is not None else 0.0
+        self._turn_until = now + (2.0 if pose is not None else 1.0) * angle / p.turn_speed
+
+    def _start_line_turn(self, now: float, pose, backoff: float | None = None) -> None:
+        """Turn away, reversing backoff (line_backoff by default) first (timed, so it also works with pose=None).
+
+        A border reaction (backoff None) also feeds the corner guard: without a pose, corner_hits of
+        them within corner_window make this one a doubled backoff and a half turn. The gate stops the
+        longer reverse if it reaches the tape behind."""
+        p = self.params
+        if backoff is None:
+            backoff = p.line_backoff
+            self._line_hits = [t for t in self._line_hits if now - t <= p.corner_window] + [now]
+            if pose is None and len(self._line_hits) >= p.corner_hits:
+                self._line_hits = []
+                self.note = "corner: back off further and turn around"
+                self._start_fixed_turn(now, pose, math.pi)
+                backoff *= 2.0
+            else:
+                self._start_turn(now, pose)
+        else:
+            self._start_turn(now, pose)
         if backoff > 0.0:
             reverse = backoff / p.reverse_speed
             self._line_backoff_until = now + reverse
@@ -492,6 +568,7 @@ class BehaviorFSM:
             elif self._target(inp.cubes, inp.now) is not None:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
+                self._aligning = False
                 return self._approach(inp)
         if inp.now < self._line_backoff_until:
             return (-p.reverse_speed, 0.0, 0.0)  # body back inside the tape before spinning
@@ -533,15 +610,31 @@ class BehaviorFSM:
             self._start_line_turn(inp.now, inp.pose)
             return self._explore(inp)
         obstacle = self._blocking(inp.cubes)
-        if obstacle is not None and obstacle.cy_norm > target.cy_norm:
-            # Pushing on would take the other cube along: skip the target and steer around.
-            self._ignore_until = inp.now + p.skip_time
-            self.state = State.EXPLORE
-            self.note = f"{obstacle.color} cube in the way"
-            return self._explore(inp)
-        if target.cy_norm > p.capture_cy:
+        if obstacle is not None and obstacle.cy_norm > target.cy_norm and inp.now >= self._clear_until:
+            recent = [t for t in self._skips if inp.now - t <= p.clear_window]
+            if len(recent) >= p.clear_after:
+                # The target keeps hiding behind other cubes: they may be moved, so push through.
+                self._skips = []
+                self._clear_until = inp.now + p.clear_time
+                self.note = f"{obstacle.color} cube in the way again: push it aside"
+            else:
+                # Pushing on would take the other cube along: skip the target and go around.
+                self._skips = recent + [inp.now]
+                self._ignore_until = inp.now + p.skip_time
+                self.state = State.EXPLORE
+                self.note = f"{obstacle.color} cube in the way"
+                return self._explore(inp)
+        if abs(target.cx_norm) > p.approach_align:
+            self._aligning = True
+        elif abs(target.cx_norm) < p.approach_align / 2.0:
+            self._aligning = False  # hysteresis: no spin/drive chatter around approach_align
+        if self._aligning:
+            turn = -math.copysign(max(p.k_turn * abs(target.cx_norm), p.approach_turn_min), target.cx_norm)
+            if inp.pose is None or self._fits(inp.pose, 0.0, turn, carrying=False):
+                return (0.0, 0.0, turn)
+        if target.cy_norm > p.capture_cy and not self._aligning:
             if not self._deliverable_from(inp.pose):
-                # Captured here, the robot would face the tape with no arc that keeps its body in.
+                # Captured here, the robot would face the tape with no move that keeps its body in.
                 self._ignore_until = inp.now + p.skip_time
                 self.state = State.EXPLORE
                 self.note = "capture skipped: no plan to the square from there"
@@ -550,15 +643,9 @@ class BehaviorFSM:
             self.state = State.CAPTURE
             self._capture_until = inp.now + p.capture_time
             return self._capture(inp)
-        scale = max(p.approach_min_scale, 1.0 - abs(target.cx_norm))
-        cmd = (p.approach_speed * scale, 0.0, -p.k_turn * target.cx_norm)
-        if inp.pose is not None and not self._fits(inp.pose, cmd[0], cmd[2], carrying=False):
-            # The body cannot advance here. The cube may still be reachable with the scoop (it
-            # reaches 10 cm past the body): face it first; give up only when it is already ahead.
-            # Webots run 15: giving up at once dropped 69 approaches to cubes inside the track.
-            turn = cmd[2] if cmd[2] != 0.0 else p.turn_speed
-            if abs(target.cx_norm) > p.approach_align and self._fits(inp.pose, 0.0, turn, carrying=False):
-                return (0.0, 0.0, turn)
+        cmd = (p.approach_speed, 0.0, 0.0)
+        if self._aligning or (inp.pose is not None and not self._fits(inp.pose, cmd[0], 0.0, carrying=False)):
+            # No room to spin toward it, or the body cannot advance with the cube centered: give up.
             self._ignore_until = inp.now + p.skip_time
             self.state = State.EXPLORE
             self.note = "border before the cube"
@@ -573,7 +660,7 @@ class BehaviorFSM:
             self._start_turn(inp.now, inp.pose)
             return self._explore(inp)
         if inp.now >= self._capture_until:
-            if not is_mine(inp.scoop_color, self.params.my_colors):
+            if not is_mine(inp.scoop_color, self.targets):
                 # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again.
                 self.state = State.APPROACH
                 self.note = "capture failed: scoop empty"
@@ -590,13 +677,17 @@ class BehaviorFSM:
         return (self.params.capture_speed, 0.0, 0.0)
 
     def _steer(self, pose, gx: float, gy: float, speed: float) -> Command:
-        """Forward-only arc toward (gx, gy): never an in-place spin (it ejects the cube)."""
+        """Spin in place (slowly: a cube may be in the scoop) until facing (gx, gy), then go straight."""
+        face = self._face(pose, math.atan2(gy - pose[1], gx - pose[0]))
+        return face if face != ZERO else (speed, 0.0, 0.0)
+
+    def _face(self, pose, heading: float) -> Command:
+        """Slow spin toward heading; ZERO once within heading_tolerance."""
         p = self.params
-        x, y, theta = pose
-        err = relative_bearing(x, y, theta, gx, gy)
-        wz = max(-p.carry_max_turn, min(p.carry_max_turn, p.k_heading * err))
-        vx = max(p.carry_min_speed, speed * math.cos(err))
-        return (vx, 0.0, wz)
+        err = math.remainder(heading - pose[2], 2.0 * math.pi)
+        if abs(err) <= p.heading_tolerance:
+            return ZERO
+        return (0.0, 0.0, math.copysign(p.carry_max_turn, err))
 
     def _ask_lease(self, inp: BehaviorInput) -> None:
         if inp.holds_zone:
@@ -624,7 +715,7 @@ class BehaviorFSM:
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
             return ZERO  # the other robot is using the square
         if inp.holds_zone and self._at_entry(inp.pose):
-            # Same heading tolerance the planner aims for (30 deg), not the corridor's 60: entering
+            # Same heading tolerance the planner aims for, not the corridor's 60 deg: entering
             # diagonally put a body corner on the square's tape (Webots run 17).
             self.state = State.DELIVER
             self._dropping = False
@@ -645,10 +736,8 @@ class BehaviorFSM:
             return self._abandon_transport(inp, "no plan to the square: cube dropped")
         if not inp.holds_zone:
             return self._steer(inp.pose, p.wait_x, p.wait_y, p.carry_speed)
-        if abs(z.along_across(x, y)[1]) <= p.lead_in_width:
-            # Near the axis: aim a bit past the entry (toward the square) so the arc ends facing it
-            # (Webots run 8: arriving at the entry facing away and entering anyway went wrong).
-            return self._steer(inp.pose, *z.point(z.entry_offset - p.lead_in), p.carry_speed)
+        if z.in_corridor(x, y):
+            return self._face(inp.pose, z.heading)  # in front of the square: face it, then DELIVER
         return self._steer(inp.pose, *z.entry_point, p.carry_speed)
 
     def _deliver(self, inp: BehaviorInput) -> Command:
@@ -656,7 +745,7 @@ class BehaviorFSM:
         z = self._zone
         if inp.pose is None:
             return ZERO
-        x, y, _ = inp.pose
+        x, y, theta = inp.pose
         if not inp.holds_zone:
             self._ask_lease(inp)  # lease expired mid-maneuver: the gate blocks the tape and the reverse
         if not self._dropping:
@@ -668,19 +757,24 @@ class BehaviorFSM:
             before = z.before(x, y)
             if before > z.drop_offset + p.drop_tolerance:
                 # The square's tape is crossed on purpose here (by the scoop): line_front is ignored.
+                face = self._face(inp.pose, z.heading)
+                if face != ZERO:
+                    return face  # heading drifted off the axis: spin back before going on
                 carrot = max(before - p.enter_lookahead, z.drop_offset - p.enter_lookahead)
-                _, _, wz = self._steer(inp.pose, *z.point(carrot), p.enter_speed)
+                bearing = relative_bearing(x, y, theta, *z.point(carrot))
+                vx, vy = p.enter_speed * math.cos(bearing), p.enter_speed * math.sin(bearing)
                 if inp.square_visible:
-                    # The camera sees the blue square: center it (corrects pose error across the axis).
-                    wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz - p.square_align_gain * inp.square_cx))
-                if self.gate_closed and not self._fits(inp.pose, p.enter_speed, wz, carrying=False):
+                    # The camera sees the blue square: center it sideways (pose error across the axis).
+                    vy -= p.square_align_gain * p.enter_speed * inp.square_cx
+                    vy = max(-p.enter_speed, min(p.enter_speed, vy))
+                if self.gate_closed and not self._fits(inp.pose, vx, 0.0, carrying=False, vy=vy):
                     # The body would touch the square's tape: back off with the retained cube, replan.
                     self.state = State.CARRY
                     self.note = "entry blocked: back off and replan"
                     self.plan = None
                     self._carry_backoff_until = inp.now + p.backoff_time / 3.0
                     return (-p.reverse_speed, 0.0, 0.0)
-                return (p.enter_speed, 0.0, wz)
+                return (vx, vy, 0.0)
             self._dropping = True
             self._drop_until = inp.now + p.drop_timeout
             if self.gate_closed:
@@ -692,7 +786,7 @@ class BehaviorFSM:
         if z.before(x, y) < z.exit_offset and inp.now < self._drop_until:
             return (-p.reverse_speed, 0.0, 0.0)
         # Counted only if the cube stayed in the square: it must have left the scoop.
-        left_behind = not is_mine(inp.scoop_color, self.params.my_colors)
+        left_behind = not is_mine(inp.scoop_color, self.targets)
         self._actions.append(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
         self._carried_color = ""

@@ -33,7 +33,7 @@ def test_passes_command_when_everything_is_fine():
 
 
 def test_emergency_stop_wins_over_everything_and_clears():
-    gate = SafetyGate(SafetyParams(require_heartbeat=False, require_pose=False, blind_reverse=True))
+    gate = SafetyGate(SafetyParams(require_heartbeat=False, require_pose=False))
     for cmd in (FORWARD, (0.0, 0.0, 1.0), (-0.05, 0.0, 0.0)):
         assert gate.filter(make_input(cmd=cmd, estop=True)) == ((0.0, 0.0, 0.0), "stop: emergency stop")
     assert gate.filter(make_input())[0] == pytest.approx(FORWARD)
@@ -86,39 +86,54 @@ def test_missing_own_pose_stops_only_when_required():
     assert gate.filter(make_input(own_pose=None))[0] == pytest.approx(FORWARD)
 
 
-def test_line_blocks_forward_but_allows_turn():
-    cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.2, 0.0, 0.5), line_front=True)
-    )
-    assert cmd == pytest.approx((0.0, 0.0, 0.5))
+def test_line_blocks_translation_toward_the_tape_but_allows_a_spin():
+    gate = SafetyGate(SafetyParams())
+    cmd, reason = gate.filter(make_input(cmd=(0.2, 0.0, 0.0), line_front=True))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
     assert "line" in reason
+    assert gate.filter(make_input(cmd=(0.0, 0.0, 0.5), line_front=True))[0] == pytest.approx((0.0, 0.0, 0.5))
 
 
-# The robot has a single FRONT line sensor: any translation that is not forward is blind to the
-# track edge. In Webots, strafing to avoid the peer drove both robots off the board.
-def test_strafe_is_never_passed_through():
-    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.1, 0.1, 0.0)))
-    assert cmd == pytest.approx((0.1, 0.0, 0.0))
+# Star motion (team rule 2026-10-27): translate in any direction or spin in place, never both.
+def test_translation_with_a_spin_keeps_only_the_spin():
+    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.1, 0.05, 0.5)))
+    assert cmd == pytest.approx((0.0, 0.0, 0.5))
+    assert "spin in place only" in reason
 
 
-def test_reverse_is_never_passed_through():
-    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(cmd=(-0.1, 0.0, 0.0)))
+@pytest.mark.parametrize("cmd", [(0.1, 0.1, 0.0), (0.0, -0.2, 0.0), (-0.1, 0.0, 0.0), (-0.1, -0.1, 0.0)])
+def test_translation_that_is_not_straight_ahead_passes_slowly_keeping_its_direction(cmd):
+    # The only line sensor is at the center: sideways, diagonal or backward it sees the tape late.
+    params = SafetyParams()
+    out, reason = SafetyGate(params).filter(make_input(cmd=cmd))
+    assert math.hypot(out[0], out[1]) == pytest.approx(params.max_side_speed)
+    assert math.atan2(out[1], out[0]) == pytest.approx(math.atan2(cmd[1], cmd[0]))
+    assert "slow" in reason
+
+
+def test_slow_sideways_translation_passes_unchanged():
+    assert SafetyGate(SafetyParams()).filter(make_input(cmd=(0.0, 0.03, 0.0)))[0] == pytest.approx((0.0, 0.03, 0.0))
+
+
+def test_on_the_line_the_robot_may_back_away_the_way_it_came():
+    gate = SafetyGate(SafetyParams(require_pose=False))
+    gate.filter(make_input(cmd=(0.0, 0.05, 0.0), own_pose=None))  # strafing left onto the tape
+    cmd, _ = gate.filter(make_input(cmd=(0.0, 0.05, 0.0), line_front=True, own_pose=None))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))  # no further left
+    cmd, _ = gate.filter(make_input(cmd=(0.0, -0.05, 0.0), line_front=True, own_pose=None))
+    assert cmd == pytest.approx((0.0, -0.05, 0.0))  # back to the right
+
+
+def test_backing_off_one_tape_does_not_cross_another_behind():
+    # A corner: the robot backs off the tape it drove onto and meets the other one behind it.
+    gate = SafetyGate(SafetyParams(require_pose=False))
+    gate.filter(make_input(cmd=FORWARD, own_pose=None))
+    back = (-0.04, 0.0, 0.0)
+    assert gate.filter(make_input(cmd=back, line_front=True, own_pose=None))[0] == pytest.approx(back)
+    assert gate.filter(make_input(cmd=back, own_pose=None))[0] == pytest.approx(back)  # off the first tape
+    cmd, reason = gate.filter(make_input(cmd=back, line_front=True, own_pose=None))  # the second one
     assert cmd == pytest.approx((0.0, 0.0, 0.0))
-    assert "forward only" in reason
-
-
-def test_blind_reverse_backs_off_the_line_without_pose():
-    # Centered line sensor (lab chase, no overhead pose): the behavior reverses off the tape.
-    gate = SafetyGate(SafetyParams(require_pose=False, blind_reverse=True))
-    cmd, reason = gate.filter(make_input(cmd=(-0.1, 0.0, 0.0), line_front=True, own_pose=None))
-    assert cmd == pytest.approx((-gate.params.max_reverse, 0.0, 0.0))
-    assert "blind reverse" in reason
-
-
-def test_blind_reverse_never_leaves_a_loose_cube_behind():
-    gate = SafetyGate(SafetyParams(require_pose=False, blind_reverse=True))
-    cmd, _ = gate.filter(make_input(cmd=(-0.1, 0.0, 0.0), own_pose=None, carrying=True))
-    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert "line" in reason
 
 
 def test_peer_very_close_in_front_blocks_forward_and_turns_away():
@@ -129,13 +144,23 @@ def test_peer_very_close_in_front_blocks_forward_and_turns_away():
     assert "peer" in reason
 
 
-def test_peer_in_slow_band_scales_forward_and_turns_away_from_it():
+def test_peer_in_avoid_band_makes_the_robot_spin_away_from_it():
     params = SafetyParams()
     mid = (params.stop_distance + params.slow_distance) / 2
     cmd, _ = SafetyGate(params).filter(make_input(peer_pose=peer_at(mid, 0.05)))
-    assert cmd[0] == pytest.approx(FORWARD[0] * 0.5, abs=0.02)
-    assert cmd[1] == pytest.approx(0.0)
-    assert cmd[2] == pytest.approx(-params.avoid_turn)  # peer slightly left -> turn right
+    assert cmd == pytest.approx((0.0, 0.0, -params.avoid_turn))  # peer slightly left -> spin right
+
+
+def test_peer_in_slow_band_scales_the_translation_toward_it():
+    params = SafetyParams(avoid_distance=0.0)  # isolate the slow-down from the turn-away
+    mid = (params.stop_distance + params.slow_distance) / 2
+    cmd, _ = SafetyGate(params).filter(make_input(peer_pose=peer_at(mid, 0.0)))
+    assert cmd == pytest.approx((FORWARD[0] * 0.5, 0.0, 0.0), abs=0.02)
+
+
+def test_moving_away_from_a_close_peer_is_not_held_back():
+    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(-0.04, 0.0, 0.0), peer_pose=peer_at(0.3, 0.0)))
+    assert cmd == pytest.approx((-0.04, 0.0, 0.0))
 
 
 def test_peer_slightly_right_turns_left():
@@ -204,12 +229,12 @@ def test_deadlock_while_carrying_holds_still():
     assert "hold" in reason
 
 
-def test_carrying_turns_only_while_moving_forward():
+def test_carrying_spins_in_place_but_slowly():
+    # A fast spin throws the cube out of the fixed U; the behavior recaptures it if it slips.
     params = SafetyParams()
-    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.0, 0.0, 0.5), carrying=True))
-    assert cmd[0] == pytest.approx(params.carry_min_forward)
-    assert cmd[2] == pytest.approx(0.5)
-    assert "arc" in reason
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.0, 0.0, 1.2), carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, params.carry_max_turn))
+    assert "slow spin" in reason
 
 
 def test_carrying_limits_turn_rate():
@@ -226,23 +251,21 @@ def test_carrying_never_strafes_even_to_avoid_peer():
     assert cmd[1] == pytest.approx(0.0)
 
 
-def test_carrying_stops_turning_when_peer_blocks_forward():
-    # The robot cannot advance, so an in-place spin would eject the cube.
-    cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.1, 0.0, 0.5), peer_pose=peer_at(0.3, 0.0), carrying=True)
-    )
-    assert cmd == pytest.approx((0.0, 0.0, 0.0))
-    assert "no in-place turn" in reason
+def test_carrying_spins_slowly_away_from_a_peer_dead_ahead():
+    params = SafetyParams()
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(0.1, 0.0, 0.0), peer_pose=peer_at(0.3, 0.0), carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, -params.carry_max_turn))
 
 
-def test_carrying_at_the_line_turns_in_place_even_if_the_cube_drops():
-    # Webots run 5: arcing off the line with a cube crossed the tape and the robot left the board.
+def test_carrying_at_the_line_spins_in_place_even_if_the_cube_drops():
+    # Webots run 5: moving on with a cube crossed the tape and the robot left the board.
     # Losing the cube at the border is recoverable; leaving the track is not.
-    cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.1, 0.0, 0.5), line_front=True, carrying=True)
-    )
-    assert cmd == pytest.approx((0.0, 0.0, 0.5))
+    params = SafetyParams()
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.1, 0.0, 0.0), line_front=True, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
     assert "line ahead" in reason
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(0.0, 0.0, 0.5), line_front=True, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, params.carry_max_turn))
 
 
 def test_carrying_never_moves_forward_over_the_line_to_avoid_a_peer():
@@ -253,10 +276,11 @@ def test_carrying_never_moves_forward_over_the_line_to_avoid_a_peer():
     assert cmd[0] == pytest.approx(0.0)
 
 
-def test_carrying_does_not_arc_toward_a_peer_already_touching():
+def test_carrying_spins_away_from_a_peer_already_touching():
+    params = SafetyParams()
     peer = peer_at(0.2 * math.cos(math.radians(40)), 0.2 * math.sin(math.radians(40)), theta=math.pi / 2)
-    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer, carrying=True))
-    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(0.08, 0.0, 0.0), peer_pose=peer, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, -params.carry_max_turn))  # swings the scoop away from it
 
 
 def test_not_carrying_keeps_in_place_rotation():
@@ -282,36 +306,17 @@ WEST = math.pi
 IN_CORRIDOR = Pose2D(*ZONE.pose(0.15), stamp=10.0)  # facing the square, between entry and drop
 
 
-def test_reverse_allowed_in_corridor_with_lease_and_bounded():
+def test_reverse_out_of_the_square_is_slow():
     params = SafetyParams()
-    cmd, reason = SafetyGate(params).filter(
-        make_input(cmd=(-0.5, 0.0, 0.0), own_pose=IN_CORRIDOR, holds_zone=True)
-    )
-    assert cmd == pytest.approx((-params.max_reverse, 0.0, 0.0))
-    assert "delivery" in reason
-
-
-@pytest.mark.parametrize(
-    "pose, holds_zone, carrying",
-    [
-        (IN_CORRIDOR, False, False),  # no lease
-        (Pose2D(0.4, 0.0, WEST, stamp=10.0), True, False),  # outside the corridor
-        (Pose2D(*ZONE.point(0.15), 0.0, stamp=10.0), True, False),  # facing away from the square
-        (IN_CORRIDOR, True, True),  # still carrying: reversing would leave the cube outside
-    ],
-)
-def test_reverse_refused_otherwise(pose, holds_zone, carrying):
-    cmd, _ = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(-0.04, 0.0, 0.0), own_pose=pose, holds_zone=holds_zone, carrying=carrying)
-    )
-    assert cmd[0] >= 0.0
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(-0.5, 0.0, 0.0), own_pose=IN_CORRIDOR, holds_zone=True))
+    assert cmd == pytest.approx((-params.max_side_speed, 0.0, 0.0))
 
 
 def test_square_tape_crossed_with_lease_while_carrying():
     cmd, reason = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.05, 0.0, 0.1), line_front=True, own_pose=IN_CORRIDOR, holds_zone=True, carrying=True)
+        make_input(cmd=(0.04, 0.01, 0.0), line_front=True, own_pose=IN_CORRIDOR, holds_zone=True, carrying=True)
     )
-    assert cmd == pytest.approx((0.05, 0.0, 0.1))
+    assert cmd == pytest.approx((0.04, 0.01, 0.0))
     assert "line ahead" not in reason
 
 
@@ -322,20 +327,20 @@ def test_square_tape_blocks_without_lease():
     assert cmd[0] == pytest.approx(0.0)
 
 
-def test_carrying_arcs_away_from_a_peer_beside_it():
+def test_carrying_spins_away_from_a_peer_beside_it():
     # Webots run 4: Ferb (carrying) froze for minutes next to a robot 38 deg to its left at 0.36 m.
     params = SafetyParams()
     peer = peer_at(0.36 * math.cos(math.radians(38)), 0.36 * math.sin(math.radians(38)), theta=math.pi / 2)
-    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer, carrying=True))
-    assert cmd == pytest.approx((params.carry_min_forward, 0.0, -params.carry_max_turn))
-    assert "arc away" in reason
+    cmd, reason = SafetyGate(params).filter(make_input(cmd=(0.08, 0.0, 0.0), peer_pose=peer, carrying=True))
+    assert cmd == pytest.approx((0.0, 0.0, -params.carry_max_turn))
+    assert "turn away" in reason
 
 
-def test_carrying_still_stops_for_a_peer_dead_ahead():
+def test_carrying_never_translates_into_a_peer_dead_ahead():
     cmd, _ = SafetyGate(SafetyParams()).filter(
-        make_input(cmd=(0.08, 0.0, 0.4), peer_pose=peer_at(0.35, 0.02), carrying=True)
+        make_input(cmd=(0.08, 0.0, 0.0), peer_pose=peer_at(0.35, 0.02), carrying=True)
     )
-    assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert cmd[0] == pytest.approx(0.0) and cmd[1] == pytest.approx(0.0)
 
 
 def test_delivering_robot_is_not_turned_away_by_the_peer_outside_the_corridor():
@@ -360,7 +365,7 @@ def test_lease_holder_is_not_turned_away_by_the_waiting_robot():
     cmd, reason = SafetyGate(SafetyParams()).filter(
         make_input(cmd=(0.0, 0.0, 1.2), own_pose=own, peer_pose=peer, holds_zone=True, carrying=True)
     )
-    assert cmd[2] == pytest.approx(0.6)  # its own (carry-limited) turn, not the avoidance turn
+    assert cmd[2] == pytest.approx(SafetyParams().carry_max_turn)  # its own (carry-limited) turn, not the avoidance turn
     assert "turn away" not in reason
     # Still stops before contact.
     close = Pose2D(-0.35, 0.1, 0.0, stamp=10.0)

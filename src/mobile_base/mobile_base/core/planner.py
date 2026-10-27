@@ -58,7 +58,7 @@ def plan_arcs(
     goal: Callable[[Pose], bool],
     target: tuple[float, float],
     straight_speed: float,
-    arc_speed: float,
+    arc_speed: float | None,
     turn: float,
     step: float = 0.03,
     cell: float = 0.02,
@@ -70,16 +70,15 @@ def plan_arcs(
     """Shortest primitive sequence from start to a pose where goal(pose) holds, or None.
 
     target is only used by the heuristic (straight-line distance). Each primitive covers `step`
-    meters; arcs use the tightest radius allowed with a cube (arc_speed / turn). With the scoop gate
-    closed the cube is retained, so in-place spins (one heading bin each) and reverse are offered too.
+    meters; arcs use the tightest radius allowed with a cube (arc_speed / turn). arc_speed None
+    leaves the arcs out (the robots now only translate or spin in place: team rule of 2026-10-27);
+    spin_speed offers in-place spins (one heading bin each) and reverse_speed a straight reverse.
     """
     # A start already touching the edge (pose noise) is accepted; the plan never goes deeper than it.
     limit = penetration(track, footprint, start)
-    primitives = [
-        (straight_speed, 0.0, step / straight_speed),
-        (arc_speed, turn, step / arc_speed),
-        (arc_speed, -turn, step / arc_speed),
-    ]
+    primitives = [(straight_speed, 0.0, step / straight_speed)]
+    if arc_speed:
+        primitives += [(arc_speed, turn, step / arc_speed), (arc_speed, -turn, step / arc_speed)]
     if spin_speed:
         bin_angle = 2.0 * math.pi / heading_bins
         primitives += [(0.0, spin_speed, bin_angle / spin_speed), (0.0, -spin_speed, bin_angle / spin_speed)]

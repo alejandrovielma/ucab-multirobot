@@ -153,12 +153,33 @@ def test_foreign_color_cube_is_ignored():
 
 
 @pytest.mark.parametrize("cx, sign", [(0.5, -1.0), (-0.5, 1.0)])
-def test_approach_steers_toward_cube(cx, sign):
+def test_approach_spins_in_place_toward_cube(cx, sign):
     fsm = make_fsm()
     tick(fsm, 0.0, cubes=[Cube("red", cx, 0.3, 400.0)])
     cmd = tick(fsm, 0.1, cubes=[Cube("red", cx, 0.3, 400.0)])
     assert cmd[2] * sign > 0  # cube on the right (cx > 0) -> turn clockwise (wz < 0)
-    assert 0.0 < cmd[0] < fsm.params.approach_speed
+    assert cmd[0] == 0.0 and cmd[1] == 0.0  # star motion: no translation while turning
+
+
+def test_approach_drives_straight_once_centered_with_hysteresis():
+    fsm = make_fsm(approach_align=0.15)
+    tick(fsm, 0.0, cubes=[Cube("red", 0.4, 0.3, 400.0)])
+    assert tick(fsm, 0.1, cubes=[Cube("red", 0.1, 0.3, 400.0)])[2] != 0.0  # still above align / 2
+    assert tick(fsm, 0.2, cubes=[Cube("red", 0.05, 0.3, 400.0)]) == pytest.approx((fsm.params.approach_speed, 0.0, 0.0))
+    assert tick(fsm, 0.3, cubes=[Cube("red", 0.12, 0.3, 400.0)]) == pytest.approx((fsm.params.approach_speed, 0.0, 0.0))
+
+
+def test_approach_spin_never_goes_below_the_motor_start_speed():
+    fsm = make_fsm(approach_align=0.15, approach_turn_min=0.4)
+    tick(fsm, 0.0, cubes=[Cube("red", 0.16, 0.3, 400.0)])
+    assert abs(tick(fsm, 0.1, cubes=[Cube("red", 0.16, 0.3, 400.0)])[2]) == pytest.approx(0.4)
+
+
+def test_a_cube_off_center_at_the_scoop_mouth_is_centered_before_the_capture():
+    fsm = make_fsm()
+    tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
+    tick(fsm, 0.1, cubes=[Cube("red", 0.5, 0.9, 3000.0)])
+    assert fsm.state is State.APPROACH
 
 
 def test_approach_targets_largest_own_cube():
@@ -339,3 +360,112 @@ def test_border_turn_with_pose_turns_far_enough_to_face_inward():
         fsm.step(BehaviorInput(now=0.1, cubes=[], line_front=True, pose=(0.0, 0.0, 0.0)))
         turned = turn_until_straight(fsm, lambda th: (0.0, 0.0, th))
         assert math.radians(135) - 0.1 <= turned <= math.radians(225) + 0.1
+
+
+# ---- Mission from the command interface (target colors; forbidden and neutral cubes are avoided)
+
+
+def test_without_a_mission_the_robot_stays_still():
+    fsm = BehaviorFSM(BehaviorParams(), rng=random.Random(1))
+    assert fsm.state is State.IDLE
+    assert tick(fsm, 0.0, cubes=[Cube("blue", 0.0, 0.5, 900.0)]) == (0.0, 0.0, 0.0)
+
+
+def test_a_mission_starts_the_robot_and_clearing_it_stops_it():
+    fsm = BehaviorFSM(BehaviorParams(), rng=random.Random(1))
+    fsm.set_mission(["blue"], avoid=["red"])
+    tick(fsm, 0.0, cubes=[Cube("blue", 0.0, 0.3, 400.0)])
+    assert fsm.state is State.APPROACH
+    fsm.set_mission([])
+    assert tick(fsm, 0.1, cubes=[Cube("blue", 0.0, 0.3, 400.0)]) == (0.0, 0.0, 0.0)
+    assert fsm.state is State.IDLE
+
+
+def test_clearing_the_mission_while_carrying_releases_the_lease():
+    fsm = BehaviorFSM(BehaviorParams(capture_time=0.1), rng=random.Random(1))
+    fsm.set_mission(["blue"])
+    tick(fsm, 0.0, cubes=[Cube("blue", 0.0, 0.3, 400.0)])
+    tick(fsm, 0.1, cubes=[Cube("blue", 0.0, 0.95, 3000.0)])
+    tick(fsm, 0.3, scoop="blue")
+    assert fsm.state is State.CARRY
+    fsm.set_mission([])
+    fsm.step(BehaviorInput(now=0.4, cubes=[], line_front=False, holds_zone=True, scoop_color="blue"))
+    assert fsm.state is State.IDLE
+    assert [a.kind for a in fsm.take_actions()] == ["release"]
+
+
+def test_only_target_colors_are_chased():
+    fsm = BehaviorFSM(BehaviorParams(), rng=random.Random(1))
+    fsm.set_mission(["green"], avoid=["red"])
+    tick(fsm, 0.0, cubes=[Cube("yellow", 0.0, 0.3, 900.0)])  # neutral
+    assert fsm.state is State.EXPLORE
+    tick(fsm, 0.1, cubes=[Cube("green", 0.5, 0.3, 300.0)])
+    assert fsm.state is State.APPROACH
+
+
+def test_a_forbidden_cube_caught_in_the_scoop_is_counted():
+    fsm = BehaviorFSM(BehaviorParams(shed_confirm=0.2), rng=random.Random(1))
+    fsm.set_mission(["green"], avoid=["red"])
+    tick(fsm, 0.0, scoop="red")
+    tick(fsm, 0.3, scoop="red")
+    assert fsm.forbidden_touches == 1
+    neutral = BehaviorFSM(BehaviorParams(shed_confirm=0.2), rng=random.Random(1))
+    neutral.set_mission(["green"], avoid=["red"])
+    tick(neutral, 0.0, scoop="yellow")
+    tick(neutral, 0.3, scoop="yellow")
+    assert neutral.forbidden_touches == 0  # backed off too, but touching a neutral costs nothing
+
+
+def test_a_target_that_keeps_hiding_behind_another_cube_is_reached_by_pushing_it_aside():
+    # Rule: other cubes may be moved on the track when that is the only way to a target.
+    fsm = BehaviorFSM(BehaviorParams(skip_time=1.0, clear_after=2, shed_confirm=0.2), rng=random.Random(1))
+    fsm.set_mission(["blue"], avoid=["red"])
+    target, obstacle = Cube("blue", 0.0, 0.4, 400.0), Cube("red", 0.05, 0.55, 600.0)
+    t = 0.0
+    for _ in range(2):  # skipped twice
+        tick(fsm, t, cubes=[target])
+        tick(fsm, t + 0.1, cubes=[target, obstacle])
+        assert fsm.state is State.EXPLORE
+        t += 2.0  # skip_time over
+    tick(fsm, t, cubes=[target])
+    cmd = tick(fsm, t + 0.1, cubes=[target, obstacle])
+    assert fsm.state is State.APPROACH and cmd == pytest.approx((fsm.params.approach_speed, 0.0, 0.0))
+    # The red cube ends up in the scoop: it is spun out (thrown aside), not backed off.
+    tick(fsm, t + 0.2, cubes=[target], scoop="red")
+    cmd = tick(fsm, t + 0.5, cubes=[target], scoop="red")
+    assert fsm.state is State.EXPLORE
+    assert cmd[0] == 0.0 and abs(cmd[2]) == pytest.approx(fsm.params.turn_speed)
+    assert fsm.forbidden_touches == 1
+
+
+def test_repeated_border_hits_in_a_corner_back_off_further_and_turn_around():
+    fsm = make_fsm(line_backoff=0.1, corner_hits=3, corner_window=10.0, turn_min=0.5, turn_max=0.5)
+    reverse = 0.1 / fsm.params.reverse_speed
+    t = 0.0
+    for _ in range(2):  # two ordinary border reactions
+        tick(fsm, t, line_front=True)
+        t += reverse + 0.6  # backoff and turn done
+        tick(fsm, t)
+    tick(fsm, t, line_front=True)  # third within the window: a corner
+    assert "corner" in fsm.note
+    assert tick(fsm, t + 2 * reverse - 0.05)[0] < 0.0  # still backing off: twice line_backoff
+    spin = math.pi / fsm.params.turn_speed
+    assert tick(fsm, t + 2 * reverse + spin - 0.05)[2] != 0.0  # a half turn
+    assert tick(fsm, t + 2 * reverse + spin + 0.05)[0] == pytest.approx(fsm.params.explore_speed)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_every_command_is_a_translation_or_a_spin_never_both(seed):
+    # Team rule 2026-10-27: random inputs through every state must never yield an arc.
+    rng = random.Random(seed)
+    fsm = BehaviorFSM(BehaviorParams(capture_time=0.2, shed_confirm=0.1), rng=random.Random(seed))
+    fsm.set_mission(["blue", "green"], avoid=["red"])
+    colors = ["blue", "green", "red", "yellow"]
+    for k in range(400):
+        cubes = [Cube(rng.choice(colors), rng.uniform(-1, 1), rng.uniform(0, 1), rng.uniform(100, 5000))
+                 for _ in range(rng.randint(0, 3))]
+        vx, vy, wz = fsm.step(BehaviorInput(
+            now=k * 0.1, cubes=cubes, line_front=rng.random() < 0.05, pose=None,
+            holds_zone=rng.random() < 0.5, scoop_color=rng.choice(colors + ["", ""]),
+        ))
+        assert wz == 0.0 or (vx == 0.0 and vy == 0.0), (fsm.state, vx, vy, wz)

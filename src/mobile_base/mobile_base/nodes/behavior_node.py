@@ -2,14 +2,19 @@
 
 It also performs the FSM's zone actions as asynchronous calls to /zone/request and
 /zone/release; the lease itself is read from /zone/occupant (holds_zone = occupant is me).
+
+The mission comes from two string parameters, comma separated, that can change at runtime (the
+command interface, or `ros2 param set /phineas/behavior my_colors "blue,green"`): my_colors (targets;
+empty = the robot stays still) and avoid_colors (forbidden). Unknown color names are rejected.
 """
 
 from geometry_msgs.msg import Twist
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, ZoneAction
-from mobile_base.core.colors import DEFAULT_ROBOT_COLORS
+from mobile_base.core.colors import parse_colors
 from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
 from multirobot_interfaces.srv import ReleaseZone, RequestZone
@@ -19,13 +24,15 @@ class BehaviorNode(Node):
     def __init__(self):
         super().__init__("behavior")
         self.robot = self.declare_parameter("robot", "phineas").value
-        default_colors = DEFAULT_ROBOT_COLORS.get(self.robot, [])
-        my_colors = self.declare_parameter("my_colors", default_colors).value
+        targets = parse_colors(self.declare_parameter("my_colors", "").value)
+        avoid = parse_colors(self.declare_parameter("avoid_colors", "").value)
         rate_hz = self.declare_parameter("rate_hz", 10.0).value
         cube_timeout = self.declare_parameter("cube_timeout", 0.5).value
         self.declare_parameter("peer_pose_topic", "/ferb/pose")  # still in the YAML; avoidance lives in the gate
         values = declare_dataclass(self, BehaviorParams, skip=("my_colors",))
-        self.fsm = BehaviorFSM(BehaviorParams(my_colors=tuple(my_colors), **values), track=declare_track(self))
+        self.fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values), track=declare_track(self))
+        self.fsm.set_mission(targets, avoid)
+        self.add_on_set_parameters_callback(self._on_mission)
         self._cube_timeout = cube_timeout
 
         self._cubes: list[Cube] = []
@@ -47,7 +54,23 @@ class BehaviorNode(Node):
         self._request_client = self.create_client(RequestZone, "/zone/request")
         self._release_client = self.create_client(ReleaseZone, "/zone/release")
         self.create_timer(1.0 / rate_hz, self._tick)
-        self.get_logger().info(f"{self.robot}: my colors {list(my_colors)}")
+        self.get_logger().info(f"{self.robot}: targets {list(targets) or 'none (idle)'}, avoid {list(avoid)}")
+
+    def _on_mission(self, params):
+        """Live mission change; a bad color name is refused and the current mission stays."""
+        targets, avoid = self.fsm.targets, self.fsm.avoid
+        try:
+            for param in params:
+                if param.name == "my_colors":
+                    targets = parse_colors(param.value)
+                elif param.name == "avoid_colors":
+                    avoid = parse_colors(param.value)
+        except (ValueError, AttributeError) as exc:
+            return SetParametersResult(successful=False, reason=str(exc))
+        if (targets, avoid) != (self.fsm.targets, self.fsm.avoid):
+            self.fsm.set_mission(targets, avoid)
+            self.get_logger().info(f"mission: targets {list(targets) or 'none (idle)'}, avoid {list(avoid)}")
+        return SetParametersResult(successful=True)
 
     def _on_cubes(self, msg: CubeDetectionArray):
         self._cubes = [Cube(c.color, c.cx_norm, c.cy_norm, c.area_px) for c in msg.cubes]

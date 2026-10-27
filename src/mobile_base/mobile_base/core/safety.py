@@ -1,46 +1,39 @@
 """SafetyGate: last filter between the behavior command and the motors.
 
+Motion rule of the team (2026-10-27): the robot translates in any direction (forward, back, sideways,
+diagonals: a "star") or spins in place, never both at once. Every change of heading is a spin.
+
 Rules, applied in order every tick:
 0. Emergency stop (the estop topic, from the phone interface) -> full stop until it is cleared.
 1. Coordinator heartbeat lost (when required) -> full stop.
 2. Own pose stale (when required) -> full stop.
-3. Forward-only translation: the robot has a single FRONT line sensor, so strafing or
-   reversing is blind to the track edge (in Webots, strafing drove both robots off the board).
-   Turning in place is allowed; vy and negative vx are removed. Exception: with the overhead pose
-   and a track polygon reversing is no longer blind, so a slow reverse (max_reverse) is allowed
-   when the body stays inside the track (and never while carrying: the cube would stay behind).
-   With blind_reverse (line sensor at the robot center, which the behavior backs off the tape by a
-   fixed line_backoff) a slow reverse is also allowed without the pose, never with a loose cube.
-4. Front line sensor on black -> no forward motion (turning allowed).
-5. Peer robot ahead (overhead-camera poses) -> slow down, stop, and turn away from it.
-   If both robots stay blocked facing each other for deadlock_time, the robot
-   WITHOUT priority rotates away (or holds still when it carries a cube, since any
-   maneuver would drop it from the fixed scoop).
-6. Carrying a cube -> turns only in arcs (see _carry_limits), with two exceptions:
-   - line ahead: the line wins. No forward motion at all; turning in place is allowed even
-     though it drops the cube (Webots run 5: arcing off the line with a cube left the board).
-   - peer to one side (not ahead, not touching): a forward arc away from it, so a carrying
-     robot does not freeze forever next to another robot.
+3. Star motion: a command that both translates and spins keeps only the spin. Any translation that is
+   not straight ahead (sideways, diagonal, backward) is limited to max_side_speed: the only line
+   sensor is at the robot center, so it sees the tape once the body is already 8-9.5 cm past it.
+4. Line sensor on black -> no translation toward the tape. The tape is taken to lie in the direction
+   the robot was translating when the line appeared (forward if it had not translated yet), so
+   backing away the way it came is allowed and pushing on (or out "through another side") is not.
+   Spinning is allowed.
+5. Peer robot in the travel direction (overhead-camera poses) -> slow down, stop, and spin away
+   from it. If both robots stay blocked facing each other for deadlock_time, the robot WITHOUT
+   priority rotates away (or holds still when it carries a cube in the open scoop).
+6. Carrying a cube in the open scoop -> spins at most carry_max_turn (a fast spin throws the cube
+   out of the fixed U; the behavior watches the scoop with the camera and recaptures it).
 
 Body geofence (last rule, needs the overhead pose and a track polygon). Rule of the team: the
 scoop may step on the tape, the robot body may never cross it. The final command is simulated for
 track_horizon seconds and every corner of the body rectangle (wheels included, scoop excluded) must
-stay inside the polygon:
-- an in-place spin that would swing a corner over the tape tries the other direction, else stops
-  (the behavior then backs off: reverse is allowed with the pose). Requiring room to spin before
-  every forward move was tried and pinned the robots: the track is at most 0.24 m from its edge;
-- with a cube (arcs only), a blocked arc tries the other direction, else the robot stops and the
-  behavior drops the cube by backing off.
-With the robot center already outside, forward motion is allowed only toward the track centroid,
-even over "black" (off the board the floor reads as tape).
+stay inside the polygon: a spin that would swing a corner over the tape tries the other direction,
+else stops; a translation that would push the body over it stops. With the robot center already
+outside, translation is allowed only toward the track centroid, even over "black" (off the board
+the floor reads as tape).
 
-Scoop gate: when the robot reports gate_closed the cube is retained by the servo door, so the
-carry restrictions (arcs only, no reverse, hold still in a deadlock) do not apply.
+Scoop gate: when the robot reports gate_closed the cube is retained by the servo door, so the carry
+restrictions (slow spins, hold still in a deadlock) do not apply.
 
-Delivery exception (rules 3 and 4): while this robot holds the zone lease (/zone/occupant) and its
-own overhead pose is inside the delivery corridor facing the square, it may cross the square's
-tape and, once it no longer carries the cube, reverse at most max_reverse. Both conditions come
-from inputs the gate reads itself, so a faulty behavior cannot unlock reversing elsewhere.
+Delivery exception (rule 4): while this robot holds the zone lease (/zone/occupant) and its own
+overhead pose is inside the delivery corridor facing the square, it may cross the square's tape.
+Both conditions come from inputs the gate reads itself, so a faulty behavior cannot unlock it.
 """
 
 import math
@@ -78,14 +71,10 @@ class SafetyParams:
     deadlock_time: float = 3.0
     escape_turn: float = 0.8  # rad/s, deadlock escape rotation of the robot without priority
     escape_time: float = 1.5
-    # The fixed scoop only retains a cube when it is pushed forward: in-place spins and strafes
-    # eject it (observed in Webots), and reversing leaves it behind.
-    carry_min_forward: float = 0.05  # m/s, forward speed forced while turning with a cube
-    carry_max_turn: float = 0.6  # rad/s, turn-rate limit with a cube
-    carry_arc_away_bearing: float = 25.0  # deg, peer this far off-axis: arc away instead of freezing
-    carry_arc_away_min_distance: float = 0.30  # m, closer than this the robots touch: hold still
-    max_reverse: float = 0.05  # m/s: delivery corridor with the lease, or anywhere the pose shows room behind
-    blind_reverse: bool = False  # allow max_reverse without the pose (centered line sensor, see rule 3)
+    # The fixed scoop only retains a cube when it is pushed forward: a fast spin throws it out of
+    # the U (observed in Webots), so with a cube the spins are slow.
+    carry_max_turn: float = 0.4  # rad/s, spin-rate limit with a cube
+    max_side_speed: float = 0.05  # m/s, any translation that is not straight ahead (rule 3)
     track_horizon: float = 0.3  # s, body geofence prediction
     body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
     body_rear: float = 0.095
@@ -126,6 +115,9 @@ class SafetyGate:
         self._escape_until: float | None = None
         self._escape_cmd: Command = STOP
         self._escape_reason = ""
+        self._travel_dir = (1.0, 0.0)  # unit translation direction (robot frame) of the last move
+        self._line_dir = (1.0, 0.0)  # where the tape is taken to be while the line is seen
+        self._line_seen = False
 
     def filter(self, inp: SafetyInput) -> tuple[Command, str]:
         p = self.params
@@ -152,153 +144,126 @@ class SafetyGate:
         loose_cube = inp.carrying and not inp.gate_closed
         delivering = own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose)
         on_track = own_fresh and self._track.enabled and self._track.contains(inp.own_pose.x, inp.own_pose.y)
-        if (delivering or on_track) and not loose_cube and vx < 0.0 and vy == 0.0:
-            vx = max(vx, -p.max_reverse)
-            reasons.append("delivery: reverse out" if delivering else "reverse (pose geofence)")
-        elif p.blind_reverse and not own_fresh and not loose_cube and vx < 0.0 and vy == 0.0:
-            vx = max(vx, -p.max_reverse)
-            reasons.append("blind reverse")
-        elif vy != 0.0 or vx < 0.0:
-            vx, vy = max(vx, 0.0), 0.0
-            reasons.append("forward only")
-        returning, off_track = self._outside_track(inp, own_fresh, reasons)
-        line_blocks = (inp.line_front and not delivering and not returning) or off_track
-        if line_blocks and vx > 0.0:
-            vx = 0.0
-            reasons.append("line ahead" if inp.line_front else "no forward")
+        vx, vy, wz = self._star(vx, vy, wz, reasons)
+        if vy != 0.0 or vx < 0.0:
+            vx, vy = self._cap(vx, vy, p.max_side_speed, "slow: not straight ahead", reasons)
+        returning, off_track = self._outside_track(inp, own_fresh, vx, vy, reasons)
+        if inp.line_front and not self._line_seen:
+            self._line_dir = self._travel_dir  # the tape lies where the robot was heading for
+        self._line_seen = inp.line_front
+        line_blocks = inp.line_front and not delivering and not returning
+        if (line_blocks and _toward(vx, vy, self._line_dir)) or (off_track and (vx or vy)):
+            vx = vy = 0.0
+            reasons.append("line ahead" if line_blocks else "no translation away from the track")
 
         peer = inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None
         blocked = False
-        peer_bearing = peer_distance = 0.0
         if own_fresh and peer is not None:
             # The lease holder has right of way near the square: only slow down / stop, no turn-away.
             # Turning away froze a carrying robot in the corridor for 8 minutes (Webots run 17) and kept
             # a lease holder replanning next to the waiting robot for 10 minutes (run 20).
-            vx, wz, blocked, peer_reason = self._avoid_peer(vx, wz, inp.own_pose, peer, turn=not inp.holds_zone)
-            own = inp.own_pose
-            peer_bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
-            peer_distance = distance(own.x, own.y, peer.x, peer.y)
+            vx, vy, wz, blocked, peer_reason = self._avoid_peer(vx, vy, wz, inp.own_pose, peer,
+                                                                turn=not inp.holds_zone)
             if peer_reason:
                 reasons.append(peer_reason)
 
         escape = self._update_deadlock(blocked, inp, peer)
         if escape is not None:
             return escape
-        if loose_cube:
-            vx, vy, wz = self._carry_limits(vx, wz, blocked, peer_bearing, peer_distance, line_blocks, reasons)
+        if loose_cube and abs(wz) > p.carry_max_turn:
+            wz = math.copysign(p.carry_max_turn, wz)
+            reasons.append("carrying: slow spin")
+        vx, vy, wz = self._star(vx, vy, wz, reasons)  # the peer rule may have added a spin
         if on_track:
-            vx, wz = self._body_geofence(inp.own_pose, vx, wz, loose_cube, reasons)
+            vx, vy, wz = self._body_geofence(inp.own_pose, vx, vy, wz, reasons)
+        if (vx or vy) and not inp.line_front:
+            norm = math.hypot(vx, vy)
+            self._travel_dir = (vx / norm, vy / norm)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
-    def _outside_track(self, inp: SafetyInput, own_fresh: bool, reasons: list[str]) -> tuple[bool, bool]:
-        """Center outside the polygon: return (heading back in, forward must be blocked)."""
+    @staticmethod
+    def _star(vx: float, vy: float, wz: float, reasons: list[str]) -> Command:
+        """Translate or spin in place, never both: the spin wins (it is how the robot changes heading)."""
+        if wz != 0.0 and (vx != 0.0 or vy != 0.0):
+            if "spin in place only" not in reasons:
+                reasons.append("spin in place only")
+            return 0.0, 0.0, wz
+        return vx, vy, wz
+
+    @staticmethod
+    def _cap(vx: float, vy: float, limit: float, why: str, reasons: list[str]) -> tuple[float, float]:
+        """Scale the translation down to `limit` m/s keeping its direction."""
+        norm = math.hypot(vx, vy)
+        if norm <= limit:
+            return vx, vy
+        reasons.append(why)
+        return vx * limit / norm, vy * limit / norm
+
+    def _outside_track(self, inp: SafetyInput, own_fresh: bool, vx: float, vy: float,
+                       reasons: list[str]) -> tuple[bool, bool]:
+        """Center outside the polygon: return (translating back in, translation must be blocked)."""
         if not own_fresh or not self._track.enabled:
             return False, False
         own = inp.own_pose
         if self._track.contains(own.x, own.y):
             return False, False
         cx, cy = self._track.centroid
-        returning = abs(relative_bearing(own.x, own.y, own.theta, cx, cy)) <= math.radians(self.params.track_return_cone)
+        travel = own.theta + math.atan2(vy, vx) if (vx or vy) else own.theta
+        returning = abs(relative_bearing(own.x, own.y, travel, cx, cy)) <= math.radians(self.params.track_return_cone)
         reasons.append("outside track: " + ("back in" if returning else "turn back"))
         return returning, not returning
 
-    def _body_fits(self, pose: Pose2D, vx: float, wz: float, carrying: bool) -> bool:
+    def _body_fits(self, pose: Pose2D, vx: float, vy: float, wz: float) -> bool:
         """Every body corner stays inside the track along the predicted motion."""
         start = (pose.x, pose.y, pose.theta)
-        return path_inside(self._track, self._body, start, vx, wz, self.params.track_horizon)
+        return path_inside(self._track, self._body, start, vx, wz, self.params.track_horizon, vy=vy)
 
-    def _body_geofence(self, pose: Pose2D, vx: float, wz: float, carrying: bool, reasons: list[str]):
-        if vx == 0.0 and wz == 0.0:
-            return vx, wz
-        if self._body_fits(pose, vx, wz, carrying):
-            return vx, wz
-        p = self.params
-        if carrying:
-            # Arcs only: try the other side (or either side when going straight).
-            options = [-wz] if wz != 0.0 else [p.carry_max_turn, -p.carry_max_turn]
-            for other in options:
-                if vx > 0.0 and self._body_fits(pose, vx, other, carrying):
-                    reasons.append("carrying: arc the other way (body geofence)")
-                    return vx, other
-            reasons.append("carrying: body would cross the tape, stop")
-            return 0.0, 0.0
-        if vx > 0.0:
-            reasons.append("track edge ahead (pose)")
-            vx = 0.0
-            if wz == 0.0 or self._body_fits(pose, 0.0, wz, carrying):
-                return vx, wz
-        if vx < 0.0:
-            reasons.append("no room behind (pose)")
-            return 0.0, 0.0
-        if wz != 0.0 and self._body_fits(pose, 0.0, -wz, carrying):
-            reasons.append("turn the other way (body geofence)")
-            return 0.0, -wz
-        reasons.append("body would cross the tape: no room to turn")
-        return 0.0, 0.0
+    def _body_geofence(self, pose: Pose2D, vx: float, vy: float, wz: float, reasons: list[str]) -> Command:
+        if (vx == 0.0 and vy == 0.0 and wz == 0.0) or self._body_fits(pose, vx, vy, wz):
+            return vx, vy, wz
+        if wz != 0.0:  # a spin (commands are pure by now): the other direction may fit
+            if self._body_fits(pose, 0.0, 0.0, -wz):
+                reasons.append("turn the other way (body geofence)")
+                return 0.0, 0.0, -wz
+            reasons.append("body would cross the tape: no room to turn")
+            return STOP
+        reasons.append("track edge in the way (pose)")
+        return STOP
 
     def _in_delivery_corridor(self, pose: Pose2D) -> bool:
         return self._zone.in_corridor(pose.x, pose.y) and self._zone.aligned(pose.theta)
 
-    def _carry_limits(
-        self,
-        vx: float,
-        wz: float,
-        peer_blocked: bool,
-        peer_bearing: float,
-        peer_distance: float,
-        line_blocks: bool,
-        reasons: list[str],
-    ) -> Command:
-        p = self.params
-        vx = max(vx, 0.0)
-        wz = max(-p.carry_max_turn, min(p.carry_max_turn, wz))
-        if line_blocks:
-            # Losing the cube at the border is recoverable; leaving the track is not.
-            if "line ahead" not in reasons:
-                reasons.append("line ahead")
-            reasons.append("carrying: turn in place, cube may drop")
-            return 0.0, 0.0, wz
-        if (
-            peer_blocked
-            and abs(peer_bearing) >= math.radians(p.carry_arc_away_bearing)
-            and peer_distance >= p.carry_arc_away_min_distance
-        ):
-            # Peer to one side: a forward arc away from it opens the gap (a frozen robot never does).
-            reasons.append("carrying: arc away from peer")
-            return p.carry_min_forward, 0.0, -math.copysign(p.carry_max_turn, peer_bearing)
-        if wz != 0.0:
-            if peer_blocked:
-                reasons.append("carrying: no in-place turn")
-                return 0.0, 0.0, 0.0
-            if vx < p.carry_min_forward:
-                vx = p.carry_min_forward
-                reasons.append("carrying: turn in arc")
-        return vx, 0.0, wz
-
     def _is_fresh(self, pose: Pose2D | None, now: float) -> bool:
         return pose is not None and now - pose.stamp <= self.params.pose_timeout
 
-    def _avoid_peer(self, vx: float, wz: float, own: Pose2D, peer: Pose2D, turn: bool = True):
+    def _avoid_peer(self, vx: float, vy: float, wz: float, own: Pose2D, peer: Pose2D, turn: bool = True):
+        """Slow down or stop a translation toward the peer, and spin away from it when it is close.
+
+        The cone is around the travel direction (the heading while spinning or still), so moving
+        away from the peer, sideways or backward, is never held back."""
         p = self.params
-        bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
-        if abs(bearing) >= math.radians(p.front_cone_deg):
-            return vx, wz, False, ""
+        moving = vx != 0.0 or vy != 0.0
+        travel = own.theta + math.atan2(vy, vx) if moving else own.theta
+        if abs(relative_bearing(own.x, own.y, travel, peer.x, peer.y)) >= math.radians(p.front_cone_deg):
+            return vx, vy, wz, False, ""
         d = distance(own.x, own.y, peer.x, peer.y)
         blocked = False
         reason = ""
         if d < p.stop_distance:
-            blocked = vx > 0.0
-            vx = min(vx, 0.0)
+            blocked = moving
+            vx = vy = 0.0
             reason = f"peer ahead at {d:.2f} m: stop"
-        elif d < p.slow_distance and vx > 0.0:
-            vx *= (d - p.stop_distance) / (p.slow_distance - p.stop_distance)
+        elif d < p.slow_distance and moving:
+            k = (d - p.stop_distance) / (p.slow_distance - p.stop_distance)
+            vx, vy = vx * k, vy * k
             reason = f"peer ahead at {d:.2f} m: slow"
         if d < p.avoid_distance and turn:
-            # Turn away from the peer; dead ahead counts as "left" so both robots break right.
+            # Spin away from the peer; dead ahead counts as "left" so both robots break right.
+            bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
             wz = -p.avoid_turn if bearing >= 0.0 else p.avoid_turn
             reason = reason or f"peer ahead at {d:.2f} m"
             reason += ", turn away"
-        return vx, wz, blocked, reason
+        return vx, vy, wz, blocked, reason
 
     def _update_deadlock(self, blocked: bool, inp: SafetyInput, peer: Pose2D | None):
         p = self.params
@@ -311,7 +276,7 @@ class SafetyGate:
         if p.has_priority or inp.now - self._blocked_since < p.deadlock_time:
             return None
         if inp.carrying and not inp.gate_closed:
-            # Any escape maneuver would drop the cube: hold still and let the priority robot go around.
+            # A spin could throw the cube out: hold still and let the priority robot go around.
             self._escape_cmd = STOP
             self._escape_reason = "deadlock: hold still (carrying)"
         else:
@@ -325,3 +290,8 @@ class SafetyGate:
     def _peer_faces_us(self, own: Pose2D, peer: Pose2D) -> bool:
         bearing = relative_bearing(peer.x, peer.y, peer.theta, own.x, own.y)
         return abs(bearing) < math.radians(self.params.front_cone_deg)
+
+
+def _toward(vx: float, vy: float, direction: tuple[float, float]) -> bool:
+    """The translation has a component along direction (robot frame)."""
+    return vx * direction[0] + vy * direction[1] > 1e-9

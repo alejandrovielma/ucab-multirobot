@@ -96,44 +96,37 @@ def test_gate_reverse_allowed_when_the_pose_shows_room_behind():
     gate = SafetyGate(params, track=ARENA)
     pose = (2.0 - 0.01 - FP.front, 1.0, 0.0)
     cmd, reason = gate.filter(gate_input(pose, (-0.2, 0.0, 0.0)))
-    assert cmd == pytest.approx((-params.max_reverse, 0.0, 0.0))
-    assert "reverse" in reason
+    assert cmd == pytest.approx((-params.max_side_speed, 0.0, 0.0))
+    assert "slow" in reason
 
 
-def test_gate_reverse_refused_without_track_or_while_carrying():
-    pose = (1.0, 1.0, 0.0)
-    no_track = SafetyGate(SafetyParams())
-    assert no_track.filter(gate_input(pose, (-0.04, 0.0, 0.0)))[0][0] == pytest.approx(0.0)
-    with_track = SafetyGate(SafetyParams(), track=ARENA)
-    assert with_track.filter(gate_input(pose, (-0.04, 0.0, 0.0), carrying=True))[0][0] == pytest.approx(0.0)
-
-
-def test_gate_carrying_arc_may_take_the_scoop_over_the_tape_but_not_the_body():
+def test_gate_slow_reverse_allowed_without_track_and_while_carrying():
+    # Star motion: backing up is always allowed, slowly (with a loose cube it leaves the cube behind,
+    # which the behavior decides).
     params = SafetyParams()
-    gate = SafetyGate(params, track=ARENA)
-    # Body front 4 cm from the wall: the scoop (to 0.20 m) is already over it; a short arc keeps the body in.
-    pose = (2.0 - 0.04 - FP.front, 1.0, 0.0)
-    cmd, _ = gate.filter(gate_input(pose, (0.05, 0.0, 0.6), carrying=True))
-    assert cmd == pytest.approx((0.05, 0.0, 0.6))
+    pose = (1.0, 1.0, 0.0)
+    no_track = SafetyGate(params)
+    assert no_track.filter(gate_input(pose, (-0.04, 0.0, 0.0)))[0] == pytest.approx((-0.04, 0.0, 0.0))
+    with_track = SafetyGate(params, track=ARENA)
+    assert with_track.filter(gate_input(pose, (-0.04, 0.0, 0.0), carrying=True))[0] == pytest.approx((-0.04, 0.0, 0.0))
 
 
-def test_gate_carrying_takes_the_other_arc_when_one_side_is_blocked():
+def test_gate_sideways_move_that_would_cross_the_tape_is_stopped():
     gate = SafetyGate(SafetyParams(), track=ARENA)
-    # Facing 10 deg east of north with the highest corner 6 mm from the north wall: the right arc
-    # swings it into the wall, the left arc does not (computed with path_inside).
-    th = math.radians(80.0)
-    top = max(cy for _, cy in FP.corners(1.0, 0.0, th))
-    pose = (1.0, 2.0 - 0.006 - top, th)
-    cmd, reason = gate.filter(gate_input(pose, (0.05, 0.0, -0.6), carrying=True))
-    assert cmd == pytest.approx((0.05, 0.0, 0.6))
-    assert "other way" in reason
-
-
-def test_gate_carrying_stops_when_no_arc_keeps_the_body_inside():
-    gate = SafetyGate(SafetyParams(), track=ARENA)
-    pose = (2.0 - 0.005 - FP.front, 1.0, 0.0)
-    cmd, reason = gate.filter(gate_input(pose, (0.05, 0.0, 0.6), carrying=True))
+    # Left side of the body 5 mm from the north wall, facing east: strafing left would cross it.
+    pose = (1.0, 2.0 - 0.005 - FP.half_width, 0.0)
+    cmd, reason = gate.filter(gate_input(pose, (0.0, 0.05, 0.0)))
     assert cmd == pytest.approx((0.0, 0.0, 0.0))
+    assert "track edge" in reason
+    assert gate.filter(gate_input(pose, (0.0, -0.05, 0.0)))[0] == pytest.approx((0.0, -0.05, 0.0))
+
+
+def test_gate_carrying_forward_may_take_the_scoop_over_the_tape_but_not_the_body():
+    gate = SafetyGate(SafetyParams(), track=ARENA)
+    # Body front 4 cm from the wall: the scoop (to 0.20 m) is already over it; 1.5 cm more keeps the body in.
+    pose = (2.0 - 0.04 - FP.front, 1.0, 0.0)
+    assert gate.filter(gate_input(pose, (0.05, 0.0, 0.0), carrying=True))[0] == pytest.approx((0.05, 0.0, 0.0))
+    assert gate.filter(gate_input(pose, (0.2, 0.0, 0.0), carrying=True))[0] == pytest.approx((0.0, 0.0, 0.0))
 
 
 # ---- behavior
@@ -294,3 +287,26 @@ def test_a_robot_already_touching_the_edge_can_still_move_away():
     pose = (2.0 - FP.front + 0.004, 1.0, 0.0)  # front 4 mm over the edge (noise)
     assert path_inside(ARENA, FP, pose, -0.04, 0.0, 0.3)  # backing away
     assert not path_inside(ARENA, FP, pose, 0.05, 0.0, 0.3)  # pushing deeper
+
+
+def test_closed_loop_with_pose_never_mixes_translation_and_spin():
+    # Team rule 2026-10-27, with the pose and the track: exploring, the carry plan and the entry into
+    # the square only ever translate or spin in place, and cubes still get delivered (2-3 per run).
+    from mobile_base.core.track import predict
+
+    for seed in range(3):
+        rng = random.Random(seed)
+        f = BehaviorFSM(BehaviorParams(my_colors=("red",), capture_time=0.2, **ZONE), rng=random.Random(seed),
+                        track=ARENA)
+        pose, delivered = (1.0, 1.5, rng.uniform(-math.pi, math.pi)), 0
+        for k in range(1500):
+            t = k * 0.1
+            cubes = [Cube("red", 0.0, 0.9, 3000.0)] if k % 200 == 20 else []  # a cube at the mouth now and then
+            holding = f.state in (State.CAPTURE, State.CARRY) or (f.state is State.DELIVER and f.carrying)
+            vx, vy, wz = f.step(BehaviorInput(now=t, cubes=cubes, line_front=False, pose=pose,
+                                             holds_zone=f.carrying or f.state is State.DELIVER,
+                                             scoop_color="red" if holding else ""))
+            assert wz == 0.0 or (vx == 0.0 and vy == 0.0), (seed, t, f.state, vx, vy, wz)
+            delivered += sum(a.kind == "release" and a.delivered for a in f.take_actions())
+            pose = predict(pose, vx, wz, 0.1, vy)
+        assert delivered >= 1, seed

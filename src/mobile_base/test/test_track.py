@@ -77,9 +77,11 @@ def gate_input(pose, cmd=(0.1, 0.0, 0.0), **kw):
 
 def test_gate_blocks_forward_when_the_front_leaves_the_track():
     gate = SafetyGate(SafetyParams(), track=SQUARE)
-    cmd, reason = gate.filter(gate_input(Pose2D(0.872, 0.5, 0.0, stamp=10.0), cmd=(0.1, 0.0, 0.3)))
-    assert cmd == pytest.approx((0.0, 0.0, 0.3))
+    pose = Pose2D(0.872, 0.5, 0.0, stamp=10.0)
+    cmd, reason = gate.filter(gate_input(pose, cmd=(0.2, 0.0, 0.0)))  # front 3.3 cm from the wall, 6 cm in 0.3 s
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
     assert "track edge" in reason
+    assert gate.filter(gate_input(pose, cmd=(0.0, 0.0, 0.3)))[0] == pytest.approx((0.0, 0.0, 0.3))
 
 
 def test_gate_lets_the_robot_drive_back_in_from_outside():

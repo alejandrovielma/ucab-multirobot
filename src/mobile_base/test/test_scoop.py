@@ -150,17 +150,15 @@ def test_deliver_starts_only_facing_the_square():
     z = fsm.params.zone
     tick(fsm, 1.3, scoop="red", pose=(*z.entry_point, 0.0), holds_zone=True)  # facing away (east)
     assert fsm.state is State.CARRY
-    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST + 0.2), holds_zone=True)
+    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST + 0.1), holds_zone=True)
     assert fsm.state is State.DELIVER
 
 
-def test_carry_near_the_axis_aims_past_the_entry_to_arrive_turned():
+def test_carry_in_front_of_the_square_spins_to_face_it():
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    # Coming from the south facing north, level with the entry and 5 cm east of it: aiming at the
-    # entry itself gives wz=0; the lead-in point west of it (toward the square) makes the robot start
-    # turning left (toward west) already.
+    # In the corridor next to the entry, facing north-west: spin (left, toward west) before DELIVER.
     ex, ey = z.entry_point
     _, _, wz = tick(fsm, 1.3, scoop="red", pose=(ex + 0.05, ey - 0.05, math.atan2(0.05, -0.05)), holds_zone=True)
     assert wz > 0.0
@@ -179,11 +177,13 @@ def test_deliver_leaving_the_corridor_goes_back_to_carry():
 
 def test_deliver_needs_the_planned_heading_not_just_the_corridor_tolerance():
     # Webots run 17: DELIVER started 33 deg off the approach heading (corridor accepts 60), went in
-    # diagonally and put a body corner on the square's tape.
+    # diagonally and put a body corner on the square's tape. Now the robot spins in place first.
     fsm = make_fsm()
     carrying(fsm)
     z = fsm.params.zone
-    tick(fsm, 1.3, scoop="red", pose=(*z.entry_point, WEST - math.radians(45)), holds_zone=True)
-    assert fsm.state is State.CARRY
-    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST - math.radians(20)), holds_zone=True)
+    for degrees in (45, 20):
+        cmd = tick(fsm, 1.3, scoop="red", pose=(*z.entry_point, WEST - math.radians(degrees)), holds_zone=True)
+        assert fsm.state is State.CARRY
+        assert cmd[0] == 0.0 and cmd[2] > 0.0  # facing north-west: spinning left, toward west
+    tick(fsm, 1.4, scoop="red", pose=(*z.entry_point, WEST - math.radians(5)), holds_zone=True)
     assert fsm.state is State.DELIVER

@@ -4,7 +4,8 @@
 /ferb/behavior:
   ros__parameters:
     robot: ferb
-    my_colors: [orange, yellow, green, blue, purple]  # every color but red (rule of 2026-10-22); red cubes stay on the track
+    my_colors: ""  # target colors at start, comma separated; empty = IDLE until a mission arrives (`ros2 param set /<robot>/behavior my_colors "blue,green"`)
+    avoid_colors: ""  # forbidden colors, comma separated: touching them costs points (counted; every non-target cube is avoided). A string, not a list: rcl cannot parse an empty YAML list
     peer_pose_topic: /phineas/pose
     rate_hz: 10.0
     cube_timeout: 0.5
@@ -16,7 +17,7 @@
     turn_angle_max: 3.927  # 225 deg
     k_turn: 1.5
     approach_speed: 0.10
-    approach_min_scale: 0.3
+    approach_turn_min: 0.4  # rad/s, slowest spin while centering a cube
     approach_align: 0.15
     lost_timeout: 1.0
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
@@ -27,12 +28,9 @@
     gate_open_time: 0.4
     scoop_lost_timeout: 1.0
     carry_speed: 0.08
-    carry_min_speed: 0.05
-    carry_max_turn: 0.6
-    k_heading: 1.5
+    carry_max_turn: 0.4  # rad/s, slow in-place spin with a cube (no arcs: team rule 2026-10-27)
+    heading_tolerance: 0.1  # rad, spin before translating when the heading is off by more
     arrive_radius: 0.10
-    lead_in: 0.10  # aim this far past the entry when close to the axis
-    lead_in_width: 0.20
     wait_x: 0.0  # waiting point while the other robot holds the lease (no lease needed)
     wait_y: -0.22
     request_period: 1.0
@@ -51,8 +49,7 @@
     plan_max_expansions: 30000
     plan_retry: 2.0
     plan_give_up: 6.0
-    entry_heading_tolerance: 0.524  # 30 deg
-    gate_entry_across_tolerance: 0.02  # with the gate the entry is precise
+    gate_entry_across_tolerance: 0.02  # the plan spins in place, so the entry is precise
     gate_entry_along_band: 0.05
     gate_entry_heading_tolerance: 0.175  # 10 deg
     skip_time: 3.0
@@ -62,7 +59,13 @@
     avoid_cx: 0.3  # |cx_norm| of the scoop path at that distance; calibrate
     avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
     shed_distance: 0.08  # red cube in the U (48 mm deep): reverse this far, then turn away
-    shed_confirm: 0.3  # s the red must stay in the scoop window (red and orange are neighbor hues)
+    shed_confirm: 0.3  # s a non-target color must stay in the scoop window (neighbor hues: red and orange)
+    clear_after: 2  # skips of a target hidden behind other cubes before pushing through
+    clear_window: 20.0
+    clear_time: 5.0
+    clear_turn: 1.5708  # spin that throws a caught non-target cube aside (90 deg)
+    corner_hits: 3  # line events within corner_window without a pose: half turn after a longer backoff
+    corner_window: 10.0
     square_border_cy: 0.0  # off until Ferb's camera and line sensor are set up and calibrated
     open_probe_distance: 0.5
     # Delivery square (core/delivery.py), measured on the real track 2026-10-15. Frame: origin at the
@@ -96,12 +99,8 @@
     deadlock_time: 3.0
     escape_turn: 0.8
     escape_time: 1.5
-    carry_min_forward: 0.05
-    carry_max_turn: 0.6
-    carry_arc_away_bearing: 25.0
-    carry_arc_away_min_distance: 0.30
-    max_reverse: 0.05
-    blind_reverse: false  # set when Ferb's sensor position is measured
+    carry_max_turn: 0.4  # rad/s, slow in-place spin with a cube (no arcs: team rule 2026-10-27)
+    max_side_speed: 0.05  # m/s, any translation that is not straight ahead (sideways, diagonal, back)
     track_horizon: 0.3
     body_front: 0.095  # body without the scoop: the scoop may step on the tape, the body may not
     body_rear: 0.095

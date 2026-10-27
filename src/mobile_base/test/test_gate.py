@@ -65,9 +65,7 @@ def test_closed_gate_lets_a_carrying_robot_reverse_with_the_pose():
 def test_open_gate_keeps_the_fixed_scoop_rules():
     gate = SafetyGate(SafetyParams(), track=ARENA)
     spin, _ = gate.filter(gate_input((0.0, 0.0, 1.2), gate_closed=False))
-    assert spin[0] > 0.0  # arc, not an in-place spin
-    back, _ = gate.filter(gate_input((-0.04, 0.0, 0.0), gate_closed=False))
-    assert back[0] == pytest.approx(0.0)
+    assert spin == pytest.approx((0.0, 0.0, SafetyParams().carry_max_turn))  # slow, or the U throws the cube
 
 
 # ---- behavior

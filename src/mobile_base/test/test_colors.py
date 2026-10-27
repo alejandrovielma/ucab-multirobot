@@ -52,3 +52,12 @@ def test_is_mine():
     assert is_mine("red", ["red", "orange", "yellow"])
     assert not is_mine("blue", ["red", "orange", "yellow"])
     assert not is_mine(None, ["red"])
+
+
+def test_mission_colors_parse_from_a_comma_separated_string():
+    from mobile_base.core.colors import parse_colors
+
+    assert parse_colors("") == ()
+    assert parse_colors(" Blue, green ,") == ("blue", "green")
+    with pytest.raises(ValueError):
+        parse_colors("blue,pink")

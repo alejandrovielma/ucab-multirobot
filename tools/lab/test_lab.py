@@ -159,3 +159,16 @@ def test_busy_camera_fails_at_once_naming_the_process(monkeypatch):
     monkeypatch.setattr(hardware, "camera_holders", lambda: [(1448, "python3 tools/lab/lab_robot.py camera")])
     with pytest.raises(RuntimeError, match=r"camera in use by PID 1448"):
         Camera("auto")
+
+
+def test_star_steps_are_pure_and_come_back_to_the_start():
+    import math
+
+    from lab_robot import robot_steps
+
+    steps = robot_steps(0.1, 2.0, star=True)
+    assert all(wz == 0.0 or (vx == 0.0 and vy == 0.0) for _, (vx, vy, wz) in steps)
+    assert sum(vx for _, (vx, _, _) in steps) == pytest.approx(0.0)
+    assert sum(vy for _, (_, vy, _) in steps) == pytest.approx(0.0)
+    assert sum(wz for _, (_, _, wz) in steps) == pytest.approx(0.0)
+    assert max(math.hypot(vx, vy) for _, (vx, vy, _) in steps) == pytest.approx(0.1)

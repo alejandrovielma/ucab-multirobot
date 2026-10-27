@@ -86,9 +86,10 @@ def test_carry_follows_the_planned_primitives():
     start = (1.5, 1.5, math.pi / 2)
     carrying(f, start)
     cmd = step(f, 1.0, start, scoop="red")
-    assert cmd[0] > 0.0
     assert f.plan is not None
     assert cmd[:3:2] == pytest.approx(f.plan.command(0.0))
+    assert cmd[1] == 0.0 and (cmd[0] == 0.0 or cmd[2] == 0.0)  # a straight or an in-place spin, no arc
+    assert all(vx == 0.0 or wz == 0.0 for vx, wz, _ in f.plan.steps)
 
 
 def test_carry_replans_when_the_robot_drifts_from_the_plan():
@@ -103,7 +104,9 @@ def test_carry_replans_when_the_robot_drifts_from_the_plan():
 
 def test_capture_skipped_when_no_plan_reaches_the_square():
     f = fsm()
-    pose = (2.0 - 0.10 - FP.front, 1.5, 0.0)  # cube at the wall, facing it
+    # Body front 2 cm from the wall, facing it: after the capture push there is no room to spin
+    # (sweep radius 12.5 cm) and no way forward; with a loose cube reversing is not planned.
+    pose = (2.0 - 0.02 - FP.front, 1.5, 0.0)
     step(f, 0.0, pose, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     step(f, 0.1, pose, cubes=[Cube("red", 0.0, 0.7, 3000.0)])
     assert f.state is State.EXPLORE
