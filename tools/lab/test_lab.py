@@ -99,7 +99,7 @@ def test_fusion_backend_dry_run_never_loads_the_library(monkeypatch):
     monkeypatch.setattr(hardware, "load_motor_class", boom)
     motors = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True)
     assert motors.dry_run and motors.bank is None
-    assert motors.port("rr") == "puerto M3"
+    assert motors.port("rr") == "puerto M1 invertido"  # Phineas map measured 2026-10-27
     motors.drive(0.1, 0.0, 0.0)  # no hardware, no error
 
 
