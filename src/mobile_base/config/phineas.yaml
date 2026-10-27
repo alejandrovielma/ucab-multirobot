@@ -169,7 +169,7 @@
     # Wiring not identified yet: run tools/lab/lab_robot.py motors, note which wheel each port
     # moves and in which direction, then update these two lists.
     fusion_ports: [M3, M0, M2, M1]  # measured 2026-10-27 by moving one port at a time: fl M3, fr M0, rl M2, rr M1 (fusion_reversed not checked yet)
-    fusion_reversed: [false, false, false, false]
+    fusion_reversed: [false, true, false, true]  # measured 2026-10-27: the right wheels (fr, rr) turned backward on "forward"
     # Power (percent, fl fr rl rr) at which each wheel starts turning: a non-zero command is spread over
     # [start, cap] so slow speeds do not stall (tools/lab/lab_robot.py threshold). 0 = not measured.
     fusion_start_power: [0.0, 0.0, 0.0, 0.0]
