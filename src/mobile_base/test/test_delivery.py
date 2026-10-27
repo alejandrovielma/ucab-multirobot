@@ -37,9 +37,60 @@ def zone(fsm) -> DeliveryZone:
     return fsm.params.zone
 
 
-def test_carry_without_pose_holds_still():
-    fsm = carrying_fsm()
-    assert tick(fsm, 1.0, None) == (0.0, 0.0, 0.0)
+# ---- Without the overhead pose: the robot's own camera finds the blue square (team decision 2026-10-27)
+
+
+def cam(fsm, now, square=None, scoop="red"):
+    """No pose; square = (cx, cy) when the camera sees the blue square."""
+    visible = square is not None
+    cx, cy = square if visible else (0.0, 0.0)
+    return fsm.step(BehaviorInput(now=now, cubes=[], line_front=False, pose=None, scoop_color=scoop,
+                                  square_visible=visible, square_cx=cx, square_cy=cy, square_area=20000.0))
+
+
+def test_without_pose_the_carrying_robot_spins_slowly_looking_for_the_square():
+    fsm = carrying_fsm(use_lease=False)
+    assert cam(fsm, 1.0) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))
+    assert fsm.state is State.CARRY
+
+
+def test_without_pose_a_square_never_seen_makes_the_robot_look_from_elsewhere():
+    fsm = carrying_fsm(use_lease=False, square_search_time=5.0, square_probe_time=1.0)
+    cam(fsm, 1.0)
+    assert cam(fsm, 6.1) == pytest.approx((fsm.params.carry_speed, 0.0, 0.0))  # drive forward a bit
+    assert cam(fsm, 7.2)[2] != 0.0  # and spin again
+
+
+def test_without_pose_the_square_is_centered_then_approached_then_entered():
+    fsm = carrying_fsm(use_lease=False, square_align=0.15, square_reach_cy=0.6)
+    p = fsm.params
+    assert cam(fsm, 1.0, square=(0.5, 0.3)) == pytest.approx((0.0, 0.0, -p.carry_max_turn))  # right: spin right
+    assert cam(fsm, 1.1, square=(0.05, 0.3)) == pytest.approx((p.carry_speed, 0.0, 0.0))
+    cmd = cam(fsm, 1.2, square=(0.0, 0.7))
+    assert fsm.state is State.DELIVER
+    assert cmd == pytest.approx((p.enter_speed, 0.0, 0.0))
+
+
+def test_without_pose_the_cube_is_pushed_in_then_left_behind_and_counted():
+    fsm = carrying_fsm(use_lease=False, deliver_push_time=2.0, deliver_back_time=2.5)
+    p = fsm.params
+    cam(fsm, 1.0, square=(0.0, 0.7))
+    assert fsm.state is State.DELIVER
+    vx, vy, wz = cam(fsm, 2.0, square=(0.2, 0.8))
+    assert vx == pytest.approx(p.enter_speed) and vy < 0.0 and wz == 0.0  # square to the right: slide right
+    assert cam(fsm, 3.1, square=(0.0, 0.9)) == pytest.approx((-p.reverse_speed, 0.0, 0.0))  # push over: back out
+    assert cam(fsm, 5.5, scoop="") == pytest.approx((-p.reverse_speed, 0.0, 0.0))
+    cam(fsm, 5.7, scoop="")
+    assert fsm.state is State.EXPLORE
+    assert fsm.delivered == 1
+    assert fsm.take_actions() == []  # no arbiter: nothing to request or release
+
+
+def test_without_pose_and_with_the_arbiter_the_robot_waits_for_the_lease():
+    fsm = carrying_fsm()  # use_lease True (Webots, Perry)
+    assert cam(fsm, 1.0, square=(0.0, 0.7)) == (0.0, 0.0, 0.0)
+    assert fsm.take_actions() == [ZoneAction("request")]
+    cam(fsm, 1.1, square=(0.0, 0.7))
     assert fsm.state is State.CARRY
 
 

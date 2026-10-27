@@ -60,6 +60,7 @@ def generate_launch_description():
                     "use_sim_time": "true",
                     "require_pose": "true",
                     "require_heartbeat": "true",
+                    "use_lease": "true",  # Webots runs the zone arbiter and publishes the pose (GPS + IMU)
                     "targets": LaunchConfiguration("targets"),
                     "avoid": LaunchConfiguration("avoid"),
                 }.items(),

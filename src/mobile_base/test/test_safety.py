@@ -421,3 +421,15 @@ def test_lease_holder_is_not_turned_away_by_the_waiting_robot():
         make_input(cmd=(0.1, 0.0, 0.0), own_pose=own, peer_pose=close, holds_zone=True)
     )
     assert cmd[0] == pytest.approx(0.0)
+
+
+def test_without_poses_the_peer_seen_by_the_camera_stops_and_turns_the_robot_away():
+    # No overhead camera (2026-10-27): the other robot's marker, seen ahead and close.
+    params = SafetyParams(require_pose=False)
+    cmd, reason = SafetyGate(params).filter(make_input(own_pose=None, peer_seen=(0.1, 0.3)))
+    assert cmd == pytest.approx((0.0, 0.0, -params.avoid_turn))  # slightly left: stop and spin right
+    assert "peer" in reason
+    far, _ = SafetyGate(params).filter(make_input(own_pose=None, peer_seen=(0.0, 1.0)))
+    assert far == pytest.approx(FORWARD)
+    beside, _ = SafetyGate(params).filter(make_input(own_pose=None, peer_seen=(math.radians(80), 0.3)))
+    assert beside == pytest.approx(FORWARD)  # outside the front cone: not in the way

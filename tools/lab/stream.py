@@ -32,20 +32,55 @@ class FrameBuffer:
             return self._jpeg
 
 
-def serve(frames: FrameBuffer, port: int) -> ThreadingHTTPServer:
+def serve(frames: FrameBuffer, port: int, page: bytes = PAGE, api=None, token: str = "") -> ThreadingHTTPServer:
+    """Serve `page` at / and the camera at /stream.mjpg. api(method, path, body) -> (status, json bytes) or
+    None answers the other routes (the teleop page). With a token every route but / needs ?t=<token>
+    (or the X-Token header): the server listens on every interface, the university Wi-Fi included."""
+    from urllib.parse import parse_qs, urlsplit
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_args):  # keep the console for the robot output
             pass
 
-        def do_GET(self):
-            if self.path == "/":
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(PAGE)
+        def _route(self) -> str | None:
+            url = urlsplit(self.path)
+            given = parse_qs(url.query).get("t", [self.headers.get("X-Token", "")])[0]
+            if token and url.path != "/" and given != token:
+                self.send_error(403, "token")
+                return None
+            return url.path
+
+        def _reply(self, status: int, body: bytes, content_type: str = "application/json") -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            path = self._route()
+            if path is None:
                 return
-            if self.path != "/stream.mjpg":
+            length = min(int(self.headers.get("Content-Length", 0) or 0), 4096)  # tiny JSON only
+            answer = api("POST", path, self.rfile.read(length)) if api else None
+            if answer is None:
                 self.send_error(404)
+                return
+            self._reply(*answer)
+
+        def do_GET(self):
+            path = self._route()
+            if path is None:
+                return
+            if path == "/":
+                self._reply(200, page, "text/html; charset=utf-8")
+                return
+            if path != "/stream.mjpg":
+                answer = api("GET", path, b"") if api else None
+                if answer is None:
+                    self.send_error(404)
+                    return
+                self._reply(*answer)
                 return
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")

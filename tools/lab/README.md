@@ -168,3 +168,16 @@ Sin hardware (`--dry-run`) y con una imagen en lugar de la cámara:
 python3 tools/lab/lab_robot.py motors --dry-run --seconds 0.1
 python3 tools/lab/lab_robot.py chase --dry-run --camera file:src/mobile_base/test/fixtures/webots_cube_at_mouth.jpg
 ```
+
+## Control desde el navegador (teleop)
+
+Cámara del robot y manejo con WASD (Q/E giran) desde un celular o laptop en la misma red:
+
+```bash
+bash tools/lab/prueba_teleop.sh [segundos] [espera s] [velocidad m/s]
+cat prueba-teleop-*.log      # la direccion completa, con ?t=<token>
+```
+
+Corre desacoplado (se puede quitar el cable). Todo comando pasa por el `SafetyGate` (línea, otro robot),
+el robot se detiene 0,4 s después del último comando y Esc es una parada que se mantiene hasta pulsar el
+botón otra vez. El token evita que otra persona de la red lo maneje.

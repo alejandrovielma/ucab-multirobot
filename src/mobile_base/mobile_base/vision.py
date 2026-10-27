@@ -39,6 +39,11 @@ class VisionParams:
     # scoop mouth covers a few thousand px with the IMX219-120 at 640 x 480: calibrate on the robot.
     square_color: str = "blue"
     square_min_area: float = 12000.0  # px
+    # The other robot, seen by this robot's camera (no overhead camera): an ArUco marker (DICT_4X4_50)
+    # of side marker_size m on it; -1 = none. camera_hfov is the horizontal field of view (IMX219-120).
+    peer_marker_id: int = -1
+    marker_size: float = 0.05  # m, printed side of the marker
+    camera_hfov: float = 1.60  # rad
 
 
 @dataclass(frozen=True)
@@ -173,6 +178,47 @@ def scoop_content(bgr: np.ndarray, params: VisionParams = VisionParams()) -> tup
 
 _CHANNELS = {"bgr8": 3, "rgb8": 3, "bgra8": 4, "rgba8": 4}
 _TO_BGR = {"rgb8": cv2.COLOR_RGB2BGR, "bgra8": cv2.COLOR_BGRA2BGR, "rgba8": cv2.COLOR_RGBA2BGR}
+
+
+def detect_peer(bgr: np.ndarray, params: VisionParams = VisionParams()) -> tuple[float, float] | None:
+    """(bearing rad, left positive; distance m) of the other robot's marker, or None.
+
+    Pinhole model: shortcut, the 120 deg lens distortion is ignored, so the distance is rough near
+    the image edges; enough to slow down and stop (rule 5 of the safety gate). Calibrate camera_hfov
+    and check the distance with a tape measure."""
+    if params.peer_marker_id < 0:
+        return None
+    corners, ids = _aruco_detect(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
+    if ids is None:
+        return None
+    width = bgr.shape[1]
+    focal = (width / 2.0) / math.tan(params.camera_hfov / 2.0)
+    for quad, marker_id in zip(corners, ids.flatten()):
+        if int(marker_id) != params.peer_marker_id:
+            continue
+        pts = quad.reshape(4, 2)
+        side = float(np.mean([np.linalg.norm(pts[i] - pts[(i + 1) % 4]) for i in range(4)]))
+        cx = float(pts[:, 0].mean()) - width / 2.0
+        return -math.atan2(cx, focal), focal * params.marker_size / max(side, 1.0)
+    return None
+
+
+def _aruco_detect(gray):
+    """(corners, ids) with the OpenCV >= 4.7 ArucoDetector or the legacy API."""
+    global _ARUCO
+    if _ARUCO is None:
+        aruco = cv2.aruco
+        dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+        if hasattr(aruco, "ArucoDetector"):
+            detector = aruco.ArucoDetector(dictionary, aruco.DetectorParameters())
+            _ARUCO = lambda g: detector.detectMarkers(g)[:2]  # noqa: E731
+        else:
+            params = aruco.DetectorParameters_create()
+            _ARUCO = lambda g: aruco.detectMarkers(g, dictionary, parameters=params)[:2]  # noqa: E731
+    return _ARUCO(gray)
+
+
+_ARUCO = None
 
 
 def image_to_bgr(height: int, width: int, encoding: str, step: int, data: bytes) -> np.ndarray:

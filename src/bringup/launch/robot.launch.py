@@ -42,10 +42,11 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument("robot", default_value="phineas", choices=["phineas", "ferb"]),
-        DeclareLaunchArgument("require_pose", default_value="true",
-                              description="false only for bench tests without the overhead camera"),
-        DeclareLaunchArgument("require_heartbeat", default_value="true",
-                              description="false only for bench tests without the coordinator"),
+        # Team decision 2026-10-27: no overhead camera and no zone arbiter on the real robots for now.
+        DeclareLaunchArgument("require_pose", default_value="false",
+                              description="true only with the overhead camera publishing the pose"),
+        DeclareLaunchArgument("require_heartbeat", default_value="false",
+                              description="true only with the zone arbiter (Perry) running"),
         DeclareLaunchArgument("targets", default_value="",
                               description="mission: target colors, comma separated (empty: the robot waits)"),
         DeclareLaunchArgument("avoid", default_value="", description="mission: forbidden colors, comma separated"),

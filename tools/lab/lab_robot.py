@@ -15,21 +15,25 @@ v4l2|file:<img>, --port 8080, --max-speed 0.10. Ctrl+C always stops the motors. 
 import argparse
 import math
 import os
+import secrets
 import select
+import socket
 import sys
 import termios
 import time
 import tty
+from pathlib import Path
 
 from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_gpio
 
 from mobile_base.core.kinematics import wheel_speeds  # noqa: E402
 from stream import FrameBuffer, serve
+from teleop import Teleop
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
 from mobile_base.core.colors import parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
-from mobile_base.vision import VisionParams, detect_cubes, detect_square, scoop_content  # noqa: E402
+from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_square, scoop_content  # noqa: E402
 
 COLORS_BGR = {"red": (0, 0, 255), "orange": (0, 140, 255), "yellow": (0, 230, 230), "green": (0, 200, 0),
               "blue": (255, 80, 0), "purple": (200, 0, 160)}
@@ -390,6 +394,7 @@ def mode_chase(args, cfg):
             square = detect_square(frame, vparams) if frame is not None else None
             black = line.black()
             scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
+            peer = detect_peer(frame, vparams) if frame is not None else None  # the other robot's marker
             want = fsm.step(BehaviorInput(
                 now=now, cubes=cubes, line_front=black, scoop_color=scoop,
                 square_visible=square is not None and square.visible,
@@ -397,14 +402,14 @@ def mode_chase(args, cfg):
                 square_cy=square.cy_norm if square is not None else 0.0,
                 square_area=square.area_px if square is not None else 0.0))
             cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
-                                                   heartbeat_age=None, carrying=fsm.carrying))
+                                                   heartbeat_age=None, carrying=fsm.carrying, peer_seen=peer))
             if fsm.state is not previous:
                 note = f" ({fsm.note})" if fsm.note else ""
                 print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)
                 previous = fsm.state
             if fsm.state is State.CAPTURE and args.stop_at_capture:
                 motors.stop()
-                print(f"[{now:6.1f}] cubo en la boca de la pala: parado (sin camara cenital no hay pose para llevarlo al cuadro). Ctrl+C para salir.", flush=True)
+                print(f"[{now:6.1f}] cubo en la boca de la pala: parado (--stop-at-capture). Ctrl+C para salir.", flush=True)
                 while True:
                     f = cam.read()
                     if f is not None:
@@ -414,8 +419,61 @@ def mode_chase(args, cfg):
             if frame is not None:
                 frames.put(annotate(frame, dets, vparams,
                                     [f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
-                                     f"prohibidos tocados={fsm.forbidden_touches}",
+                                     f"prohibidos tocados={fsm.forbidden_touches} entregados={fsm.delivered}"
+                                     + (f" otro robot a {peer[1]:.2f} m" if peer else ""),
                                      f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
+            time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
+    finally:
+        motors.stop()
+        motors.gpio.close()
+
+
+def mode_teleop(args, cfg):
+    """Drive from the browser: camera view plus WASD, every command through the safety gate."""
+    gpio = open_gpio(args.chip, args.dry_run)
+    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
+    line = LineSensor(cfg, gpio)
+    cam = Camera(args.camera)
+    vparams = vision_params(cfg)
+    gcfg = cfg["safety_gate"]
+    gfields = SafetyParams.__dataclass_fields__
+    gate = SafetyGate(SafetyParams(**{**{k: v for k, v in gcfg.items() if k in gfields},
+                                      "require_pose": False, "require_heartbeat": False}))
+    teleop = Teleop(args.max_speed, args.max_turn)
+    token = secrets.token_urlsafe(8)
+    page = (Path(__file__).parent / "teleop.html").read_bytes()
+    frames = FrameBuffer()
+    serve(frames, args.port, page=page, api=teleop.handle, token=token)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("10.255.255.255", 1))  # no packet is sent: only picks the outgoing interface
+            ip = s.getsockname()[0]
+    except OSError:
+        ip = "<ip-del-robot>"
+    print(f"control: http://{ip}:{args.port}/?t={token}   (Ctrl+C o pkill -INT para parar)", flush=True)
+    t0 = time.monotonic()
+    last = t0
+    try:
+        while True:
+            now = time.monotonic() - t0
+            frame = cam.read()
+            dets = detect_cubes(frame, vparams) if frame is not None else []
+            square = detect_square(frame, vparams) if frame is not None else None
+            black = line.black()
+            scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
+            peer = detect_peer(frame, vparams) if frame is not None else None
+            cmd, reason = gate.filter(SafetyInput(cmd=teleop.current(), line_front=black, own_pose=None, peer_pose=None,
+                                                   now=now, heartbeat_age=None, carrying=False, peer_seen=peer,
+                                                   estop=teleop.estop))
+            motors.drive(*cmd)
+            t = time.monotonic()
+            teleop.update_status(reason=reason, line=bool(black), scoop=scoop or "",
+                                 peer=peer[1] if peer else None, cubes=[d.color for d in dets],
+                                 square=square is not None and square.visible, fps=1.0 / max(t - last, 1e-3))
+            last = t
+            if frame is not None:
+                frames.put(annotate(frame, dets, vparams, [f"teleop linea={int(black)} pala={scoop or '-'}",
+                                                           f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
             time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
     finally:
         motors.stop()
@@ -424,7 +482,7 @@ def mode_chase(args, cfg):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase"])
+    parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase", "teleop"])
     parser.add_argument("--robot", default="phineas", choices=["phineas", "ferb"])
     parser.add_argument("--dry-run", action="store_true", help="no GPIO access (laptop check)")
     parser.add_argument("--chip", type=int, default=None, help="gpiochip number (default: autodetect)")
@@ -455,13 +513,15 @@ def main():
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
     parser.add_argument("--target", default=None, help="chase: target colors, comma separated (the mission)")
     parser.add_argument("--avoid", default=None, help="chase: forbidden colors, comma separated")
-    parser.add_argument("--no-stop-at-capture", dest="stop_at_capture", action="store_false")
+    parser.add_argument("--max-turn", type=float, default=1.0, help="teleop: rad/s cap of the spin")
+    parser.add_argument("--stop-at-capture", action="store_true",
+                        help="chase: stop when a cube reaches the scoop instead of carrying it to the square")
     args = parser.parse_args()
     cfg = load_config(args.robot)
     if args.battery is not None:
         cfg["hat_motor_driver"]["battery_voltage"] = args.battery
     modes = {"motors": mode_motors, "threshold": mode_threshold, "drive": mode_drive, "line": mode_line, "camera": mode_camera,
-             "chase": mode_chase}
+             "chase": mode_chase, "teleop": mode_teleop}
     try:
         modes[args.mode](args, cfg)
     except KeyboardInterrupt:

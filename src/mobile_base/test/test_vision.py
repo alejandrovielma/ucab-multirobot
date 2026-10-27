@@ -1,3 +1,4 @@
+import math
 import cv2
 import numpy as np
 import pytest
@@ -120,3 +121,27 @@ def test_no_square_without_a_big_blue_region():
     big_red = np.full((480, 640, 3), 255, dtype=np.uint8)
     cv2.rectangle(big_red, (120, 250), (420, 420), (20, 20, 200), -1)
     assert not detect_square(big_red, VisionParams()).visible
+
+
+def _marker_image(marker_id, side_px, center_x, width=640, height=480):
+    aruco = cv2.aruco
+    marker = aruco.generateImageMarker(aruco.getPredefinedDictionary(aruco.DICT_4X4_50), marker_id, side_px)
+    img = np.full((height, width, 3), 255, np.uint8)
+    x0, y0 = center_x - side_px // 2, height // 2 - side_px // 2
+    img[y0:y0 + side_px, x0:x0 + side_px] = cv2.cvtColor(marker, cv2.COLOR_GRAY2BGR)
+    return img
+
+
+def test_the_other_robots_marker_gives_its_bearing_and_distance():
+    # No overhead camera: the robot camera sees the marker on the other robot (2026-10-27).
+    from mobile_base.vision import VisionParams, detect_peer
+
+    params = VisionParams(peer_marker_id=2, marker_size=0.05, camera_hfov=1.60)
+    focal = 320.0 / math.tan(0.8)
+    bearing, distance = detect_peer(_marker_image(2, 80, 320), params)
+    assert bearing == pytest.approx(0.0, abs=0.02)
+    assert distance == pytest.approx(focal * 0.05 / 80.0, rel=0.05)  # ~0.19 m
+    right, _ = detect_peer(_marker_image(2, 60, 500), params)
+    assert right < 0.0  # to the right of the image: negative bearing (robot convention, left positive)
+    assert detect_peer(_marker_image(1, 80, 320), params) is None  # its own marker id is not the peer
+    assert detect_peer(_marker_image(2, 80, 320), VisionParams()) is None  # no peer configured

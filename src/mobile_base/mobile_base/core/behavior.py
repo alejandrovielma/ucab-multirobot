@@ -40,6 +40,13 @@ than the target makes the robot skip the target for skip_time. A target that kee
 the U for shed_confirm (scoop_color, not carrying) is backed off shed_distance (at least line_backoff
 on the line) before turning away, or spun out of the scoop (clear_turn) while clearing the way.
 
+Without the overhead pose (team decision 2026-10-27: only the robot's own camera) CARRY looks for the
+blue square: slow spins until the camera sees it (a short drive forward every square_search_time
+without it), spins to center it, then drives straight until its centroid is at square_reach_cy.
+DELIVER then pushes the scoop in for deliver_push_time (sideways corrections from the camera) and
+backs out for deliver_back_time. Without use_lease there is no zone arbiter: the robot acts as if it
+always held the square and sends no requests.
+
 Corners: corner_hits line events within corner_window without a pose make the next border reaction a
 doubled backoff and a half turn (random 135-225 deg turns kept pointing at the other tape).
 
@@ -166,6 +173,14 @@ class BehaviorParams:
     clear_turn: float = math.pi / 2  # rad, spin that throws the caught cube aside
     corner_hits: int = 3  # line events within corner_window (no pose): next reaction is a half turn
     corner_window: float = 10.0  # s
+    use_lease: bool = True  # zone arbiter (Perry); False: no requests, the square is taken as free
+    # Delivery with the robot's camera only (no pose); calibrate square_* and deliver_* on the track.
+    square_search_time: float = 15.0  # s spinning without seeing the square before a short drive forward
+    square_probe_time: float = 1.5  # s of that drive forward
+    square_align: float = 0.15  # |square_cx| below which the square counts as straight ahead
+    square_reach_cy: float = 0.6  # square centroid this low in the image: the scoop is at its edge
+    deliver_push_time: float = 2.0  # s pushing in at enter_speed (10 cm)
+    deliver_back_time: float = 2.5  # s backing out at reverse_speed (10 cm)
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
     # or approaching a cube (never carrying or delivering), a blue square seen with square_cy at or
     # above this value is reacted to as the line (line_backoff reverse, then spin). 0 disables it.
@@ -243,6 +258,10 @@ class BehaviorFSM:
         self._skips: list[float] = []  # times a target was skipped behind another cube
         self._clear_until = 0.0  # pushing through to a target until then
         self._line_hits: list[float] = []  # border reactions, for the corner guard
+        self._search_since: float | None = None  # camera carry: spinning without the square since
+        self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
+        self._push_until = 0.0  # camera deliver: pushing in until
+        self.delivered = 0  # deliveries counted by this robot (the arbiter keeps the official count)
         self._actions: list[ZoneAction] = []
 
     @property
@@ -280,12 +299,14 @@ class BehaviorFSM:
                     self._last_request = inp.now
                 elif inp.holds_zone and inp.now - (self._last_request or 0.0) >= self.params.request_period:
                     # A lease granted after the mission was cleared (request in flight): give it back.
-                    self._actions.append(ZoneAction("release", delivered=False))
+                    self._zone_action(ZoneAction("release", delivered=False))
                     self._last_request = inp.now
                 return ZERO
             if self.state is State.IDLE:
                 self.state = State.EXPLORE
                 self.note = "mission received"
+        if not self.params.use_lease:
+            inp = dataclasses.replace(inp, holds_zone=True)  # no arbiter: the square is always ours
         if self.state not in (State.DELIVER, State.STOP) and self._track.enabled and inp.pose is not None:
             x, y, theta = inp.pose
             if not self._track.contains(x, y):
@@ -439,8 +460,12 @@ class BehaviorFSM:
     def _give_up_cube(self, inp: BehaviorInput) -> None:
         self.gate_closed = False  # backing off must leave the cube behind
         if inp.holds_zone:
-            self._actions.append(ZoneAction("release", delivered=False, color=self._carried_color))
+            self._zone_action(ZoneAction("release", delivered=False, color=self._carried_color))
         self._carried_color = ""
+
+    def _zone_action(self, action: ZoneAction) -> None:
+        if self.params.use_lease:
+            self._actions.append(action)
 
     def _target(self, cubes: Sequence[Cube], now: float) -> Cube | None:
         if now < self._ignore_until:
@@ -702,12 +727,10 @@ class BehaviorFSM:
         if inp.holds_zone:
             return
         if self._last_request is None or inp.now - self._last_request >= self.params.request_period:
-            self._actions.append(ZoneAction("request"))
+            self._zone_action(ZoneAction("request"))
             self._last_request = inp.now
 
     def _carry(self, inp: BehaviorInput) -> Command:
-        if inp.pose is None:
-            return ZERO  # without the overhead pose the robot cannot find the square
         p = self.params
         z = self._zone
         if inp.line_front and not self.gate_closed:
@@ -719,6 +742,8 @@ class BehaviorFSM:
             return ZERO  # the gate is still closing
         if inp.now < self._carry_backoff_until:
             return (-p.reverse_speed, 0.0, 0.0)  # cube retained by the gate
+        if inp.pose is None:
+            return self._carry_by_camera(inp)
         x, y, theta = inp.pose
         self._ask_lease(inp)
         if not inp.holds_zone and distance(x, y, p.wait_x, p.wait_y) <= p.arrive_radius:
@@ -749,11 +774,74 @@ class BehaviorFSM:
             return self._face(inp.pose, z.heading)  # in front of the square: face it, then DELIVER
         return self._steer(inp.pose, *z.entry_point, p.carry_speed)
 
+    def _carry_by_camera(self, inp: BehaviorInput) -> Command:
+        """No pose: find the blue square with the camera, center it, drive to it (slow spins only)."""
+        p = self.params
+        turn = p.turn_speed if self.gate_closed else p.carry_max_turn
+        if inp.now < self._probe_until:
+            return (p.carry_speed, 0.0, 0.0)  # looking for the square from somewhere else
+        if not inp.square_visible:
+            self._search_since = inp.now if self._search_since is None else self._search_since
+            if inp.now - self._search_since >= p.square_search_time:
+                self._search_since = None
+                self._probe_until = inp.now + p.square_probe_time
+                self.note = "square not seen: drive forward and look again"
+                return (p.carry_speed, 0.0, 0.0)
+            return (0.0, 0.0, turn)
+        self._search_since = None
+        if abs(inp.square_cx) > p.square_align:
+            return (0.0, 0.0, -math.copysign(turn, inp.square_cx))  # square on the right: spin right
+        if inp.square_cy < p.square_reach_cy:
+            return (p.carry_speed, 0.0, 0.0)
+        self._ask_lease(inp)
+        if not inp.holds_zone:
+            return ZERO  # the other robot is using the square
+        self.state = State.DELIVER
+        self._dropping = False
+        self._push_until = inp.now + p.deliver_push_time
+        self.note = "at the blue square: push the cube in"
+        return self._deliver(inp)
+
+    def _deliver_by_camera(self, inp: BehaviorInput) -> Command:
+        """No pose: push in for deliver_push_time (centering the square sideways), back out, count."""
+        p = self.params
+        if not self._dropping:
+            if not self._still_holding(inp):
+                return self._abandon_transport(inp, "cube lost while entering")
+            if inp.now < self._push_until:
+                vy = 0.0
+                if inp.square_visible:
+                    vy = max(-p.enter_speed, min(p.enter_speed, -p.square_align_gain * p.enter_speed * inp.square_cx))
+                return (p.enter_speed, vy, 0.0)
+            self._dropping = True
+            self._drop_until = inp.now + p.deliver_back_time
+            if self.gate_closed:
+                self.gate_closed = False  # open the door, then reverse out leaving the cube
+                self._gate_ready_at = inp.now + p.gate_open_time
+                self._drop_until += p.gate_open_time
+        if inp.now < self._gate_ready_at:
+            return ZERO  # the gate is still opening
+        if inp.now < self._drop_until:
+            return (-p.reverse_speed, 0.0, 0.0)
+        return self._finish_delivery(inp)
+
+    def _finish_delivery(self, inp: BehaviorInput) -> Command:
+        # Counted only if the cube stayed in the square: it must have left the scoop.
+        left_behind = not is_mine(inp.scoop_color, self.targets)
+        self.delivered += left_behind
+        self._zone_action(ZoneAction("release", delivered=left_behind, color=self._carried_color))
+        self._dropping = False
+        self._carried_color = ""
+        self.state = State.EXPLORE
+        self.note = "delivered" if left_behind else "delivery failed: the cube is still in the scoop"
+        self._start_turn(inp.now, inp.pose)  # facing the square: turn away before exploring
+        return self._explore(inp)
+
     def _deliver(self, inp: BehaviorInput) -> Command:
         p = self.params
         z = self._zone
         if inp.pose is None:
-            return ZERO
+            return self._deliver_by_camera(inp)
         x, y, theta = inp.pose
         if not inp.holds_zone:
             self._ask_lease(inp)  # lease expired mid-maneuver: the gate blocks the tape and the reverse
@@ -794,11 +882,4 @@ class BehaviorFSM:
             return ZERO  # the gate is still opening
         if z.before(x, y) < z.exit_offset and inp.now < self._drop_until:
             return (-p.reverse_speed, 0.0, 0.0)
-        # Counted only if the cube stayed in the square: it must have left the scoop.
-        left_behind = not is_mine(inp.scoop_color, self.targets)
-        self._actions.append(ZoneAction("release", delivered=left_behind, color=self._carried_color))
-        self._dropping = False
-        self._carried_color = ""
-        self.state = State.EXPLORE
-        self._start_turn(inp.now, inp.pose)  # facing the square's tape: turn away before exploring
-        return self._explore(inp)
+        return self._finish_delivery(inp)

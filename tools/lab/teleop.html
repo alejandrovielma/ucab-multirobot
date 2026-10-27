@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phineas: control</title>
+<style>
+  :root { --bg: #111; --panel: #1c1c1c; --text: #ddd; --muted: #888; --accent: #4a9eff; --stop: #d33; --ok: #3a3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 16px; }
+  h1 { font-size: 18px; margin: 4px 0 10px; }
+  #video { width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 6px; display: block; object-fit: contain; }
+  #status { margin: 8px 0; padding: 8px 10px; background: var(--panel); border-radius: 6px; font: 13px ui-monospace, monospace;
+            white-space: pre-wrap; min-height: 3.6em; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+  label { color: var(--muted); }
+  input[type=range] { width: 140px; }
+  .pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-width: 420px; margin: 10px auto; }
+  .pad button { padding: 16px 0; font-size: 20px; border: 0; border-radius: 6px; background: var(--panel); color: var(--text);
+                touch-action: none; user-select: none; }
+  .pad button.on { background: var(--accent); color: #000; }
+  #estop { padding: 14px 22px; font-size: 18px; font-weight: 700; border: 0; border-radius: 6px; background: var(--stop); color: #fff; }
+  #estop.latched { background: var(--ok); }
+  .hint { color: var(--muted); font-size: 13px; }
+  .warn { color: #f99; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Phineas: cámara y control manual</h1>
+  <img id="video" alt="Cámara del robot">
+  <div id="status">conectando…</div>
+  <div class="row">
+    <button id="estop" type="button">PARADA (Esc)</button>
+    <label>Velocidad <input id="speed" type="range" min="0.03" max="0.20" step="0.01" value="0.08"> <span id="speedv"></span> m/s</label>
+    <label>Giro <input id="turn" type="range" min="0.3" max="1.5" step="0.1" value="0.8"> <span id="turnv"></span> rad/s</label>
+  </div>
+  <div class="pad" id="pad">
+    <button data-k="q" title="girar a la izquierda (Q)">⟲</button>
+    <button data-k="w,a" title="diagonal adelante izquierda">↖</button>
+    <button data-k="w" title="adelante (W)">↑</button>
+    <button data-k="w,d" title="diagonal adelante derecha">↗</button>
+    <button data-k="e" title="girar a la derecha (E)">⟳</button>
+    <span></span>
+    <button data-k="a" title="izquierda (A)">←</button>
+    <button data-k="" title="detener (Espacio)">■</button>
+    <button data-k="d" title="derecha (D)">→</button>
+    <span></span>
+    <span></span>
+    <button data-k="s,a" title="diagonal atrás izquierda">↙</button>
+    <button data-k="s" title="atrás (S)">↓</button>
+    <button data-k="s,d" title="diagonal atrás derecha">↘</button>
+    <span></span>
+  </div>
+  <p class="hint">Mantener presionado para mover: W/S adelante y atrás, A/D a los lados, W+A y similares en diagonal, Q/E girar
+    en el sitio (girar y trasladarse a la vez no se permite: manda el giro). Al soltar se detiene; si la página pierde
+    el foco o la red, el robot se detiene en 0,4 s. De lado, en diagonal y hacia atrás va a 0,05 m/s como máximo
+    (el sensor de línea está en el centro). Esc: parada que se mantiene hasta pulsar el botón otra vez.</p>
+</main>
+<script>
+const token = new URLSearchParams(location.search).get("t") || "";
+const q = (path) => path + (path.includes("?") ? "&" : "?") + "t=" + encodeURIComponent(token);
+document.getElementById("video").src = q("/stream.mjpg");
+
+const held = new Set();          // keys from the keyboard and the touch pad
+const KEYS = new Set(["w", "a", "s", "d", "q", "e"]);
+const speed = document.getElementById("speed"), turn = document.getElementById("turn");
+const show = () => {
+  document.getElementById("speedv").textContent = Number(speed.value).toFixed(2);
+  document.getElementById("turnv").textContent = Number(turn.value).toFixed(1);
+};
+speed.oninput = turn.oninput = show; show();
+
+function command() {
+  let vx = 0, vy = 0, wz = 0;
+  if (held.has("w")) vx += 1; if (held.has("s")) vx -= 1;
+  if (held.has("a")) vy += 1; if (held.has("d")) vy -= 1;
+  if (held.has("q")) wz += 1; if (held.has("e")) wz -= 1;
+  if (wz) return { vx: 0, vy: 0, wz: wz * Number(turn.value) };  // star rule: a spin, no translation
+  const n = Math.hypot(vx, vy) || 1;
+  return { vx: vx / n * Number(speed.value), vy: vy / n * Number(speed.value), wz: 0 };
+}
+
+let lastSent = "";
+async function send(force = false) {
+  const body = JSON.stringify(command());
+  if (!force && body === lastSent && body === JSON.stringify({ vx: 0, vy: 0, wz: 0 })) return;  // idle: nothing to say
+  lastSent = body;
+  try { await fetch(q("/cmd"), { method: "POST", body, headers: { "Content-Type": "application/json" } }); } catch (_) {}
+}
+setInterval(send, 100);  // keep alive while a key is held: the robot stops 0.4 s after the last command
+
+function release() { held.clear(); document.querySelectorAll(".pad button").forEach(b => b.classList.remove("on")); send(true); }
+document.addEventListener("keydown", (ev) => {
+  const k = ev.key.toLowerCase();
+  if (k === "escape") { toggleEstop(true); return; }
+  if (k === " ") { release(); ev.preventDefault(); return; }
+  if (KEYS.has(k)) { held.add(k); ev.preventDefault(); }
+});
+document.addEventListener("keyup", (ev) => { const k = ev.key.toLowerCase(); if (KEYS.has(k)) { held.delete(k); send(true); } });
+window.addEventListener("blur", release);
+document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
+
+document.querySelectorAll(".pad button").forEach((b) => {
+  const keys = b.dataset.k ? b.dataset.k.split(",") : [];
+  b.addEventListener("pointerdown", (ev) => { ev.preventDefault(); b.setPointerCapture(ev.pointerId); release(); keys.forEach(k => held.add(k)); b.classList.add("on"); send(true); });
+  const up = () => { keys.forEach(k => held.delete(k)); b.classList.remove("on"); send(true); };
+  b.addEventListener("pointerup", up); b.addEventListener("pointercancel", up);
+});
+
+let estop = false;
+async function toggleEstop(on) {
+  estop = on === undefined ? !estop : on;
+  release();
+  try { await fetch(q("/estop"), { method: "POST", body: JSON.stringify({ on: estop }) }); } catch (_) {}
+}
+document.getElementById("estop").onclick = () => toggleEstop();
+
+async function poll() {
+  try {
+    const r = await fetch(q("/status"));
+    if (r.status === 403) { document.getElementById("status").innerHTML = '<span class="warn">Falta el token: abre la dirección completa que imprimió el robot (con ?t=…).</span>'; return; }
+    const s = await r.json();
+    estop = s.estop;
+    const b = document.getElementById("estop");
+    b.classList.toggle("latched", estop);
+    b.textContent = estop ? "PARADO: pulsar para reanudar" : "PARADA (Esc)";
+    const c = s.cmd.map(v => v.toFixed(2)).join(", ");
+    document.getElementById("status").textContent =
+      `motores: vx, vy, wz = ${c}   (${s.reason})\n` +
+      `línea: ${s.line ? "NEGRO" : "blanco"}   pala: ${s.scoop || "-"}   otro robot: ${s.peer === null ? "-" : s.peer.toFixed(2) + " m"}\n` +
+      `cubos: ${s.cubes.join(", ") || "-"}   cuadro azul: ${s.square ? "sí" : "no"}   ${s.fps.toFixed(0)} fps`;
+  } catch (_) {
+    document.getElementById("status").innerHTML = '<span class="warn">Sin conexión con el robot.</span>';
+  }
+}
+setInterval(poll, 300); poll();
+</script>
+</body>
+</html>

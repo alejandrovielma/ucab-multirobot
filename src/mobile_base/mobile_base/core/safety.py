@@ -17,7 +17,8 @@ Rules, applied in order every tick:
    the pose by its heading change, without it by integrating the spin the gate let through. A line
    that comes back less than line_clear_time after it went white is the same tape (the TCRT5000
    flickers on its edge), so the direction is not taken again.
-5. Peer robot in the travel direction (overhead-camera poses) -> slow down, stop, and spin away
+5. Peer robot in the travel direction (overhead-camera poses, or without them the bearing and
+   distance of its marker seen by this robot's camera, peer_seen) -> slow down, stop, and spin away
    from it. If both robots stay blocked facing each other for deadlock_time, the robot WITHOUT
    priority rotates away (or holds still when it carries a cube in the open scoop).
 6. Carrying a cube in the open scoop -> spins at most carry_max_turn (a fast spin throws the cube
@@ -107,6 +108,8 @@ class SafetyInput:
     holds_zone: bool = False  # /zone/occupant == this robot
     gate_closed: bool = False  # scoop gate closed: the cube is retained
     estop: bool = False  # emergency stop requested (latched by the node until cleared)
+    # Without overhead poses: the peer's marker seen by this robot's camera, (bearing rad, distance m).
+    peer_seen: tuple[float, float] | None = None
 
 
 class SafetyGate:
@@ -187,18 +190,23 @@ class SafetyGate:
             vx = vy = 0.0
             reasons.append("line ahead" if line_blocks else "no translation away from the track")
 
-        peer = inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None
+        own, peer = inp.own_pose, (inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None)
+        if (not own_fresh or peer is None) and inp.peer_seen is not None:
+            # No overhead poses: put the peer the camera sees in the robot's own frame. Its heading is
+            # unknown: taken as facing us (the worst case, so the deadlock rule still applies).
+            bearing, dist = inp.peer_seen
+            own = Pose2D(0.0, 0.0, 0.0, inp.now)
+            peer = Pose2D(dist * math.cos(bearing), dist * math.sin(bearing), math.pi + bearing, inp.now)
         blocked = False
-        if own_fresh and peer is not None:
+        if own is not None and peer is not None and (own_fresh or inp.peer_seen is not None):
             # The lease holder has right of way near the square: only slow down / stop, no turn-away.
             # Turning away froze a carrying robot in the corridor for 8 minutes (Webots run 17) and kept
             # a lease holder replanning next to the waiting robot for 10 minutes (run 20).
-            vx, vy, wz, blocked, peer_reason = self._avoid_peer(vx, vy, wz, inp.own_pose, peer,
-                                                                turn=not inp.holds_zone)
+            vx, vy, wz, blocked, peer_reason = self._avoid_peer(vx, vy, wz, own, peer, turn=not inp.holds_zone)
             if peer_reason:
                 reasons.append(peer_reason)
 
-        escape = self._update_deadlock(blocked, inp, peer)
+        escape = self._update_deadlock(blocked, inp, own, peer)
         if escape is not None:
             return escape
         if loose_cube and abs(wz) > p.carry_max_turn:
@@ -298,9 +306,9 @@ class SafetyGate:
             reason += ", turn away"
         return vx, vy, wz, blocked, reason
 
-    def _update_deadlock(self, blocked: bool, inp: SafetyInput, peer: Pose2D | None):
+    def _update_deadlock(self, blocked: bool, inp: SafetyInput, own: Pose2D | None, peer: Pose2D | None):
         p = self.params
-        if not blocked or not self._peer_faces_us(inp.own_pose, peer):
+        if not blocked or not self._peer_faces_us(own, peer):
             self._blocked_since = None
             return None
         if self._blocked_since is None:
@@ -313,7 +321,7 @@ class SafetyGate:
             self._escape_cmd = STOP
             self._escape_reason = "deadlock: hold still (carrying)"
         else:
-            bearing = relative_bearing(inp.own_pose.x, inp.own_pose.y, inp.own_pose.theta, peer.x, peer.y)
+            bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
             turn = -p.escape_turn if bearing >= 0.0 else p.escape_turn
             self._escape_cmd = (0.0, 0.0, turn)
             self._escape_reason = "deadlock: rotate away"

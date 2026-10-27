@@ -66,6 +66,14 @@
     clear_turn: 1.5708  # spin that throws a caught non-target cube aside (90 deg)
     corner_hits: 3  # line events within corner_window without a pose: half turn after a longer backoff
     corner_window: 10.0
+    use_lease: false  # no zone arbiter (Perry) for now: the square is taken as free (team decision 2026-10-27)
+    # Delivery with the robot camera only (no overhead pose); calibrate on the track.
+    square_search_time: 15.0  # s spinning without seeing the square before a short drive forward
+    square_probe_time: 1.5
+    square_align: 0.15  # |square_cx| that counts as centered
+    square_reach_cy: 0.6  # square centroid this low in the image: the scoop is at its edge
+    deliver_push_time: 2.0  # s pushing in at enter_speed
+    deliver_back_time: 2.5  # s backing out at reverse_speed
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).
     # Enabled on purpose: a wrong value only makes the robot turn away early, while 0.0 (off) lets the
     # body drive into the square through its open side when there is no overhead pose (lab tests).
@@ -89,9 +97,9 @@
     peer_pose_topic: /ferb/pose
     rate_hz: 20.0
     cmd_timeout: 0.5
-    require_heartbeat: true
+    require_heartbeat: false  # no zone arbiter (Perry) for now (team decision 2026-10-27); Webots sets it true
     heartbeat_timeout: 2.0
-    require_pose: true
+    require_pose: false  # no overhead camera: the robot uses only its own camera (2026-10-27); Webots sets it true
     pose_timeout: 0.5
     front_cone_deg: 60.0
     stop_distance: 0.40
@@ -142,6 +150,11 @@
     # reported apart (square_* in the cubes message) and never as a cube. Calibrate on the robot.
     square_color: blue
     square_min_area: 12000.0
+    # The other robot, seen by this camera (no overhead camera, 2026-10-27): ArUco DICT_4X4_50 on it,
+    # side marker_size m. Phineas carries id 1 and Ferb id 2, as for the overhead camera.
+    peer_marker_id: 2  # Ferb
+    marker_size: 0.05  # m: measure the printed marker
+    camera_hfov: 1.60  # rad, IMX219-120
     # OpenCV hue (0-179) ranges as [lo1, hi1, lo2, hi2, ...]; calibrate with the real cubes.
     hue_ranges:
       red: [0, 8, 169, 179]

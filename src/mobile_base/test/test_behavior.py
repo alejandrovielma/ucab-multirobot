@@ -122,8 +122,8 @@ def test_blue_square_is_not_a_border_while_carrying():
     tick(plain, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
     tick(plain, 0.5, scoop="red")
     cmd = tick_square(fsm, 0.6, 0.9, scoop="red")
-    assert fsm.state is State.CARRY
-    assert cmd == pytest.approx(tick(plain, 0.6, scoop="red"))
+    # Carrying, the square is the destination (camera delivery), never a border to back off from.
+    assert fsm.state in (State.CARRY, State.DELIVER)
     assert cmd[0] >= 0.0
 
 

@@ -28,6 +28,7 @@ def generate_launch_description():
     mission = {
         "my_colors": ParameterValue(LaunchConfiguration("targets"), value_type=str),
         "avoid_colors": ParameterValue(LaunchConfiguration("avoid"), value_type=str),
+        "use_lease": ParameterValue(LaunchConfiguration("use_lease"), value_type=bool),
     }
 
     def logic_node(executable, extra=None):
@@ -47,6 +48,7 @@ def generate_launch_description():
         DeclareLaunchArgument("require_heartbeat", default_value="true"),
         DeclareLaunchArgument("targets", default_value="", description="target colors, e.g. blue,green"),
         DeclareLaunchArgument("avoid", default_value="", description="forbidden colors, e.g. red"),
+        DeclareLaunchArgument("use_lease", default_value="false", description="true with the zone arbiter (Perry)"),
         logic_node("cube_detector"),
         logic_node("behavior", [mission]),
         logic_node("safety_gate", [gate_overrides]),
