@@ -2,7 +2,7 @@
 """Lab tool for the real robot without ROS (Raspberry Pi 5 + Fusion HAT+ + IMX219 + line sensor).
 
     python3 tools/lab/lab_robot.py motors              # each port/wheel forward then backward (wiring check)
-    python3 tools/lab/lab_robot.py threshold [--all]   # power at which each wheel (or the robot) starts moving
+    python3 tools/lab/lab_robot.py threshold --delay 15   # power at which the robot starts moving (camera)
     python3 tools/lab/lab_robot.py drive               # keyboard teleop over SSH
     python3 tools/lab/lab_robot.py line                # line sensor level
     python3 tools/lab/lab_robot.py camera              # camera + cube detection, view at http://<ip>:8080/
@@ -22,6 +22,8 @@ import time
 import tty
 
 from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_gpio
+
+from mobile_base.core.kinematics import wheel_speeds  # noqa: E402
 from stream import FrameBuffer, serve
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
@@ -141,48 +143,109 @@ def mode_motors(args, cfg):
         motors.gpio.close()
 
 
+# Whole-robot motions for the threshold mode: every wheel gets the same power, with the signs of the
+# mecanum kinematics (a spin is a differential: left side back, right side forward).
+THRESHOLD_MOTIONS = [
+    ("girar antihorario", (0.0, 0.0, 1.0)), ("girar horario", (0.0, 0.0, -1.0)),
+    ("adelante", (1.0, 0.0, 0.0)), ("atras", (-1.0, 0.0, 0.0)),
+    ("izquierda", (0.0, 1.0, 0.0)), ("derecha", (0.0, -1.0, 0.0)),
+]
+
+
+def motion_signs(vx: float, vy: float, wz: float) -> tuple[float, ...]:
+    """Sign of each wheel (fl, fr, rl, rr) for a body motion, from the mecanum kinematics."""
+    return tuple(math.copysign(1.0, s) if abs(s) > 1e-9 else 0.0 for s in wheel_speeds(vx, vy, wz))
+
+
+def frame_motion(previous, frame) -> float:
+    """Mean absolute difference of two frames (gray, 160 x 120, blurred): grows when the view moves."""
+    import cv2
+
+    def small(img):
+        return cv2.GaussianBlur(cv2.cvtColor(cv2.resize(img, (160, 120)), cv2.COLOR_BGR2GRAY), (5, 5), 0)
+
+    return float(cv2.absdiff(small(previous), small(frame)).mean())
+
+
+def moving_since(levels: list[float], still_mean: float, still_std: float, steps: int = 2) -> int | None:
+    """Index of the first of `steps` consecutive levels well above the still camera noise, or None."""
+    limit = still_mean + max(4.0 * still_std, 1.5)
+    run = 0
+    for i, level in enumerate(levels):
+        run = run + 1 if level > limit else 0
+        if run >= steps:
+            return i - steps + 1
+    return None
+
+
 def mode_threshold(args, cfg):
-    """Power at which each wheel starts turning (fusion_start_power): it rises by --step percent every
-    --step-time seconds; press any key as soon as the wheel turns steadily (x: it never did). With --all
-    the four wheels rise together forward: on the floor, the power at which the whole robot moves."""
-    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
+    """Power at which the robot starts moving, for each whole-robot motion (fusion_start_power).
+
+    The power of all four wheels rises by --step percent every --step-time seconds, up to --max-power.
+    The camera tells when the robot moves (frame difference well above its still noise for two steps),
+    so it runs without anyone at the keyboard (unplug the SSH cable during --delay). It stops at once
+    when it detects motion or the line sensor sees the tape, and logs the level of every step."""
+    gpio = open_gpio(args.chip, args.dry_run)
+    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
+    line = LineSensor(cfg, gpio)
+    cam = Camera(args.camera)
     if motors.bank is None:
         print("sin la Fusion HAT+ no hay nada que medir", flush=True)
         return
-    top = motors.cap * 100.0
-    groups = [("todas", WHEELS)] if args.all else [(w, (w,)) for w in WHEELS]
+    top = min(motors.cap * 100.0, args.max_power)
     found = {}
-    print(f"La potencia sube de a {args.step:.0f} % cada {args.step_time:.1f} s hasta {top:.0f} %. "
-          "Presiona cualquier tecla apenas gire de forma continua (x: no giro).", flush=True)
+
+    def frames_for(seconds):
+        """Frame-difference levels over `seconds`."""
+        levels, previous, end = [], cam.read(), time.monotonic() + seconds
+        while time.monotonic() < end:
+            frame = cam.read()
+            if frame is not None and previous is not None:
+                levels.append(frame_motion(previous, frame))
+            previous = frame if frame is not None else previous
+        return levels
+
+    if args.delay > 0.0:
+        print(f"empieza en {args.delay:.0f} s: poner el robot en el centro, mirando a algo con detalle "
+              "(cinta, cubos), y desconectar el cable", flush=True)
+        time.sleep(args.delay)
     try:
-        with RawKeys() as raw:
-            for name, wheels in groups:
-                hits = []
-                for direction in (1.0, -1.0) if not args.all else (1.0,):
-                    label = "adelante" if direction > 0 else "atras"
-                    power, hit = 0.0, None
-                    while power < top:
-                        power = min(top, power + args.step)
-                        for wheel in wheels:  # raw percent: no start power or trim on top of it
-                            motors.bank.set_power(wheel, direction * power)
-                        print(f"\r{name} {label}: {power:5.1f} %   ", end="", flush=True)
-                        key = raw.get(args.step_time)
-                        if key:
-                            hit = None if key == "x" else power
-                            break
-                    motors.stop()
-                    print(f"-> {'no giro' if hit is None else f'{hit:.0f} %'}", flush=True)
-                    hits.append(hit)
-                    time.sleep(0.8)
-                found[name] = max((h for h in hits if h is not None), default=None)
+        for name, cmd in THRESHOLD_MOTIONS:
+            signs = motion_signs(*cmd)
+            still = frames_for(1.5)
+            mean = sum(still) / len(still) if still else 0.0
+            std = (sum((x - mean) ** 2 for x in still) / len(still)) ** 0.5 if still else 0.0
+            print(f"{name}: ruido quieto {mean:.2f} +- {std:.2f}", flush=True)
+            levels, powers, hit, why = [], [], None, "no se movio hasta el tope"
+            power = args.start_power
+            while power <= top + 1e-9:
+                for wheel, sign in zip(WHEELS, signs):
+                    motors.bank.set_power(wheel, sign * power)
+                step = frames_for(args.step_time)
+                levels.append(max(step) if step else 0.0)
+                powers.append(power)
+                print(f"  {power:5.1f} %  nivel {levels[-1]:.2f}", flush=True)
+                if line.black():
+                    why = "linea negra: parado"
+                    break
+                first = moving_since(levels, mean, std)
+                if first is not None:
+                    hit, why = powers[first], "en movimiento"
+                    break
+                power = round(power + args.step, 1)
+            motors.stop()
+            found[name] = hit
+            print(f"{name}: {'%.0f %%' % hit if hit is not None else '-'} ({why})", flush=True)
+            time.sleep(1.0)
     finally:
         motors.stop()
-        motors.gpio.close()
-    print("resultado:", ", ".join(f"{k} {'no giro' if v is None else f'{v:.0f} %'}" for k, v in found.items()),
+        gpio.close()
+    print("resultado: " + ", ".join(f"{k} {'-' if v is None else f'{v:.0f} %'}" for k, v in found.items()),
           flush=True)
-    if not args.all and all(found.get(w) is not None for w in WHEELS):
-        print(f"fusion_start_power: [{', '.join(f'{found[w]:.1f}' for w in WHEELS)}]  "
-              "(medido en el aire: en el piso suele hacer falta mas, comprobar con --all)", flush=True)
+    measured = [v for v in found.values() if v is not None]
+    if measured:
+        start = max(measured) + args.step  # the slowest motion to start, plus one step of margin
+        print(f"fusion_start_power: [{start:.1f}, {start:.1f}, {start:.1f}, {start:.1f}]", flush=True)
 
 
 def mode_drive(args, cfg):
@@ -341,7 +404,7 @@ def mode_chase(args, cfg):
                 previous = fsm.state
             if fsm.state is State.CAPTURE and args.stop_at_capture:
                 motors.stop()
-                print(f"[{now:6.1f}] cubo en la boca de la pala: parado (sin pala aun). Ctrl+C para salir.", flush=True)
+                print(f"[{now:6.1f}] cubo en la boca de la pala: parado (sin camara cenital no hay pose para llevarlo al cuadro). Ctrl+C para salir.", flush=True)
                 while True:
                     f = cam.read()
                     if f is not None:
@@ -380,8 +443,10 @@ def main():
     parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
     parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
     parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
-    parser.add_argument("--step-time", type=float, default=0.7, help="threshold mode: seconds per step")
-    parser.add_argument("--all", action="store_true", help="threshold mode: all four wheels together (on the floor)")
+    parser.add_argument("--step-time", type=float, default=0.6, help="threshold mode: seconds per step")
+    parser.add_argument("--start-power", type=float, default=8.0, help="threshold mode: first power step (percent)")
+    parser.add_argument("--max-power", type=float, default=45.0,
+                        help="threshold mode: highest power tried (the 21-28 %% of the star test already moves)"),
     parser.add_argument("--latch-timeout", type=float, default=3.0, help="drive mode: stop after N s with no key")
     parser.add_argument("--save-every", type=float, default=0.0,
                         help="camera mode: save the raw and the annotated frame every N seconds")

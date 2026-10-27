@@ -172,3 +172,21 @@ def test_star_steps_are_pure_and_come_back_to_the_start():
     assert sum(vy for _, (_, vy, _) in steps) == pytest.approx(0.0)
     assert sum(wz for _, (_, _, wz) in steps) == pytest.approx(0.0)
     assert max(math.hypot(vx, vy) for _, (vx, vy, _) in steps) == pytest.approx(0.1)
+
+
+def test_threshold_motions_drive_every_wheel_like_a_differential_for_spins():
+    from lab_robot import THRESHOLD_MOTIONS, motion_signs
+
+    patterns = {name: motion_signs(*cmd) for name, cmd in THRESHOLD_MOTIONS}
+    assert patterns["girar antihorario"] == (-1.0, 1.0, -1.0, 1.0)  # left side back, right side forward
+    assert patterns["adelante"] == (1.0, 1.0, 1.0, 1.0)
+    assert patterns["izquierda"] == (-1.0, 1.0, 1.0, -1.0)  # mecanum strafe
+    assert all(0.0 not in signs for signs in patterns.values())  # all four wheels, always
+
+
+def test_motion_is_detected_after_two_steps_well_above_the_still_noise():
+    from lab_robot import moving_since
+
+    assert moving_since([0.8, 0.9, 1.0, 3.5, 4.0, 6.0], still_mean=0.8, still_std=0.1) == 3
+    assert moving_since([0.8, 3.5, 0.9, 1.0], still_mean=0.8, still_std=0.1) is None  # one spike is noise
+    assert moving_since([], still_mean=0.8, still_std=0.1) is None

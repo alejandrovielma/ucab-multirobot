@@ -172,7 +172,7 @@
     fusion_reversed: [false, true, false, true]  # the right wheels (fr, rr) turned backward on "forward"
     # Power (percent, fl fr rl rr) at which each wheel starts turning: a non-zero command is spread over
     # [start, cap] so slow speeds do not stall (tools/lab/lab_robot.py threshold). 0 = not measured.
-    fusion_start_power: [0.0, 0.0, 0.0, 0.0]
+    fusion_start_power: [20.0, 20.0, 20.0, 20.0]  # PROVISIONAL 2026-10-27: the star test moved at 21-28 % and a mission at 10-17 % did not; replace with `lab_robot.py threshold`
     # Per-wheel scale in (0, 1] to even out motor speeds (drift when driving straight on the floor).
     fusion_trim: [1.0, 1.0, 1.0, 1.0]
     # Cokoino 4WD HAT (2x DRV8833), only with motor_backend cokoino_drv8833.
