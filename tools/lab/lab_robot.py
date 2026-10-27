@@ -102,9 +102,15 @@ def open_motor_gpio(args, cfg):
 # ------------------------------------------------------------------ modes
 
 
-def robot_steps(v: float, seconds: float, star: bool) -> list[tuple[str, tuple[float, float, float]]]:
+def robot_steps(v: float, seconds: float, star: bool,
+                arcs: bool = False) -> list[tuple[str, tuple[float, float, float]]]:
     """Whole-robot steps of the motors mode. --star: the 8 translations and both spins of the team's
     motion rule, in pairs that bring the robot back, so the leftover offset shows the drift."""
+    if arcs:
+        # Translation and spin in one command (radius v / w = 20 cm); each arc is undone by its reverse.
+        w = 5.0 * v
+        return [("arco adelante-izquierda", (v, 0.0, w)), ("arco atras-izquierda (deshace)", (-v, 0.0, -w)),
+                ("arco adelante-derecha", (v, 0.0, -w)), ("arco atras-derecha (deshace)", (-v, 0.0, w))]
     if not star:
         return [("avanzar", (v, 0.0, 0.0)), ("lateral izquierda", (0.0, v, 0.0)),
                 ("girar antihorario", (0.0, 0.0, 10.0 * v))]  # 0.8 rad/s at 0.08 m/s, as before
@@ -136,7 +142,7 @@ def mode_motors(args, cfg):
                 time.sleep(args.seconds)
                 motors.stop()
                 time.sleep(0.5)
-        for name, cmd in () if args.only_wheels else robot_steps(args.speed, args.seconds, args.star):
+        for name, cmd in () if args.only_wheels else robot_steps(args.speed, args.seconds, args.star, args.arcs):
             print(f"robot: {name} {args.seconds:.1f} s", flush=True)
             motors.drive(*cmd)
             time.sleep(args.seconds)
@@ -498,6 +504,8 @@ def main():
     parser.add_argument("--only-wheels", action="store_true", help="motors mode: skip the whole-robot steps")
     parser.add_argument("--star", action="store_true",
                         help="motors mode: robot steps in the 8 translation directions and both spins, in return pairs")
+    parser.add_argument("--arcs", action="store_true",
+                        help="motors mode: robot steps are arcs (translation and spin together), in return pairs")
     parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
     parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
     parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")

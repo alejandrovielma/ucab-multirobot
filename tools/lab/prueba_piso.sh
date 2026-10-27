@@ -34,7 +34,14 @@ setsid nohup python3 tools/lab/lab_robot.py motors --only-robot --speed "$speed"
     --seconds "$seconds" "$@" > "$log" 2>&1 < /dev/null &
 
 echo "Prueba en el piso a $speed m/s: empieza en $delay s (PID $!)."
-if $star; then
+if [[ " $* " == *" --arcs "* ]]; then
+    cat <<EOF
+  Cuatro arcos de ~20 cm de radio (adelante-izquierda y vuelta, adelante-derecha y vuelta), ~$distance cm de
+  avance cada uno. Debe terminar donde empezo: anotar el desplazamiento, si el arco se abre o se cierra
+  respecto del esperado y si alguna rueda patina o se traba.
+Dejar libres unos $((distance + 20)) cm alrededor: esta prueba no mira la linea negra.
+EOF
+elif $star; then
     cat <<EOF
   Adelante y atras, izquierda y derecha, las cuatro diagonales (ida y vuelta), ~$distance cm cada tramo;
   despues 90 grados antihorario y 90 grados horario. Debe terminar donde empezo y con el mismo rumbo:

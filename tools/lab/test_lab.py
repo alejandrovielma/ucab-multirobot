@@ -190,3 +190,10 @@ def test_motion_is_detected_after_two_steps_well_above_the_still_noise():
     assert moving_since([0.8, 0.9, 1.0, 3.5, 4.0, 6.0], still_mean=0.8, still_std=0.1) == 3
     assert moving_since([0.8, 3.5, 0.9, 1.0], still_mean=0.8, still_std=0.1) is None  # one spike is noise
     assert moving_since([], still_mean=0.8, still_std=0.1) is None
+
+
+def test_arc_steps_come_in_return_pairs():
+    steps = robot_steps(0.08, 1.5, star=False, arcs=True)
+    assert len(steps) == 4 and all(vx and wz for _, (vx, _vy, wz) in steps)
+    for (_, a), (_, b) in zip(steps[::2], steps[1::2]):
+        assert b == tuple(-c for c in a)
