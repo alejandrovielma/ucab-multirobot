@@ -168,7 +168,7 @@
     # Fusion HAT+: motor port of each wheel [fl, fr, rl, rr] and direction flip done by the HAT.
     # Wiring not identified yet: run tools/lab/lab_robot.py motors, note which wheel each port
     # moves and in which direction, then update these two lists.
-    fusion_ports: [M0, M1, M2, M3]
+    fusion_ports: [M3, M0, M2, M1]  # measured 2026-10-27 by moving one port at a time: fl M3, fr M0, rl M2, rr M1 (fusion_reversed not checked yet)
     fusion_reversed: [false, false, false, false]
     # Power (percent, fl fr rl rr) at which each wheel starts turning: a non-zero command is spread over
     # [start, cap] so slow speeds do not stall (tools/lab/lab_robot.py threshold). 0 = not measured.
