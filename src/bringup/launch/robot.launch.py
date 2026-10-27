@@ -35,6 +35,8 @@ def generate_launch_description():
             "use_sim_time": "false",
             "require_pose": LaunchConfiguration("require_pose"),
             "require_heartbeat": LaunchConfiguration("require_heartbeat"),
+            "targets": LaunchConfiguration("targets"),
+            "avoid": LaunchConfiguration("avoid"),
         }.items(),
     )
 
@@ -44,6 +46,9 @@ def generate_launch_description():
                               description="false only for bench tests without the overhead camera"),
         DeclareLaunchArgument("require_heartbeat", default_value="true",
                               description="false only for bench tests without the coordinator"),
+        DeclareLaunchArgument("targets", default_value="",
+                              description="mission: target colors, comma separated (empty: the robot waits)"),
+        DeclareLaunchArgument("avoid", default_value="", description="mission: forbidden colors, comma separated"),
         hw_node("hat_motor_driver"),
         hw_node("line_sensor"),
         hw_node("camera"),

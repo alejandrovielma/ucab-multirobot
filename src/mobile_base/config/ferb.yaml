@@ -101,6 +101,7 @@
     escape_time: 1.5
     carry_max_turn: 0.4  # rad/s, slow in-place spin with a cube (no arcs: team rule 2026-10-27)
     max_side_speed: 0.05  # m/s, any translation that is not straight ahead (sideways, diagonal, back)
+    line_clear_time: 0.3  # s of white before a new black reading counts as a new tape (the TCRT5000 flickers on its edge)
     track_horizon: 0.3
     body_front: 0.095  # body without the scoop: the scoop may step on the tape, the body may not
     body_rear: 0.095

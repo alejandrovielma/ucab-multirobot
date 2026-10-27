@@ -1,7 +1,9 @@
 """Hardware-independent nodes of ONE robot: cube_detector, behavior, safety_gate.
 
 Included by robot.launch.py (real robot) and sim.launch.py (Webots).
-Args: robot (phineas|ferb), use_sim_time, require_pose, require_heartbeat.
+Args: robot (phineas|ferb), use_sim_time, require_pose, require_heartbeat, targets and avoid (the
+mission: comma-separated colors; without targets the robot stays still until one is set with
+`ros2 param set /<robot>/behavior my_colors "blue"` or the command interface).
 """
 
 from launch import LaunchDescription
@@ -23,6 +25,11 @@ def generate_launch_description():
         "require_heartbeat": ParameterValue(LaunchConfiguration("require_heartbeat"), value_type=bool),
     }
 
+    mission = {
+        "my_colors": ParameterValue(LaunchConfiguration("targets"), value_type=str),
+        "avoid_colors": ParameterValue(LaunchConfiguration("avoid"), value_type=str),
+    }
+
     def logic_node(executable, extra=None):
         return Node(
             package="mobile_base",
@@ -38,7 +45,9 @@ def generate_launch_description():
         DeclareLaunchArgument("use_sim_time", default_value="false"),
         DeclareLaunchArgument("require_pose", default_value="true"),
         DeclareLaunchArgument("require_heartbeat", default_value="true"),
+        DeclareLaunchArgument("targets", default_value="", description="target colors, e.g. blue,green"),
+        DeclareLaunchArgument("avoid", default_value="", description="forbidden colors, e.g. red"),
         logic_node("cube_detector"),
-        logic_node("behavior"),
+        logic_node("behavior", [mission]),
         logic_node("safety_gate", [gate_overrides]),
     ])

@@ -68,7 +68,11 @@ Documentos que complementan este (léelos en este orden si necesitas más contex
 
 ### Qué hizo la fase 1 (ya en el PR)
 
-Regla nueva desde el 2026-10-22: **Phineas y Ferb empujan al cuadro todos los cubos que no son rojos;
+> **Superado el 2026-10-27:** la regla de colores ahora es una misión (colores objetivo y prohibidos,
+> sin misión el robot quieto) y el movimiento es en asterisco, sin arcos. Ver el README y
+> [architecture.md](architecture.md). Lo que sigue describe la fase 1 tal como quedó el 2026-10-22.
+
+Regla del 2026-10-22: **Phineas y Ferb empujan al cuadro todos los cubos que no son rojos;
 los rojos se quedan en la pista.**
 
 | Cambio | Archivo | Detalle |

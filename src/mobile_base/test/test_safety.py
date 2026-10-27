@@ -127,13 +127,61 @@ def test_on_the_line_the_robot_may_back_away_the_way_it_came():
 def test_backing_off_one_tape_does_not_cross_another_behind():
     # A corner: the robot backs off the tape it drove onto and meets the other one behind it.
     gate = SafetyGate(SafetyParams(require_pose=False))
-    gate.filter(make_input(cmd=FORWARD, own_pose=None))
     back = (-0.04, 0.0, 0.0)
-    assert gate.filter(make_input(cmd=back, line_front=True, own_pose=None))[0] == pytest.approx(back)
-    assert gate.filter(make_input(cmd=back, own_pose=None))[0] == pytest.approx(back)  # off the first tape
-    cmd, reason = gate.filter(make_input(cmd=back, line_front=True, own_pose=None))  # the second one
+
+    def at(t, cmd, line):
+        return gate.filter(make_input(now=t, cmd=cmd, line_front=line, own_pose=None))
+
+    at(10.0, FORWARD, False)
+    assert at(10.1, back, True)[0] == pytest.approx(back)
+    assert at(10.5, back, False)[0] == pytest.approx(back)  # off the first tape
+    cmd, reason = at(11.5, back, True)  # the second one, a second later
     assert cmd == pytest.approx((0.0, 0.0, 0.0))
     assert "line" in reason
+
+
+def test_the_tape_direction_turns_with_the_robot_without_pose():
+    # Reviewer's case: after a half turn on the tape the tape is BEHIND; the old rule (fixed in the
+    # robot frame) let the robot back into it and blocked driving away (and pinned it in corners).
+    gate = SafetyGate(SafetyParams(require_pose=False))
+    gate.filter(make_input(now=10.0, cmd=FORWARD, own_pose=None))
+    gate.filter(make_input(now=10.1, cmd=FORWARD, line_front=True, own_pose=None))  # tape ahead
+    t = 10.1
+    while t < 10.1 + math.pi / 1.2:  # spin half a turn at 1.2 rad/s, still on the tape
+        gate.filter(make_input(now=t, cmd=(0.0, 0.0, 1.2), line_front=True, own_pose=None))
+        t += 0.05
+    t = 10.1 + math.pi / 1.2
+    assert gate.filter(make_input(now=t, cmd=(-0.04, 0.0, 0.0), line_front=True, own_pose=None))[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert gate.filter(make_input(now=t, cmd=FORWARD, line_front=True, own_pose=None))[0] == pytest.approx(FORWARD)
+
+
+def test_the_tape_direction_turns_with_the_pose_heading():
+    gate = SafetyGate(SafetyParams())
+    gate.filter(make_input(now=10.0, cmd=FORWARD, own_pose=Pose2D(0.0, 0.0, 0.0, stamp=10.0)))
+    gate.filter(make_input(now=10.1, cmd=FORWARD, line_front=True, own_pose=Pose2D(0.0, 0.0, 0.0, stamp=10.1)))
+    # The pose says the robot now faces north: the tape (east) is on its right.
+    turned = Pose2D(0.0, 0.0, math.pi / 2, stamp=10.5)
+    right, left = (0.0, -0.04, 0.0), (0.0, 0.04, 0.0)
+    assert gate.filter(make_input(now=10.5, cmd=right, line_front=True, own_pose=turned))[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert gate.filter(make_input(now=10.5, cmd=left, line_front=True, own_pose=turned))[0] == pytest.approx(left)
+
+
+def test_a_flicker_on_the_tape_edge_is_the_same_tape():
+    # TCRT5000 without debounce: one white reading while backing off must not re-aim the rule.
+    gate = SafetyGate(SafetyParams(require_pose=False))
+    back = (-0.04, 0.0, 0.0)
+    gate.filter(make_input(now=10.0, cmd=FORWARD, own_pose=None))
+    gate.filter(make_input(now=10.1, cmd=back, line_front=True, own_pose=None))
+    gate.filter(make_input(now=10.2, cmd=back, line_front=False, own_pose=None))  # flicker
+    assert gate.filter(make_input(now=10.3, cmd=back, line_front=True, own_pose=None))[0] == pytest.approx(back)
+    assert gate.filter(make_input(now=10.4, cmd=FORWARD, line_front=True, own_pose=None))[0] == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_backing_toward_a_peer_behind_stops_without_swinging_the_rear_into_it():
+    params = SafetyParams()
+    behind_left = peer_at(-0.25, 0.15, theta=0.0)
+    cmd, _ = SafetyGate(params).filter(make_input(cmd=(-0.04, 0.0, 0.0), peer_pose=behind_left))
+    assert cmd == pytest.approx((0.0, 0.0, 0.0))
 
 
 def test_peer_very_close_in_front_blocks_forward_and_turns_away():

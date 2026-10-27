@@ -13,7 +13,8 @@ Este documento es el plan; las tareas con criterio de aceptación salen de aquí
 | RF1 | Explorar la pista sin salir del rectángulo de cinta negra | Implementado (sensor de línea + cerca virtual con pose cenital) |
 | RF2 | No chocar con el otro robot | Implementado en `safety_gate` (cono de 120°, 0,40/0,60 m, regla asimétrica de bloqueo) |
 | RF3 | Detectar cubos y su color con la cámara a bordo | Implementado; falta calibrar con la cámara real |
-| RF4 | **Phineas y Ferb empujan a la zona de descarga todos los cubos que no sean rojos** | **Cambia:** hoy el repo reparte los colores (rojo/naranja/amarillo frente a verde/azul/morado) |
+| RF4 | **Misión (regla del 2026-10-27, reemplaza "todo menos rojo" del 2026-10-22):** la interfaz da uno o varios colores objetivo y los prohibidos. Suma puntos cada objetivo entregado y resta tocar un prohibido. Solo se capturan objetivos; los demás se pueden mover en la pista, nunca al cuadro. Sin misión, el robot quieto | Implementado: `set_mission`, parámetros `my_colors` / `avoid_colors` (texto separado por comas), `targets:=` / `avoid:=` en el launch, `chase --target --avoid` |
+| RF4b | **Movimiento en asterisco (regla del 2026-10-27):** trasladarse en cualquier dirección o girar en el sitio, nunca las dos cosas; sin arcos | Implementado en `safety_gate` y `behavior` |
 | RF5 | Los rojos se quedan en la pista: no se capturan y, si uno entra en la pala, se suelta | Nuevo |
 | RF6 | Los dos robots no persiguen el mismo cubo | Nuevo (consecuencia de RF4: ahora compiten por los mismos colores) |
 | RF7 | Turnos con Perry en la zona de descarga: ni robot ni brazo entran mientras el otro trabaja | Parcial: la llave del cuadro existe; Perry aún no la pide |
@@ -175,7 +176,7 @@ Cambios pequeños, en `core/` y con pruebas, sin tocar las reglas de seguridad e
 
 | Cambio | Dónde | Motivo |
 |---|---|---|
-| `my_colors` pasa a ser `[orange, yellow, green, blue, purple]` en los dos YAML | `config/*.yaml`, README, docs | RF4 |
+| ~~`my_colors` pasa a ser todo menos rojo~~: reemplazado el 2026-10-27 por la misión (RF4) | `config/*.yaml`, README, docs | RF4 |
 | `BehaviorInput` recibe `mission` (colores, pausa, escala de velocidad) y `goal` (x, y o nada) | `core/behavior.py` | Los colores dejan de ser un parámetro fijo |
 | En `EXPLORE`, con `goal` y pose: rumbo al objetivo en vez de vagar; al ver el cubo con la cámara pasa a `APPROACH` como hoy | `core/behavior.py` | El navegante decide adónde; la captura sigue siendo reactiva |
 | En `EXPLORE`/`APPROACH`: un cubo rojo cerca del frente (cy alto) se trata como obstáculo y se gira | `core/behavior.py` | RF5: con la pala fija, avanzar sobre un rojo lo captura |

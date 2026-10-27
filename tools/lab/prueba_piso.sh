@@ -13,6 +13,9 @@ speed=${1:-0.2}
 delay=${2:-15}
 seconds=${3:-2}
 shift $(($# < 3 ? $# : 3))
+for value in "$speed" "$delay" "$seconds"; do
+    [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "numero invalido: '$value'" >&2; exit 1; }
+done
 
 # Two programs driving the HAT at once fight over the motors.
 # Anchored: only a python3 process running the tool, not a shell whose command line mentions it.

@@ -65,11 +65,11 @@ class BehaviorNode(Node):
                     targets = parse_colors(param.value)
                 elif param.name == "avoid_colors":
                     avoid = parse_colors(param.value)
+            if (targets, avoid) != (self.fsm.targets, self.fsm.avoid):
+                self.fsm.set_mission(targets, avoid)  # refuses a color that is both
+                self.get_logger().info(f"mission: targets {list(targets) or 'none (idle)'}, avoid {list(avoid)}")
         except (ValueError, AttributeError) as exc:
             return SetParametersResult(successful=False, reason=str(exc))
-        if (targets, avoid) != (self.fsm.targets, self.fsm.avoid):
-            self.fsm.set_mission(targets, avoid)
-            self.get_logger().info(f"mission: targets {list(targets) or 'none (idle)'}, avoid {list(avoid)}")
         return SetParametersResult(successful=True)
 
     def _on_cubes(self, msg: CubeDetectionArray):

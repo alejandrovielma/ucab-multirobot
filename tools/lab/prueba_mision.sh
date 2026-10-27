@@ -16,6 +16,9 @@ avoid=${2:-}
 duration=${3:-60}
 delay=${4:-15}
 speed=${5:-0.08}
+for value in "$speed" "$delay" "$duration"; do
+    [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "numero invalido: '$value'" >&2; exit 1; }
+done
 
 # Anchored: only a python3 process running the tool, not a shell whose command line mentions it.
 running=$(pgrep -f "^python3 tools/lab/lab_robot.py" | tr '\n' ' ' || true)

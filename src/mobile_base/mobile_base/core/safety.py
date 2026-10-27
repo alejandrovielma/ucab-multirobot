@@ -13,7 +13,10 @@ Rules, applied in order every tick:
 4. Line sensor on black -> no translation toward the tape. The tape is taken to lie in the direction
    the robot was translating when the line appeared (forward if it had not translated yet), so
    backing away the way it came is allowed and pushing on (or out "through another side") is not.
-   Spinning is allowed.
+   Spinning is allowed, and that direction turns with the robot (the tape stays where it is): with
+   the pose by its heading change, without it by integrating the spin the gate let through. A line
+   that comes back less than line_clear_time after it went white is the same tape (the TCRT5000
+   flickers on its edge), so the direction is not taken again.
 5. Peer robot in the travel direction (overhead-camera poses) -> slow down, stop, and spin away
    from it. If both robots stay blocked facing each other for deadlock_time, the robot WITHOUT
    priority rotates away (or holds still when it carries a cube in the open scoop).
@@ -75,6 +78,7 @@ class SafetyParams:
     # the U (observed in Webots), so with a cube the spins are slow.
     carry_max_turn: float = 0.4  # rad/s, spin-rate limit with a cube
     max_side_speed: float = 0.05  # m/s, any translation that is not straight ahead (rule 3)
+    line_clear_time: float = 0.3  # s of white before a new black reading counts as a new tape (rule 4)
     track_horizon: float = 0.3  # s, body geofence prediction
     body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
     body_rear: float = 0.095
@@ -118,8 +122,33 @@ class SafetyGate:
         self._travel_dir = (1.0, 0.0)  # unit translation direction (robot frame) of the last move
         self._line_dir = (1.0, 0.0)  # where the tape is taken to be while the line is seen
         self._line_seen = False
+        self._line_clear_since = -math.inf  # when the sensor last went from black to white
+        self._last_now: float | None = None
+        self._last_theta: float | None = None  # own heading at the previous tick (fresh pose only)
+        self._last_wz = 0.0  # spin let through at the previous tick
 
     def filter(self, inp: SafetyInput) -> tuple[Command, str]:
+        self._follow_rotation(inp)
+        cmd, reason = self._filter(inp)
+        self._last_wz = cmd[2]
+        return cmd, reason
+
+    def _follow_rotation(self, inp: SafetyInput) -> None:
+        """Turn the robot-frame directions of rule 4 by the robot's own spin since the last tick."""
+        fresh = self._is_fresh(inp.own_pose, inp.now)
+        if fresh and self._last_theta is not None:
+            dtheta = math.remainder(inp.own_pose.theta - self._last_theta, 2.0 * math.pi)
+        elif self._last_now is not None:
+            dtheta = self._last_wz * max(0.0, inp.now - self._last_now)
+        else:
+            dtheta = 0.0
+        self._last_theta = inp.own_pose.theta if fresh else None
+        self._last_now = inp.now
+        if dtheta:
+            self._line_dir = _rotate(self._line_dir, -dtheta)
+            self._travel_dir = _rotate(self._travel_dir, -dtheta)
+
+    def _filter(self, inp: SafetyInput) -> tuple[Command, str]:
         p = self.params
         if inp.estop:
             # A deadlock escape must not resume when the stop is cleared: the deadlock is timed afresh.
@@ -148,8 +177,10 @@ class SafetyGate:
         if vy != 0.0 or vx < 0.0:
             vx, vy = self._cap(vx, vy, p.max_side_speed, "slow: not straight ahead", reasons)
         returning, off_track = self._outside_track(inp, own_fresh, vx, vy, reasons)
-        if inp.line_front and not self._line_seen:
-            self._line_dir = self._travel_dir  # the tape lies where the robot was heading for
+        if inp.line_front and not self._line_seen and inp.now - self._line_clear_since >= p.line_clear_time:
+            self._line_dir = self._travel_dir  # a new tape: it lies where the robot was heading for
+        if self._line_seen and not inp.line_front:
+            self._line_clear_since = inp.now
         self._line_seen = inp.line_front
         line_blocks = inp.line_front and not delivering and not returning
         if (line_blocks and _toward(vx, vy, self._line_dir)) or (off_track and (vx or vy)):
@@ -257,9 +288,11 @@ class SafetyGate:
             k = (d - p.stop_distance) / (p.slow_distance - p.stop_distance)
             vx, vy = vx * k, vy * k
             reason = f"peer ahead at {d:.2f} m: slow"
-        if d < p.avoid_distance and turn:
-            # Spin away from the peer; dead ahead counts as "left" so both robots break right.
-            bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
+        bearing = relative_bearing(own.x, own.y, own.theta, peer.x, peer.y)
+        if d < p.avoid_distance and turn and abs(bearing) < math.radians(p.front_cone_deg):
+            # Spin away from a peer in front; dead ahead counts as "left" so both robots break right.
+            # One behind (in the cone only because the robot backs toward it) is not spun away from:
+            # that would swing the rear into it.
             wz = -p.avoid_turn if bearing >= 0.0 else p.avoid_turn
             reason = reason or f"peer ahead at {d:.2f} m"
             reason += ", turn away"
@@ -295,3 +328,8 @@ class SafetyGate:
 def _toward(vx: float, vy: float, direction: tuple[float, float]) -> bool:
     """The translation has a component along direction (robot frame)."""
     return vx * direction[0] + vy * direction[1] > 1e-9
+
+
+def _rotate(v: tuple[float, float], angle: float) -> tuple[float, float]:
+    c, s = math.cos(angle), math.sin(angle)
+    return c * v[0] - s * v[1], s * v[0] + c * v[1]

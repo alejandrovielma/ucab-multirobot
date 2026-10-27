@@ -303,7 +303,10 @@ def mode_chase(args, cfg):
     if args.capture_cy is not None:
         values["capture_cy"] = args.capture_cy
     fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values))
-    fsm.set_mission(targets, avoid)
+    try:
+        fsm.set_mission(targets, avoid)
+    except ValueError as exc:
+        raise SystemExit(f"mision invalida: {exc}") from None
     gcfg = cfg["safety_gate"]
     gfields = SafetyParams.__dataclass_fields__
     gate = SafetyGate(SafetyParams(**{**{k: v for k, v in gcfg.items() if k in gfields},

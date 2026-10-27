@@ -38,6 +38,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "logic", default_value="true", description="false = only Webots and drivers (manual cmd_vel tests)"
         ),
+        # Same mission for both robots; per robot later with `ros2 param set /<robot>/behavior my_colors ...`.
+        DeclareLaunchArgument("targets", default_value="", description="target colors, comma separated"),
+        DeclareLaunchArgument("avoid", default_value="", description="forbidden colors, comma separated"),
         webots,
         webots._supervisor,
     ]
@@ -57,6 +60,8 @@ def generate_launch_description():
                     "use_sim_time": "true",
                     "require_pose": "true",
                     "require_heartbeat": "true",
+                    "targets": LaunchConfiguration("targets"),
+                    "avoid": LaunchConfiguration("avoid"),
                 }.items(),
                 condition=IfCondition(LaunchConfiguration("logic")),
             )

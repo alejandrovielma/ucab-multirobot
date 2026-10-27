@@ -469,3 +469,19 @@ def test_every_command_is_a_translation_or_a_spin_never_both(seed):
             holds_zone=rng.random() < 0.5, scoop_color=rng.choice(colors + ["", ""]),
         ))
         assert wz == 0.0 or (vx == 0.0 and vy == 0.0), (fsm.state, vx, vy, wz)
+
+
+def test_a_lease_granted_after_the_mission_was_cleared_is_given_back():
+    fsm = BehaviorFSM(BehaviorParams(request_period=1.0), rng=random.Random(1))
+    fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False))
+    fsm.step(BehaviorInput(now=2.0, cubes=[], line_front=False, holds_zone=True))
+    assert [a.kind for a in fsm.take_actions()] == ["release"]
+    fsm.step(BehaviorInput(now=2.5, cubes=[], line_front=False, holds_zone=True))
+    assert fsm.take_actions() == []  # not every tick
+
+
+def test_a_color_cannot_be_both_target_and_forbidden():
+    fsm = BehaviorFSM(BehaviorParams(), rng=random.Random(1))
+    with pytest.raises(ValueError):
+        fsm.set_mission(["blue", "red"], avoid=["red"])
+    assert fsm.targets == ()

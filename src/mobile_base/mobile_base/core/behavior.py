@@ -256,7 +256,10 @@ class BehaviorFSM:
         """Colors to collect and colors whose touch costs points; no targets = stay still (IDLE).
 
         A cube already carried that is no longer a target stops counting as held, so the transport
-        ends after scoop_lost_timeout (lease released, nothing delivered)."""
+        ends after scoop_lost_timeout (lease released, nothing delivered). A color cannot be both."""
+        both = set(targets) & set(avoid)
+        if both:
+            raise ValueError(f"color(s) {sorted(both)} both target and forbidden")
         self.targets = tuple(targets)
         self.avoid = tuple(avoid)
 
@@ -269,10 +272,16 @@ class BehaviorFSM:
         if self.state is not State.STOP:
             if not self.targets:
                 if self.state is not State.IDLE:
-                    if self.carrying:
+                    if self.state in (State.CARRY, State.DELIVER):
                         self._give_up_cube(inp)
+                        self._dropping = False
                     self.state = State.IDLE
                     self.note = "no mission"
+                    self._last_request = inp.now
+                elif inp.holds_zone and inp.now - (self._last_request or 0.0) >= self.params.request_period:
+                    # A lease granted after the mission was cleared (request in flight): give it back.
+                    self._actions.append(ZoneAction("release", delivered=False))
+                    self._last_request = inp.now
                 return ZERO
             if self.state is State.IDLE:
                 self.state = State.EXPLORE
