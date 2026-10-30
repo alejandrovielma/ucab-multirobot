@@ -28,10 +28,11 @@ from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_
 
 from mobile_base.core.kinematics import wheel_speeds  # noqa: E402
 from stream import FrameBuffer, serve
+from dashboard import Dashboard
 from teleop import Teleop
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
-from mobile_base.core.colors import parse_colors, ranges_from_flat  # noqa: E402
+from mobile_base.core.colors import DEFAULT_HUE_RANGES, parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
 from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_refs, detect_square, scoop_content  # noqa: E402
 
@@ -433,8 +434,10 @@ def mode_chase(args, cfg):
         motors.gpio.close()
 
 
-def mode_teleop(args, cfg):
-    """Drive from the browser: camera view plus WASD, every command through the safety gate."""
+def mode_dashboard(args, cfg):
+    """Mission buttons, camera view and manual WASD in the browser; every command through the safety gate.
+
+    Deliberative layer = the person (buttons), sequencer = BehaviorFSM, reactive layer = SafetyGate."""
     gpio = open_gpio(args.chip, args.dry_run)
     motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
     line = LineSensor(cfg, gpio)
@@ -444,11 +447,17 @@ def mode_teleop(args, cfg):
     gfields = SafetyParams.__dataclass_fields__
     gate = SafetyGate(SafetyParams(**{**{k: v for k, v in gcfg.items() if k in gfields},
                                       "require_pose": False, "require_heartbeat": False}))
+    bcfg = cfg["behavior"]
+    values = {k: v for k, v in bcfg.items() if k in BehaviorParams.__dataclass_fields__ and k != "my_colors"}
+    values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
+                  approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))
+    fsm = BehaviorFSM(BehaviorParams(my_colors=(), **values))  # no mission: IDLE until INICIAR
     teleop = Teleop(args.max_speed, args.max_turn)
+    dash = Dashboard(teleop, DEFAULT_HUE_RANGES)
     token = secrets.token_urlsafe(8)
-    page = (Path(__file__).parent / "teleop.html").read_bytes()
+    page = (Path(__file__).parent / "dashboard.html").read_bytes()
     frames = FrameBuffer()
-    serve(frames, args.port, page=page, api=teleop.handle, token=token)
+    serve(frames, args.port, page=page, api=dash.handle, token=token)
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("10.255.255.255", 1))  # no packet is sent: only picks the outgoing interface
@@ -467,17 +476,33 @@ def mode_teleop(args, cfg):
             black = line.black()
             scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
             peer = detect_peer(frame, vparams) if frame is not None else None
-            cmd, reason = gate.filter(SafetyInput(cmd=teleop.current(), line_front=black, own_pose=None, peer_pose=None,
-                                                   now=now, heartbeat_age=None, carrying=False, peer_seen=peer,
-                                                   estop=teleop.estop))
+            refs = detect_refs(frame, vparams) if frame is not None else None
+            auto = fsm.step(BehaviorInput(
+                now=now, cubes=[Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets], line_front=black,
+                scoop_color=scoop, square_visible=square is not None and square.visible,
+                square_cx=square.cx_norm if square is not None else 0.0,
+                square_cy=square.cy_norm if square is not None else 0.0,
+                square_area=square.area_px if square is not None else 0.0,
+                refs_visible=refs is not None and refs.visible,
+                refs_cx=refs.center_cx if refs is not None else 0.0,
+                refs_skew=refs.skew if refs is not None else 0.0))
+            change = dash.take_change()
+            if change is not None:
+                fsm.set_mission(*change)  # already validated by the dashboard
+            manual = dash.manual
+            cmd, reason = gate.filter(SafetyInput(
+                cmd=teleop.current() if manual else auto, line_front=black, own_pose=None, peer_pose=None, now=now,
+                heartbeat_age=None, carrying=fsm.carrying and not manual, peer_seen=peer, estop=teleop.estop,
+                delivering=fsm.state is State.DELIVER and not manual))
             motors.drive(*cmd)
             t = time.monotonic()
-            teleop.update_status(reason=reason, line=bool(black), scoop=scoop or "",
+            dash.update_status(fsm=fsm.state.value, delivered=fsm.delivered, forbidden=fsm.forbidden_touches,
+                               reason=reason, line=bool(black), scoop=scoop or "",
                                  peer=peer[1] if peer else None, cubes=[d.color for d in dets],
                                  square=square is not None and square.visible, fps=1.0 / max(t - last, 1e-3))
             last = t
             if frame is not None:
-                frames.put(annotate(frame, dets, vparams, [f"teleop linea={int(black)} pala={scoop or '-'}",
+                frames.put(annotate(frame, dets, vparams, [f"{'manual' if manual else fsm.state.value} linea={int(black)} pala={scoop or '-'}",
                                                            f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
             time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
     finally:
@@ -487,7 +512,7 @@ def mode_teleop(args, cfg):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase", "teleop"])
+    parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase", "dashboard"])
     parser.add_argument("--robot", default="phineas", choices=["phineas", "ferb"])
     parser.add_argument("--dry-run", action="store_true", help="no GPIO access (laptop check)")
     parser.add_argument("--chip", type=int, default=None, help="gpiochip number (default: autodetect)")
@@ -526,7 +551,7 @@ def main():
     if args.battery is not None:
         cfg["hat_motor_driver"]["battery_voltage"] = args.battery
     modes = {"motors": mode_motors, "threshold": mode_threshold, "drive": mode_drive, "line": mode_line, "camera": mode_camera,
-             "chase": mode_chase, "teleop": mode_teleop}
+             "chase": mode_chase, "dashboard": mode_dashboard}
     try:
         modes[args.mode](args, cfg)
     except KeyboardInterrupt:

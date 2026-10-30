@@ -169,13 +169,15 @@ python3 tools/lab/lab_robot.py motors --dry-run --seconds 0.1
 python3 tools/lab/lab_robot.py chase --dry-run --camera file:src/mobile_base/test/fixtures/webots_cube_at_mouth.jpg
 ```
 
-## Control desde el navegador (teleop)
+## Dashboard en el navegador (misión + manual)
 
-Cámara del robot y manejo con WASD (Q/E giran) desde un celular o laptop en la misma red:
+Botones de misión (color objetivo, prohibido, neutro; INICIAR / DETENER), cámara del robot, parada de
+emergencia y modo manual con WASD (Q/E giran en el sitio), desde un celular o laptop en la misma red. Sin
+modelo de lenguaje: es la capa deliberativa de la arquitectura híbrida (decisión 2026-10-30):
 
 ```bash
-bash tools/lab/prueba_teleop.sh [segundos] [espera s] [velocidad m/s]
-cat prueba-teleop-*.log      # la direccion completa, con ?t=<token>
+bash tools/lab/prueba_dashboard.sh [segundos] [espera s] [velocidad m/s]
+cat prueba-dashboard-*.log      # la direccion completa, con ?t=<token>
 ```
 
 Corre desacoplado (se puede quitar el cable). Todo comando pasa por el `SafetyGate` (línea, otro robot),

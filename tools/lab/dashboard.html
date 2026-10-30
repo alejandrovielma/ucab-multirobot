@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Phineas: control</title>
+<title>Robot: misión y control</title>
 <style>
   :root { --bg: #111; --panel: #1c1c1c; --text: #ddd; --muted: #888; --accent: #4a9eff; --stop: #d33; --ok: #3a3; }
   * { box-sizing: border-box; }
@@ -23,14 +23,27 @@
   #estop { padding: 14px 22px; font-size: 18px; font-weight: 700; border: 0; border-radius: 6px; background: var(--stop); color: #fff; }
   #estop.latched { background: var(--ok); }
   .hint { color: var(--muted); font-size: 13px; }
+  .act { padding: 12px 16px; font-size: 15px; font-weight: 600; border: 0; border-radius: 6px; background: var(--panel); color: var(--text); }
+  .act.on { background: var(--accent); color: #000; }
+  .col { padding: 10px 14px; border-radius: 6px; border: 3px solid var(--panel); background: var(--panel); color: var(--text); font-size: 14px; }
+  .col.target { border-color: var(--ok); }
+  .col.avoid { border-color: var(--stop); text-decoration: line-through; }
+  .col .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
   .warn { color: #f99; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Phineas: cámara y control manual</h1>
+  <h1>Misión, cámara y control manual</h1>
   <img id="video" alt="Cámara del robot">
   <div id="status">conectando…</div>
+  <div class="row" id="colors" title="Pulsar un color: neutro, objetivo o prohibido"></div>
+  <div class="row">
+    <button id="start" type="button" class="act">INICIAR MISIÓN</button>
+    <button id="stop" type="button" class="act">DETENER</button>
+    <button id="manual" type="button" class="act">MODO MANUAL: no</button>
+    <span id="mstate" class="hint"></span>
+  </div>
   <div class="row">
     <button id="estop" type="button">PARADA (Esc)</button>
     <label>Velocidad <input id="speed" type="range" min="0.03" max="0.20" step="0.01" value="0.08"> <span id="speedv"></span> m/s</label>
@@ -82,8 +95,37 @@ function command() {
   return { vx: vx / n * Number(speed.value), vy: vy / n * Number(speed.value), wz: 0 };
 }
 
+// ---- mission: each color is neutral, target (+) or forbidden (-); nothing moves until INICIAR
+const COLORS = { red: ["rojo", "#e33"], orange: ["naranja", "#f90"], yellow: ["amarillo", "#fd3"],
+                 green: ["verde", "#3b3"], blue: ["azul", "#38f"], purple: ["morado", "#a5f"] };
+const role = Object.fromEntries(Object.keys(COLORS).map(c => [c, "neutral"]));
+const post = (path, obj) => fetch(q(path), { method: "POST", body: JSON.stringify(obj || {}), headers: { "Content-Type": "application/json" } }).catch(() => null);
+const colorBox = document.getElementById("colors");
+function drawColors() {
+  colorBox.innerHTML = "";
+  for (const [c, [name, hex]] of Object.entries(COLORS)) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "col " + role[c];
+    b.innerHTML = `<span class="dot" style="background:${hex}"></span>${name}` + (role[c] === "target" ? " (objetivo)" : role[c] === "avoid" ? " (prohibido)" : "");
+    b.onclick = () => { role[c] = { neutral: "target", target: "avoid", avoid: "neutral" }[role[c]]; drawColors(); sendMission(); };
+    colorBox.appendChild(b);
+  }
+}
+const pick = (r) => Object.keys(role).filter(c => role[c] === r);
+const sendMission = () => post("/mission", { targets: pick("target"), avoid: pick("avoid") });
+drawColors();
+document.getElementById("start").onclick = async () => {
+  await sendMission();
+  const r = await post("/start");
+  if (r && !r.ok) document.getElementById("mstate").textContent = "Elige al menos un color objetivo.";
+};
+document.getElementById("stop").onclick = () => post("/stop");
+let manual = false;
+document.getElementById("manual").onclick = () => post("/manual", { on: !manual });
+
 let lastSent = "";
 async function send(force = false) {
+  if (!manual) return;  // the robot only takes WASD in manual mode
   const body = JSON.stringify(command());
   if (!force && body === lastSent && body === JSON.stringify({ vx: 0, vy: 0, wz: 0 })) return;  // idle: nothing to say
   lastSent = body;
@@ -126,6 +168,12 @@ async function poll() {
     const b = document.getElementById("estop");
     b.classList.toggle("latched", estop);
     b.textContent = estop ? "PARADO: pulsar para reanudar" : "PARADA (Esc)";
+    manual = s.manual;
+    document.getElementById("manual").textContent = "MODO MANUAL: " + (manual ? "sí" : "no");
+    document.getElementById("manual").classList.toggle("on", manual);
+    document.getElementById("start").classList.toggle("on", s.running);
+    document.getElementById("mstate").textContent = (s.running ? "en misión" : manual ? "manual" : "quieto") +
+      (s.fsm ? `: ${s.fsm}` : "") + `  entregados ${s.delivered ?? 0}  prohibidos tocados ${s.forbidden ?? 0}`;
     const c = s.cmd.map(v => v.toFixed(2)).join(", ");
     document.getElementById("status").textContent =
       `motores: vx, vy, wz = ${c}   (${s.reason})\n` +
