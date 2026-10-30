@@ -406,7 +406,8 @@ def mode_chase(args, cfg):
                 square_cy=square.cy_norm if square is not None else 0.0,
                 square_area=square.area_px if square is not None else 0.0))
             cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
-                                                   heartbeat_age=None, carrying=fsm.carrying, peer_seen=peer))
+                                                   heartbeat_age=None, carrying=fsm.carrying, peer_seen=peer,
+                                                   delivering=fsm.state is State.DELIVER))
             if fsm.state is not previous:
                 note = f" ({fsm.note})" if fsm.note else ""
                 print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)

@@ -113,6 +113,9 @@ class SafetyInput:
     heartbeat_age: float | None  # None = never received
     carrying: bool = False
     holds_zone: bool = False  # /zone/occupant == this robot
+    # The sequencer is pushing the cube into the square (state DELIVER) with no pose to tell it from the
+    # corridor: the square's tape may be crossed by the scoop. The push itself is time-limited there.
+    delivering: bool = False
     gate_closed: bool = False  # scoop gate closed: the cube is retained
     estop: bool = False  # emergency stop requested (latched by the node until cleared)
     # Without overhead poses: the peer's marker seen by this robot's camera, (bearing rad, distance m).
@@ -200,7 +203,7 @@ class SafetyGate:
         reasons = []
         # Only a cube in the OPEN fixed scoop restricts the motion; a closed gate retains it.
         loose_cube = inp.carrying and not inp.gate_closed
-        delivering = own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose)
+        delivering = inp.delivering or (own_fresh and inp.holds_zone and self._in_delivery_corridor(inp.own_pose))
         on_track = own_fresh and self._track.enabled and self._track.contains(inp.own_pose.x, inp.own_pose.y)
         vx, vy, wz = self._star(vx, vy, wz, reasons)
         if vy != 0.0 or vx < 0.0:

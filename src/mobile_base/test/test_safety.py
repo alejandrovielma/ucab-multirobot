@@ -468,3 +468,11 @@ def test_carrying_brakes_gradually_but_line_and_estop_stop_at_once():
     for i in range(3):
         gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.1 * i, carrying=True))
     assert gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.3, carrying=True, estop=True))[0] == (0.0, 0.0, 0.0)
+
+
+def test_line_does_not_stop_the_delivery_push_when_the_sequencer_says_so():
+    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False))
+    base = dict(cmd=(0.1, 0.0, 0.0), line_front=True, own_pose=None, peer_pose=None, now=0.0, heartbeat_age=None)
+    assert gate.filter(SafetyInput(**base))[0][0] == 0.0  # the tape stops a normal advance
+    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False))
+    assert gate.filter(SafetyInput(**base, delivering=True))[0][0] == pytest.approx(0.1)
