@@ -167,6 +167,8 @@ class SafetyGate:
             rate = rate_down if slowing else rate_up
             step = rate * dt
             out.append(new if rate <= 0.0 else old + max(-step, min(step, new - old)))
+        if (out[0] or out[1]) and out[2]:
+            out[2] = 0.0  # star motion holds during a ramp too: brake the translation first, then spin
         self._out = (out[0], out[1], out[2])
         return self._out
 

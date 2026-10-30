@@ -486,3 +486,12 @@ def test_the_peer_that_left_the_view_still_blocks_for_a_while():
     assert held[0] == 0.0  # still blocked from memory
     free = gate.filter(SafetyInput(cmd=(0.1, 0.0, 0.0), now=3.5, **base))[0]
     assert free[0] == pytest.approx(0.1)  # forgotten after peer_memory
+
+
+def test_a_braking_ramp_never_mixes_translation_and_spin():
+    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False, max_accel=1.0, max_decel_carry=0.3))
+    base = dict(line_front=False, own_pose=None, peer_pose=None, heartbeat_age=None, carrying=True)
+    for i in range(3):
+        gate.filter(SafetyInput(cmd=(0.08, 0.0, 0.0), now=0.1 * i, **base))
+    vx, vy, wz = gate.filter(SafetyInput(cmd=(0.0, 0.0, 0.4), now=0.3, **base))[0]
+    assert vx > 0.0 and wz == 0.0  # still braking: no spin yet

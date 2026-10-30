@@ -55,6 +55,8 @@
     skip_time: 3.0
     backoff_time: 3.0
     line_backoff: 0.14  # line sensor at the robot center: reverse the body front (0.095) plus spin sweep room (~0.125 body sweep radius) so the body is back inside before spinning
+    explore_tape_stop: 0.18  # m, estimated tape this close ahead: turn before touching it (guided exploration)
+    explore_heading_tol: 0.3  # rad, spin toward the exploration goal beyond this
     avoid_cy: 0.45  # cube of another color (red) lower in the image than this is in the scoop path: steer around it; calibrate
     avoid_cx: 0.3  # |cx_norm| of the scoop path at that distance; calibrate
     avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
@@ -80,6 +82,8 @@
     peer_yield_distance: 0.5  # m, other robot's marker closer than this: wait
     yield_timeout: 10.0  # s waiting before giving the cube up
     dodge_limit: 3  # sidesteps around non-target cubes while carrying
+    deliver_guard_cx: 0.6  # |cx| of non-target cubes that call the push into the square off (scoop walls included)
+    deliver_guard_cy: 0.5  # and closer than this cy
     deliver_push_time: 4.0  # s pushing in at enter_speed: 0.20 m from the entry to the drop point (core/delivery.py)
     deliver_back_time: 2.5  # s backing out at reverse_speed
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).

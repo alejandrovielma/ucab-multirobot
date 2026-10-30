@@ -162,6 +162,10 @@ class BehaviorParams:
     # approaching: with the line sensor at the robot center the body front is already past the tape.
     line_backoff: float = 0.0
     # Cubes of other colors (see the module docstring); calibrate avoid_* with the real camera.
+    # Guided exploration (core/cartographer.py, estimated pose): head for explore_goal, spinning in place
+    # until within explore_heading_tol; stop and turn when the estimated tape is closer than explore_tape_stop.
+    explore_tape_stop: float = 0.18  # m ahead of the robot center (body front 0.095 + margin)
+    explore_heading_tol: float = 0.3  # rad
     avoid_cy: float = 0.45  # a cube lower in the image than this is about to enter the scoop
     avoid_cx: float = 0.3  # |cx_norm| of the scoop's path at that distance
     avoid_timeout: float = 3.0  # s turning away (~200 deg at turn_speed) before ignoring it for skip_time
@@ -193,6 +197,10 @@ class BehaviorParams:
     yield_timeout: float = 10.0
     # Non-target cubes in the way while carrying: strafe around them, give up after dodge_limit tries.
     dodge_limit: int = 3
+    # While pushing into the square, a non-target cube this wide in the image (|cx|) and this low (cy) is
+    # in front of the scoop's walls too: the push is called off (the cube would go in with it).
+    deliver_guard_cx: float = 0.6
+    deliver_guard_cy: float = 0.5
     deliver_push_time: float = 2.0  # s pushing in at enter_speed (10 cm)
     deliver_back_time: float = 2.5  # s backing out at reverse_speed (10 cm)
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
@@ -228,6 +236,10 @@ class BehaviorInput:
     square_cx: float = 0.0  # [-1, 1], left negative
     square_cy: float = 0.0  # [0, 1], 0 = top
     square_area: float = 0.0  # px
+    # Cartographer (particle filter + memory), only while its estimate is trusted; None otherwise.
+    est_pose: tuple[float, float, float] | None = None
+    explore_goal: tuple[float, float] | None = None
+    tape_ahead: float | None = None  # m along the heading to the tape, from the estimated pose
     peer_seen: tuple[float, float] | None = None  # the other robot's marker: (bearing rad, distance m)
     refs_visible: bool = False  # green and red rectangles beside the square (vision.detect_refs)
     refs_cx: float = 0.0  # [-1, 1], midpoint between them
@@ -279,6 +291,7 @@ class BehaviorFSM:
         self._search_since: float | None = None  # camera carry: spinning without the square since
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
+        self._guide_turning = False  # guided exploration: spinning toward the goal
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
         self._dodging = False
@@ -646,7 +659,29 @@ class BehaviorFSM:
             # misread part of the robot), so dodging it never ends. Ignore it for a while.
             self._avoid_ignore_until = inp.now + p.skip_time
             self._avoid_since = None
+        if inp.est_pose is not None:
+            guided = self._guided(inp)
+            if guided is not None:
+                return guided
         return (p.explore_speed, 0.0, 0.0)
+
+    def _guided(self, inp: BehaviorInput) -> Command | None:
+        """Star motion toward the cartographer's goal: spin in place to face it, then straight. The tape
+        is anticipated from the estimate (the line sensor still stops the robot if the estimate is off)."""
+        p = self.params
+        x, y, th = inp.est_pose
+        gx, gy = inp.explore_goal if inp.explore_goal is not None else (0.0, 0.0)  # no goal: the center
+        err = math.remainder(math.atan2(gy - y, gx - x) - th, 2.0 * math.pi)
+        near_tape = inp.tape_ahead is not None and inp.tape_ahead < p.explore_tape_stop
+        if near_tape and abs(err) < p.explore_heading_tol:
+            err = math.pi / 2.0  # the goal is past the tape (estimate off): turn away anyway
+        if near_tape or abs(err) > p.explore_heading_tol or (self._guide_turning and abs(err) > p.explore_heading_tol / 2.0):
+            self._guide_turning = True
+            if near_tape:
+                self.note = "tape ahead (estimated): turn before touching it"
+            return (0.0, 0.0, math.copysign(p.turn_speed, err))
+        self._guide_turning = False
+        return None
 
     def _approach(self, inp: BehaviorInput) -> Command:
         p = self.params
@@ -864,8 +899,13 @@ class BehaviorFSM:
             if not self._still_holding(inp):
                 return self._abandon_transport(inp, "cube lost while entering")
             if inp.now < self._push_until:
-                if self._blocking(inp.cubes) is not None:  # pushing on would take it into the square
+                guard = [c for c in inp.cubes if not is_mine(c.color, self.targets)
+                         and c.cy_norm > p.deliver_guard_cy and abs(c.cx_norm) < p.deliver_guard_cx]
+                if guard:  # pushing on would take it into the square
                     return self._abandon_transport(inp, "non-target cube in the push path")
+                if inp.scoop_color and not is_mine(inp.scoop_color, self.targets):
+                    # No grace period here (unlike CARRY): one more push puts the foreign cube in the square.
+                    return self._abandon_transport(inp, f"{inp.scoop_color} cube in the scoop while entering")
                 vy = 0.0
                 if inp.square_visible and not p.axis_delivery:  # on the axis the push is straight
                     vy = max(-p.enter_speed, min(p.enter_speed, -p.square_align_gain * p.enter_speed * inp.square_cx))

@@ -25,6 +25,8 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "src" / "mobile_base"))
 
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
+from mobile_base.core.cartographer import Cartographer  # noqa: E402
+from mobile_base.core.localization import LANDMARKS, Localizer  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
 
 DT = 0.1
@@ -33,11 +35,11 @@ INNER = (0.585, 0.352)  # half sizes, inner tape edge
 OUTER = (0.603, 0.370)
 GAP_Y = (-0.075, 0.092)  # the square's side toward the track has no tape
 BLUE = (-0.788, -0.585, -0.075, 0.092)  # x0, x1, y0, y1
-SQUARE_C = (-0.6865, 0.0085)
+SQUARE_C = LANDMARKS["square"]
 SQUARE_OUTER = (-0.806, -0.603, -0.093, 0.110)
 # Reference rectangles flanking the square (PLACEHOLDER geometry: 20 x 4 cm bars along x, 18 cm either side).
-REF_GREEN = (-0.70, 0.19)
-REF_RED = (-0.70, -0.17)
+REF_GREEN = LANDMARKS["green"]
+REF_RED = LANDMARKS["red"]
 BOX_X, BOX_HALF = (0.095, 0.20), 0.085  # scoop U footprint in the robot frame
 CUBE_COLORS = {"red": (60, 60, 220), "orange": (40, 140, 250), "yellow": (60, 220, 240), "green": (60, 190, 60),
                "purple": (190, 70, 150), "blue": (200, 110, 30)}
@@ -102,6 +104,10 @@ class Robot:
     log: list = field(default_factory=list)
     state: str = ""
     trace: list = field(default_factory=list)
+    carto: Cartographer | None = None  # None: the old bump-and-turn exploration (no estimate)
+    loc_err: list = field(default_factory=list)  # m, estimate vs truth while the estimate is trusted
+    tape_hits: int = 0  # times the line sensor went from white to black
+    was_black: bool = False
 
 
 def make_robot(name, robot, start, targets, avoid):
@@ -121,7 +127,7 @@ def observe(r, other, cubes):
     cam = []
     for c in cubes:
         p = project(*to_robot(r, c["x"], c["y"]))
-        if p:
+        if p and not in_blue(c["x"], c["y"]):  # vision.detect_cubes ignores cubes on the square
             cam.append(Cube(c["color"], p[0], p[1], 3000.0 * (0.2 / p[2]) ** 2))
     sq = project(*to_robot(r, *SQUARE_C))
     refs = [project(*to_robot(r, *REF_GREEN)), project(*to_robot(r, *REF_RED))]
@@ -143,13 +149,23 @@ def observe(r, other, cubes):
 
 def step_world(r, other, cubes, now, rng):
     obs = observe(r, other, cubes)
-    want = r.fsm.step(BehaviorInput(now=now, pose=None, **obs))
+    extra = {}
+    if r.carto is not None:
+        seen = [(name, *pr[:2]) for name, (lx, ly) in LANDMARKS.items() if (pr := project(*to_robot(r, lx, ly)))]
+        est = r.carto.observe(now, obs["line_front"], seen, obs["cubes"], r.fsm.targets, carrying=r.fsm.carrying)
+        goal = r.carto.goal_for(now, r.fsm.targets)
+        if est.localized:
+            r.loc_err.append(math.hypot(est.x - r.x, est.y - r.y))
+            extra = dict(est_pose=(est.x, est.y, est.theta), explore_goal=goal, tape_ahead=r.carto.tape_ahead())
+    want = r.fsm.step(BehaviorInput(now=now, pose=None, **obs, **extra))
     cmd, reason = r.gate.filter(SafetyInput(
         cmd=want, line_front=obs["line_front"], own_pose=None, peer_pose=None, now=now, heartbeat_age=None,
         carrying=r.fsm.carrying, peer_seen=obs["peer_seen"], delivering=r.fsm.state is State.DELIVER))
     r.trace.append((round(now, 1), r.fsm.state.value, tuple(round(v, 3) for v in want), tuple(round(v, 3) for v in cmd), reason,
                     obs["line_front"], round(r.x, 2), round(r.y, 2), round(math.degrees(r.th))))
     del r.trace[:-400]
+    if r.carto is not None:
+        r.carto.moved(cmd, DT)
     vx, vy, wz = cmd
     held = []
     for c in cubes:
@@ -157,19 +173,32 @@ def step_world(r, other, cubes, now, rng):
         if BOX_X[0] <= xr <= BOX_X[1] and abs(yr) < BOX_HALF:
             if c["color"] in r.avoid:
                 r.touched.add(id(c))
-            inside_u = abs(yr) < 0.06  # between the walls: slides in against the back wall, turns with the robot
-            pushed = vx > 0.0 and wz == 0.0  # outside the walls: only pushed ahead, a spin sweeps past it
-            if inside_u and vx >= 0.0 and abs(wz) <= 0.8:
-                held.append((c, min(xr, 0.1395), yr))
-            elif pushed:
-                held.append((c, xr, yr))
+            inside_u = abs(yr) < 0.06  # between the walls
+            if inside_u and wz != 0.0 and abs(wz) <= 0.8 and vx >= 0.0:
+                held.append((c, xr, yr))  # a slow spin: the walls drag it along
+            elif inside_u and vx > 0.0 and xr <= 0.1395 + 0.005:
+                held.append((c, 0.1395, yr))  # against the back wall: pushed ahead
+            elif not inside_u and vx > 0.0 and wz == 0.0:
+                held.append((c, xr, yr))  # on the outside of a wall: pushed ahead, a spin sweeps past it
     k = 0.9 + 0.05 * rng.random()  # the wheels deliver less than commanded
     th = r.th + wz * DT * k
     mx, my = (vx * math.cos(r.th) - vy * math.sin(r.th)) * DT * k, (vx * math.sin(r.th) + vy * math.cos(r.th)) * DT * k
     r.x, r.y, r.th = r.x + mx, r.y + my, th
     for c, xr, yr in held:
         c["x"], c["y"] = to_world(r, xr, yr)
+    for a in range(len(cubes)):  # cubes are solid: push overlapping ones apart (2.5 cm between centers)
+        for b in range(a + 1, len(cubes)):
+            ca, cb = cubes[a], cubes[b]
+            dx, dy = cb["x"] - ca["x"], cb["y"] - ca["y"]
+            d = math.hypot(dx, dy)
+            if d < 0.025:
+                ux, uy = (dx / d, dy / d) if d > 1e-6 else (1.0, 0.0)
+                push = (0.025 - d) / 2.0
+                ca["x"], ca["y"] = ca["x"] - ux * push, ca["y"] - uy * push
+                cb["x"], cb["y"] = cb["x"] + ux * push, cb["y"] + uy * push
     r.tape_ticks += black(r.x, r.y)
+    r.tape_hits += black(r.x, r.y) and not r.was_black
+    r.was_black = black(r.x, r.y)
     r.path.append((r.x, r.y))
     if r.fsm.state.value != r.state:
         r.state = r.fsm.state.value
@@ -191,6 +220,16 @@ def draw(robots, cubes, t):
     for (x, y), col in ((REF_GREEN, (60, 190, 60)), (REF_RED, (60, 60, 220))):
         cv2.rectangle(img, px(x - 0.10, y + 0.02), px(x + 0.10, y - 0.02), col, -1)
     cv2.line(img, px(-0.806, SQUARE_C[1]), px(0.40, SQUARE_C[1]), (190, 190, 190), 1)  # the delivery axis
+    for r in robots:
+        if r.carto is None:
+            continue
+        for x, y in r.carto.loc.p[::3, :2]:
+            cv2.circle(img, px(x, y), 1, (150, 150, 150), -1)
+        est = r.carto.est
+        cv2.circle(img, px(est.x, est.y), 10, (0, 140, 255) if est.localized else (0, 200, 255), 2)
+        if r.carto.goal is not None:
+            gx, gy = px(*r.carto.goal)
+            cv2.drawMarker(img, (gx, gy), (0, 140, 255), cv2.MARKER_TILTED_CROSS, 14, 2)
     for r, col in zip(robots, ((0, 0, 200), (200, 0, 0))):
         pts = np.array([px(*p) for p in r.path[::3]], np.int32)
         if len(pts) > 1:
@@ -213,6 +252,8 @@ def main():
     ap.add_argument("--video", default=None)
     ap.add_argument("--png", default=None)
     ap.add_argument("--ferb", action="store_true", help="also run Ferb (off by default: Phineas alone)")
+    ap.add_argument("--no-map", action="store_true", help="old exploration: no particle filter, no memory")
+    ap.add_argument("--known-start", action="store_true", help="the filter starts at the true pose (default: lost)")
     ap.add_argument("--trace", type=int, default=0, help="print the last N ticks of each robot")
     args = ap.parse_args()
     rng = random.Random(args.seed)
@@ -223,12 +264,19 @@ def main():
               ("purple", 0.00, 0.00), ("red", 0.30, -0.10), ("green", -0.20, -0.20), ("orange", 0.05, 0.25)]
     cubes = [{"color": c, "x": x + rng.uniform(-0.03, 0.03), "y": y + rng.uniform(-0.03, 0.03)} for c, x, y in layout]
     robots = [phineas, ferb] if args.ferb else [phineas]
+    if not args.no_map:
+        for r in robots:
+            start = (r.x, r.y, r.th) if args.known_start else None
+            r.carto = Cartographer(Localizer(seed=args.seed, start=start))
     if not args.ferb:
         ferb.x, ferb.y = 9.0, 9.0  # parked far away: Phineas never sees its marker
     writer = None
     if args.video:
-        import cv2
-        writer = cv2.VideoWriter(args.video, cv2.VideoWriter_fourcc(*"mp4v"), 10, (1000, 600))
+        import subprocess
+        # Frames go to ffmpeg (H.264 plays everywhere; OpenCV's own mp4v does not): one frame per 0.2 s at 20 fps = 4x.
+        writer = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "1000x600",
+                                   "-r", "20", "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p", args.video],
+                                  stdin=subprocess.PIPE)
     collisions = 0
     steps = int(args.seconds / DT)
     for i in range(steps):
@@ -238,9 +286,10 @@ def main():
             step_world(ferb, phineas, cubes, now, rng)
             collisions += math.hypot(phineas.x - ferb.x, phineas.y - ferb.y) < 0.19
         if writer and i % 2 == 0:
-            writer.write(draw(robots, cubes, now))
+            writer.stdin.write(draw(robots, cubes, now).tobytes())
     if writer:
-        writer.release()
+        writer.stdin.close()
+        writer.wait()
     if args.png:
         import cv2
         cv2.imwrite(args.png, draw(robots, cubes, steps * DT))
@@ -252,7 +301,12 @@ def main():
         wrong = sum(1 for c in cubes if c["color"] not in owned and in_blue(c["x"], c["y"]))
         print(f"{r.name}: objetivo {r.targets} prohibido {r.avoid}\n  entregados (verdad): {inside}"
               f"  (cuenta del robot: {r.fsm.delivered})  cubos ajenos en el cuadro (NO debe haber): {wrong}"
-              f"  prohibidos tocados: {len(r.touched)}  ticks sobre la cinta: {r.tape_ticks}")
+              f"  prohibidos tocados: {len(r.touched)}  ticks sobre la cinta: {r.tape_ticks}  toques de cinta: {r.tape_hits}")
+        if r.carto is not None:
+            err = np.array(r.loc_err) if r.loc_err else np.array([np.nan])
+            seen = float(np.isfinite(r.carto.seen_at).mean())
+            print(f"  localizado {len(r.loc_err) / steps:.0%} del tiempo, error medio {np.nanmean(err):.3f} m"
+                  f" (p95 {np.nanpercentile(err, 95):.3f} m), pista vista {seen:.0%}, eficiencia aprendida {r.carto.est.scale:.2f}")
         for t, state, note in r.log[:40]:
             print(f"    [{t:6.1f}] {state:8s} {note}")
     for r in robots:

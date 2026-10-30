@@ -193,6 +193,8 @@ def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list
             continue  # a reference rectangle, not a cube
         cx = x + w / 2.0
         cy = y + h / 2.0
+        if square is not None and cv2.pointPolygonTest(cv2.convexHull(square), (cx, cy), False) >= 0:
+            continue  # a cube already in the delivery square: delivered, never taken out again
         detections.append(
             Detection(color, (cx / width) * 2.0 - 1.0, cy / height, float(area))
         )

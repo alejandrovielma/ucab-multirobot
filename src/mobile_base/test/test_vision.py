@@ -208,3 +208,12 @@ def test_scoop_one_cube_is_its_color_and_two_colors_are_mixed():
 
 def test_scoop_two_cubes_of_the_same_color_are_that_color():
     assert scoop_content(_scoop_frame(RED))[0] == "red"
+
+
+def test_a_cube_on_the_blue_square_is_delivered_not_a_target():
+    img = _canvas()
+    img[200:400, 150:450] = (200, 110, 30)  # blue square (BGR)
+    img[280:310, 280:310] = RED  # a red cube on it
+    img[100:130, 500:530] = RED  # a red cube elsewhere
+    reds = [d for d in detect_cubes(img) if d.color == "red"]
+    assert len(reds) == 1 and reds[0].cx_norm > 0.5
