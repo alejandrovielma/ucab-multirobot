@@ -179,6 +179,13 @@ class BehaviorParams:
     square_probe_time: float = 1.5  # s of that drive forward
     square_align: float = 0.15  # |square_cx| below which the square counts as straight ahead
     square_reach_cy: float = 0.6  # square centroid this low in the image: the scoop is at its edge
+    # Delivery along an axis (no arcs, team decision 2026-10-30): the robot lines itself up on the
+    # perpendicular through the midpoint of the green and red rectangles (centered on them, both at the
+    # same apparent height), then drives and pushes straight. False = aim at the blue square only.
+    axis_delivery: bool = False
+    axis_align: float = 0.1  # |refs_cx| below which the midpoint counts as straight ahead
+    axis_skew_tol: float = 0.06  # |refs_skew| below which the robot counts as on the axis
+    axis_strafe_speed: float = 0.04  # m/s sideways to get onto the axis (the gate caps it at max_side_speed)
     deliver_push_time: float = 2.0  # s pushing in at enter_speed (10 cm)
     deliver_back_time: float = 2.5  # s backing out at reverse_speed (10 cm)
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
@@ -214,6 +221,9 @@ class BehaviorInput:
     square_cx: float = 0.0  # [-1, 1], left negative
     square_cy: float = 0.0  # [0, 1], 0 = top
     square_area: float = 0.0  # px
+    refs_visible: bool = False  # green and red rectangles beside the square (vision.detect_refs)
+    refs_cx: float = 0.0  # [-1, 1], midpoint between them
+    refs_skew: float = 0.0  # left cy - right cy: > 0 means the robot is left of the axis
 
 
 class BehaviorFSM:
@@ -261,6 +271,7 @@ class BehaviorFSM:
         self._search_since: float | None = None  # camera carry: spinning without the square since
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
+        self._on_axis = False  # camera carry: lined up on the delivery axis (the rectangles may leave the view)
         self.delivered = 0  # deliveries counted by this robot (the arbiter keeps the official count)
         self._actions: list[ZoneAction] = []
 
@@ -452,6 +463,7 @@ class BehaviorFSM:
     def _abandon_transport(self, inp: BehaviorInput, why: str) -> Command:
         self.note = why
         self.plan = None
+        self._on_axis = False
         self._give_up_cube(inp)
         self.state = State.EXPLORE
         self._start_turn(inp.now, inp.pose)
@@ -780,7 +792,11 @@ class BehaviorFSM:
         turn = p.turn_speed if self.gate_closed else p.carry_max_turn
         if inp.now < self._probe_until:
             return (p.carry_speed, 0.0, 0.0)  # looking for the square from somewhere else
-        if not inp.square_visible:
+        axis = p.axis_delivery
+        # Close to the square the rectangles leave the view: once on the axis, the square is enough.
+        seen = inp.refs_visible or (self._on_axis and inp.square_visible) if axis else inp.square_visible
+        if not seen:
+            self._on_axis = False
             self._search_since = inp.now if self._search_since is None else self._search_since
             if inp.now - self._search_since >= p.square_search_time:
                 self._search_since = None
@@ -789,9 +805,19 @@ class BehaviorFSM:
                 return (p.carry_speed, 0.0, 0.0)
             return (0.0, 0.0, turn)
         self._search_since = None
-        if abs(inp.square_cx) > p.square_align:
+        if axis and inp.refs_visible:
+            # Two decoupled corrections, no arcs: spin to center the midpoint, strafe to even the rectangles.
+            if abs(inp.refs_cx) > p.axis_align:
+                self._on_axis = False
+                return (0.0, 0.0, -math.copysign(turn, inp.refs_cx))
+            if abs(inp.refs_skew) > p.axis_skew_tol:
+                self._on_axis = False
+                self.note = "getting onto the delivery axis"
+                return (0.0, -math.copysign(p.axis_strafe_speed, inp.refs_skew), 0.0)
+            self._on_axis = True
+        elif not axis and abs(inp.square_cx) > p.square_align:
             return (0.0, 0.0, -math.copysign(turn, inp.square_cx))  # square on the right: spin right
-        if inp.square_cy < p.square_reach_cy:
+        if not (inp.square_visible and inp.square_cy >= p.square_reach_cy):
             return (p.carry_speed, 0.0, 0.0)
         self._ask_lease(inp)
         if not inp.holds_zone:
@@ -810,7 +836,7 @@ class BehaviorFSM:
                 return self._abandon_transport(inp, "cube lost while entering")
             if inp.now < self._push_until:
                 vy = 0.0
-                if inp.square_visible:
+                if inp.square_visible and not p.axis_delivery:  # on the axis the push is straight
                     vy = max(-p.enter_speed, min(p.enter_speed, -p.square_align_gain * p.enter_speed * inp.square_cx))
                 return (p.enter_speed, vy, 0.0)
             self._dropping = True
@@ -831,6 +857,7 @@ class BehaviorFSM:
         self.delivered += left_behind
         self._zone_action(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
+        self._on_axis = False
         self._carried_color = ""
         self.state = State.EXPLORE
         self.note = "delivered" if left_behind else "delivery failed: the cube is still in the scoop"

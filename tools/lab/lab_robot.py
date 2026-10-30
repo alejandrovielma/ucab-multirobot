@@ -33,7 +33,7 @@ from teleop import Teleop
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
 from mobile_base.core.colors import parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
-from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_square, scoop_content  # noqa: E402
+from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_refs, detect_square, scoop_content  # noqa: E402
 
 COLORS_BGR = {"red": (0, 0, 255), "orange": (0, 140, 255), "yellow": (0, 230, 230), "green": (0, 200, 0),
               "blue": (255, 80, 0), "purple": (200, 0, 160)}
@@ -395,8 +395,12 @@ def mode_chase(args, cfg):
             black = line.black()
             scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
             peer = detect_peer(frame, vparams) if frame is not None else None  # the other robot's marker
+            refs = detect_refs(frame, vparams) if frame is not None else None  # green and red rectangles
             want = fsm.step(BehaviorInput(
                 now=now, cubes=cubes, line_front=black, scoop_color=scoop,
+                refs_visible=refs is not None and refs.visible,
+                refs_cx=refs.center_cx if refs is not None else 0.0,
+                refs_skew=refs.skew if refs is not None else 0.0,
                 square_visible=square is not None and square.visible,
                 square_cx=square.cx_norm if square is not None else 0.0,
                 square_cy=square.cy_norm if square is not None else 0.0,

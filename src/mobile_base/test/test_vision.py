@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 
-from mobile_base.vision import VisionParams, detect_cubes
+from mobile_base.vision import VisionParams, detect_cubes, detect_refs
 
 
 def _board_with_cubes():
@@ -145,3 +145,44 @@ def test_the_other_robots_marker_gives_its_bearing_and_distance():
     assert right < 0.0  # to the right of the image: negative bearing (robot convention, left positive)
     assert detect_peer(_marker_image(1, 80, 320), params) is None  # its own marker id is not the peer
     assert detect_peer(_marker_image(2, 80, 320), VisionParams()) is None  # no peer configured
+
+
+# ---- reference rectangles beside the delivery square
+
+
+def _canvas():
+    return np.full((480, 640, 3), 235, np.uint8)  # white board
+
+
+def _rect(img, x0, y0, x1, y1, color):
+    img[y0:y1, x0:x1] = color  # BGR
+
+
+GREEN, RED = (60, 200, 60), (40, 40, 220)
+
+
+def test_refs_both_rectangles_give_midpoint_and_skew():
+    img = _canvas()
+    _rect(img, 100, 300, 220, 340, GREEN)  # left one is lower in the image: nearer
+    _rect(img, 420, 260, 540, 300, RED)
+    refs = detect_refs(img, VisionParams(ref_min_area=2000.0))
+    assert refs.visible
+    assert refs.center_cx == pytest.approx(0.0, abs=0.02)
+    assert refs.skew > 0.0  # left nearer: the robot stands left of the axis
+
+
+def test_refs_one_alone_says_nothing():
+    img = _canvas()
+    _rect(img, 100, 300, 220, 340, GREEN)
+    assert not detect_refs(img, VisionParams(ref_min_area=2000.0)).visible
+
+
+def test_refs_a_cube_sized_blob_is_not_a_reference_and_a_reference_is_not_a_cube():
+    params = VisionParams(ref_min_area=2000.0)
+    img = _canvas()
+    _rect(img, 100, 300, 140, 340, GREEN)  # cube-like
+    _rect(img, 420, 300, 460, 340, RED)
+    assert not detect_refs(img, params).visible
+    big = _canvas()
+    _rect(big, 100, 300, 260, 340, RED)  # long red rectangle
+    assert not [d for d in detect_cubes(big, params) if d.color == "red"]

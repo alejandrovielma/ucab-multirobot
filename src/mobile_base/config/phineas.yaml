@@ -72,6 +72,10 @@
     square_probe_time: 1.5
     square_align: 0.15  # |square_cx| that counts as centered
     square_reach_cy: 0.6  # square centroid this low in the image: the scoop is at its edge
+    axis_delivery: true  # line up on the perpendicular between the green and red rectangles, push straight
+    axis_align: 0.1  # |refs_cx| below which the midpoint counts as straight ahead
+    axis_skew_tol: 0.06  # |refs_skew| below which the robot counts as on the axis (calibrate)
+    axis_strafe_speed: 0.04  # m/s sideways to get onto the axis
     deliver_push_time: 2.0  # s pushing in at enter_speed
     deliver_back_time: 2.5  # s backing out at reverse_speed
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).
@@ -154,6 +158,10 @@
     # reported apart (square_* in the cubes message) and never as a cube. Calibrate on the robot.
     square_color: blue
     square_min_area: 12000.0
+    # Green and red rectangles beside the square (delivery axis): told from cubes by size and shape.
+    # PLACEHOLDERS: measure the real rectangles and calibrate from the robot camera.
+    ref_min_area: 3000.0  # px
+    ref_min_aspect: 2.0  # long side / short side
     # The other robot, seen by this camera (no overhead camera, 2026-10-27): ArUco DICT_4X4_50 on it,
     # side marker_size m. Phineas carries id 1 and Ferb id 2, as for the overhead camera.
     peer_marker_id: 2  # Ferb

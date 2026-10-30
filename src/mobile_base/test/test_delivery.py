@@ -385,3 +385,57 @@ def test_behavior_and_gate_complete_a_delivery_on_the_real_track():
         released = next((a for a in fsm.take_actions() if a.kind == "release"), None)
         t += 0.1
     assert released == ZoneAction("release", delivered=True, color="red"), f"stuck at t={t:.1f} pose={pose}"
+
+
+# ---- Delivery along an axis: line up on the perpendicular between the green and red rectangles, push straight
+
+
+def axis_cam(fsm, now, refs=None, square=None, scoop="red"):
+    """refs = (center_cx, skew) when both rectangles are seen; square = (cx, cy) when the blue square is."""
+    rv = refs is not None
+    sv = square is not None
+    return fsm.step(BehaviorInput(
+        now=now, cubes=[], line_front=False, pose=None, scoop_color=scoop,
+        refs_visible=rv, refs_cx=refs[0] if rv else 0.0, refs_skew=refs[1] if rv else 0.0,
+        square_visible=sv, square_cx=square[0] if sv else 0.0, square_cy=square[1] if sv else 0.0,
+        square_area=20000.0))
+
+
+def axis_fsm(**kw):
+    return carrying_fsm(use_lease=False, axis_delivery=True, **kw)
+
+
+def test_axis_the_robot_spins_to_center_the_rectangles_before_anything_else():
+    fsm = axis_fsm()
+    p = fsm.params
+    assert axis_cam(fsm, 1.0, refs=(0.5, 0.3)) == pytest.approx((0.0, 0.0, -p.carry_max_turn))
+    assert axis_cam(fsm, 1.1, refs=(-0.5, 0.3)) == pytest.approx((0.0, 0.0, p.carry_max_turn))
+
+
+def test_axis_left_of_the_axis_strafes_right_and_right_of_it_strafes_left_never_turning_and_moving():
+    fsm = axis_fsm()
+    p = fsm.params
+    assert axis_cam(fsm, 1.0, refs=(0.0, 0.2)) == pytest.approx((0.0, -p.axis_strafe_speed, 0.0))  # left nearer
+    assert axis_cam(fsm, 1.1, refs=(0.0, -0.2)) == pytest.approx((0.0, p.axis_strafe_speed, 0.0))
+    assert p.axis_strafe_speed <= 0.05  # not above the gate's max_side_speed
+
+
+def test_axis_on_the_axis_it_drives_straight_and_keeps_going_when_the_rectangles_leave_the_view():
+    fsm = axis_fsm()
+    p = fsm.params
+    assert axis_cam(fsm, 1.0, refs=(0.02, 0.01), square=(0.0, 0.3)) == pytest.approx((p.carry_speed, 0.0, 0.0))
+    # near the square the rectangles are out of the frame: no spinning around to look for them
+    assert axis_cam(fsm, 1.2, square=(0.0, 0.4)) == pytest.approx((p.carry_speed, 0.0, 0.0))
+
+
+def test_axis_without_rectangles_or_a_previous_alignment_it_searches_by_spinning():
+    fsm = axis_fsm()
+    assert axis_cam(fsm, 1.0, square=(0.0, 0.4)) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))
+
+
+def test_axis_the_push_is_straight_even_if_the_square_looks_off_center():
+    fsm = axis_fsm()
+    p = fsm.params
+    axis_cam(fsm, 1.0, refs=(0.0, 0.0), square=(0.0, 0.7))
+    assert fsm.state is State.DELIVER
+    assert axis_cam(fsm, 2.0, square=(0.4, 0.8)) == pytest.approx((p.enter_speed, 0.0, 0.0))

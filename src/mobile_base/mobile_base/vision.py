@@ -39,6 +39,13 @@ class VisionParams:
     # scoop mouth covers a few thousand px with the IMX219-120 at 640 x 480: calibrate on the robot.
     square_color: str = "blue"
     square_min_area: float = 12000.0  # px
+    # Delivery axis (team decision 2026-10-30): a green and a red rectangle stand on both sides of the
+    # square; the axis is the perpendicular through their midpoint. They are told from cubes by size and
+    # shape: at least ref_min_area px and a long side ref_min_aspect times the short one. PLACEHOLDERS
+    # until the real rectangles are measured and photographed from the robot.
+    ref_colors: tuple[str, ...] = ("green", "red")
+    ref_min_area: float = 3000.0  # px
+    ref_min_aspect: float = 2.0
     # The other robot, seen by this robot's camera (no overhead camera): an ArUco marker (DICT_4X4_50)
     # of side marker_size m on it; -1 = none. camera_hfov is the horizontal field of view (IMX219-120).
     peer_marker_id: int = -1
@@ -52,6 +59,15 @@ class SquareView:
     cx_norm: float = 0.0  # [-1, 1], left negative (centroid)
     cy_norm: float = 0.0  # [0, 1], 0 = top
     area_px: float = 0.0
+
+
+@dataclass(frozen=True)
+class RefsView:
+    """The two reference rectangles beside the square. skew = left cy - right cy (image y grows down):
+    positive when the left one is nearer, i.e. the robot stands left of the axis."""
+    visible: bool = False
+    center_cx: float = 0.0  # [-1, 1], midpoint between them, left negative
+    skew: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -104,6 +120,35 @@ def detect_square(bgr: np.ndarray, params: VisionParams = VisionParams()) -> Squ
     return SquareView(True, (cx / width) * 2.0 - 1.0, cy / height, area)
 
 
+def _is_ref_shape(contour, params: VisionParams) -> bool:
+    """Big and elongated: a reference rectangle, not a cube."""
+    if cv2.contourArea(contour) < params.ref_min_area:
+        return False
+    (_, _), (w, h), _ = cv2.minAreaRect(contour)
+    short = min(w, h)
+    return short > 0.0 and max(w, h) / short >= params.ref_min_aspect
+
+
+def detect_refs(bgr: np.ndarray, params: VisionParams = VisionParams()) -> RefsView:
+    """The green and red reference rectangles, both or nothing (one alone says nothing about the axis)."""
+    height, width = bgr.shape[:2]
+    hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+    painted = _painted(hsv, params)
+    found = []
+    for color in params.ref_colors:
+        in_range = np.zeros(hsv.shape[:2], bool)
+        for low, high in params.hue_ranges.get(color, ()):
+            in_range |= (hsv[..., 0] >= low) & (hsv[..., 0] <= high)
+        contours, _ = cv2.findContours(_open(in_range & painted, params), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        blobs = [c for c in contours if _is_ref_shape(c, params)]
+        if not blobs:
+            return RefsView()
+        m = cv2.moments(max(blobs, key=cv2.contourArea))
+        found.append((m["m10"] / m["m00"] / width * 2.0 - 1.0, m["m01"] / m["m00"] / height))
+    (lx, ly), (rx, ry) = sorted(found)
+    return RefsView(True, (lx + rx) / 2.0, ly - ry)
+
+
 def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list[Detection]:
     height, width = bgr.shape[:2]
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -141,6 +186,8 @@ def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list
             continue
         if color == params.square_color and (area >= params.square_min_area or square_mask[blob > 0].any()):
             continue  # the delivery square, not a cube
+        if color in params.ref_colors and _is_ref_shape(contour, params):
+            continue  # a reference rectangle, not a cube
         cx = x + w / 2.0
         cy = y + h / 2.0
         detections.append(
