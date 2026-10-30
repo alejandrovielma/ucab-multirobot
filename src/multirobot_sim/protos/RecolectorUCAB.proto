@@ -27,6 +27,11 @@ PROTO RecolectorUCAB [
   field SFFloat    palaFondoAncho  0.040     # m, ancho interior de la U junto a la pared del fondo
   field SFFloat    palaProfundidad 0.048     # m, largo de las paredes laterales de la U
   field SFBool     compuerta       TRUE      # puerta con servo en la boca de la U
+  # Pala real (2026-10-30): abierta y ancha, tramo central recto y dos alas de igual largo dobladas
+  # palaAngulo hacia adelante (ancho total ~ el del robot). Medidas SUPUESTAS hasta medir la pala real.
+  field SFBool     palaAbierta     FALSE     # TRUE: pala abierta (la real); FALSE: la U con embudo
+  field SFFloat    palaTramo       0.062     # m, largo del tramo central y de cada ala
+  field SFFloat    palaAngulo      0.5236    # rad, alas respecto al tramo central (30 grados)
 ]
 {
   %<
@@ -222,11 +227,20 @@ PROTO RecolectorUCAB [
               const piezas = [
                 { x: 0.003, y: 0, z: -0.008, sx: 0.006, sy: 2 * wb + 0.002, sz: 0.016, r: 0, solid: false },
                 { x: 0.021, y: 0, z: -0.0155, sx: 0.042, sy: 2 * wb + 0.002, sz: 0.003, r: 0, solid: true },
-                { x: xb, y: 0, z: -0.035, sx: 0.003, sy: 2 * wb, sz: 0.035, r: 0, solid: true },
               ];
+              if (fields.palaAbierta.value) {
+                // Tramo central recto en x = xb y dos alas que salen de sus extremos hacia adelante y afuera.
+                const t = fields.palaTramo.value, a = fields.palaAngulo.value;
+                piezas.push({ x: xb, y: 0, z: -0.035, sx: 0.003, sy: t, sz: 0.035, r: 0, solid: true });
+                for (const s of [1, -1])
+                  piezas.push({ x: xb + t / 2 * Math.sin(a), y: s * (t / 2 + t / 2 * Math.cos(a)), z: -0.035,
+                                sx: t, sy: 0.003, sz: 0.035, r: s * (Math.PI / 2 - a), solid: true });
+              } else {
+              piezas.push({ x: xb, y: 0, z: -0.035, sx: 0.003, sy: 2 * wb, sz: 0.035, r: 0, solid: true });
               for (const s of [1, -1]) {
                 piezas.push({ x: xb + 0.0015 + prof / 2, y: s * (wb + wm) / 2, z: -0.035, sx: lado, sy: 0.003, sz: 0.035, r: s * ang, solid: true });
                 piezas.push({ x: xm + emb / 2 * Math.cos(embAng), y: s * (wm + emb / 2 * Math.sin(embAng)), z: -0.035, sx: emb, sy: 0.003, sz: 0.035, r: s * embAng, solid: true });
+              }
               }
             >%
             DEF PALA_FORMA Group {

@@ -9,6 +9,7 @@ Started as an extern controller by tools/sim/webots_run.py (with the project's P
 """
 
 import argparse
+import dataclasses
 import json
 import math
 import sys
@@ -57,6 +58,12 @@ def main():
     det = dict(cfg["cube_detector"])
     vparams = VisionParams(hue_ranges=ranges_from_flat(det.pop("hue_ranges")),
                            **{k: v for k, v in det.items() if k in VisionParams.__dataclass_fields__})
+    # The scoop of RecolectorUCAB.proto seen by its camera: the floor is visible from 0.134 m ahead of
+    # the center, so a cube against the middle plate (center 0.14 m) only shows its top face at the
+    # bottom of the image, cy 0.82-0.95 (at the wings' tips it is at ~0.69). The open scoop holds the
+    # cube anywhere along its 6 cm middle plate: +-3 cm at 6.5 cm from the camera is x_half 0.46.
+    # The YAML window is the real robot's (to be measured with its camera).
+    vparams = dataclasses.replace(vparams, scoop_y_min=0.82, scoop_y_max=0.95, scoop_x_half=0.46)
     values = {k: v for k, v in cfg["behavior"].items() if k in BehaviorParams.__dataclass_fields__ and k != "my_colors"}
     values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
                   approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))

@@ -48,6 +48,7 @@ def make_world() -> None:
   name "Phineas"
   controller "<extern>"
   compuerta FALSE  # the real scoop is rigid
+  palaAbierta TRUE  # and open: a straight middle third, wings bent 30 deg forward (measures ASSUMED)
   marcadorUrl [ "textures/aruco_phineas_id1.png" ]
   extensiones [
     # The real robot has ONE TCRT5000 at the CENTER of the body (moved there on 2026-10-20).
