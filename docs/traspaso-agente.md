@@ -1,5 +1,14 @@
 # Traspaso: qué hay que hacer a partir de aquí (para otro agente)
 
+> **Decisiones vigentes (2026-10-30), que reemplazan lo que contradigan en este documento:**
+> - **Sin modelo de lenguaje ni voz.** La capa deliberativa es un dashboard de botones (colores objetivo y
+>   prohibidos, iniciar, detener, parada, modo manual WASD/QE): `tools/lab/dashboard.py` y `dashboard.html`
+>   (`lab_robot.py dashboard`, `prueba_dashboard.sh`). La fase 5 (LLM) y el dictado por voz quedan descartadas.
+> - **Sin arcos:** movimiento en estrella (trasladar o girar en el sitio, nunca a la vez).
+> - **Sin cámara cenital:** solo la cámara del robot; el otro robot se ve por marcador ArUco.
+> - **Entrega por eje:** el robot se alinea con la perpendicular entre los rectángulos verde y rojo del cuadro azul
+>   y empuja recto (`axis_delivery`, `vision.detect_refs`).
+
 Escrito: 2026-10-23. Destinatario: un agente de código que retoma el trabajo sin haber visto la sesión
 anterior. Léelo completo antes de ejecutar nada. Cada tarea dice **quién** la hace (agente o humano),
 **qué necesita antes**, **los pasos exactos**, **cuándo está terminada** y **qué no hacer**.
