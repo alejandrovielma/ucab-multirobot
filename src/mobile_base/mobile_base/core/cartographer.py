@@ -119,7 +119,8 @@ class Cartographer:
             if c.color not in targets:
                 continue
             dist, b = cam.distance(c.cy_norm), cam.bearing(c.cx_norm)
-            x, y = est.x + dist * math.cos(est.theta + b), est.y + dist * math.sin(est.theta + b)
+            ox, oy = est.x + cam.camera_x * math.cos(est.theta), est.y + cam.camera_x * math.sin(est.theta)
+            x, y = ox + dist * math.cos(est.theta + b), oy + dist * math.sin(est.theta + b)
             if abs(x) < ix - 0.02 and abs(y) < iy - 0.02:  # on the track: not delivered, not past the tape
                 seen_now.append((c.color, x, y))
         kept = []

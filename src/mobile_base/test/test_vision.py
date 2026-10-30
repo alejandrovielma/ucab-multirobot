@@ -233,3 +233,19 @@ def test_each_reference_rectangle_is_a_landmark_even_alone():
     names = [n for n, _, _ in landmark_sightings(SquareView(True, 0.0, 0.4, 20000.0), refs)]
     assert names == ["square", "green", "red"]
     assert landmark_sightings(None, None) == []
+
+
+def test_two_touching_cubes_of_different_colors_are_two_detections():
+    img = _canvas()
+    img[300:340, 280:320] = RED
+    img[300:340, 320:360] = (40, 140, 250)  # orange, touching the red one
+    colors = sorted(d.color for d in detect_cubes(img))
+    assert colors == ["orange", "red"]
+
+
+def test_a_blob_cut_by_the_side_of_the_image_is_not_a_cube():
+    img = _canvas()
+    img[200:240, 0:30] = RED  # cut by the left edge
+    img[440:480, 300:340] = RED  # at the bottom, in front of the scoop: kept
+    reds = [d for d in detect_cubes(img) if d.color == "red"]
+    assert len(reds) == 1 and reds[0].cy_norm > 0.9

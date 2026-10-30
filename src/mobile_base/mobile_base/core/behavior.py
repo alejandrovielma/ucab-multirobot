@@ -119,6 +119,19 @@ class BehaviorParams:
     approach_turn_min: float = 0.4  # rad/s, slowest spin while centering a cube (slower stalls the motors)
     approach_align: float = 0.15  # |cx_norm| below which the cube counts as straight ahead
     lost_timeout: float = 1.0  # s
+    # Far cubes flicker at the detector's area threshold (Webots): smaller targets are left to the
+    # exploration (and the cartographer's memory) instead of being approached. 0 = any size.
+    approach_min_area: float = 0.0  # px
+    # The U is barely twice a cube wide: once the cube is close (cy above approach_strafe_cy) the last
+    # centering is a sideways slide, not a spin (a spin swings the scoop's mouth). 0 = off.
+    approach_strafe_cy: float = 0.0
+    approach_strafe_tol: float = 0.04  # |cx| that counts as centered on the U
+    approach_strafe_speed: float = 0.03  # m/s
+    # Centering by spinning that lasts longer than this means the target turns WITH the robot (a cube
+    # dragged by the outside of a scoop wall, seen in Webots): back off approach_backoff_time to leave
+    # it and ignore it for skip_time. 0 = off.
+    approach_spin_timeout: float = 0.0  # s
+    approach_backoff_time: float = 1.5  # s
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
     capture_time: float = 1.0  # s
@@ -292,6 +305,7 @@ class BehaviorFSM:
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
         self._guide_turning = False  # guided exploration: spinning toward the goal
+        self._align_since: float | None = None  # APPROACH: spinning to center the target since
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
         self._dodging = False
@@ -507,7 +521,7 @@ class BehaviorFSM:
     def _target(self, cubes: Sequence[Cube], now: float) -> Cube | None:
         if now < self._ignore_until:
             return None
-        mine = [c for c in cubes if is_mine(c.color, self.targets)]
+        mine = [c for c in cubes if is_mine(c.color, self.targets) and c.area_px >= self.params.approach_min_area]
         return max(mine, key=lambda c: c.area_px, default=None)
 
     def _blocking(self, cubes: Sequence[Cube]) -> Cube | None:
@@ -721,10 +735,25 @@ class BehaviorFSM:
             self._aligning = True
         elif abs(target.cx_norm) < p.approach_align / 2.0:
             self._aligning = False  # hysteresis: no spin/drive chatter around approach_align
+        if not self._aligning:
+            self._align_since = None
+        elif p.approach_spin_timeout > 0.0:
+            self._align_since = inp.now if self._align_since is None else self._align_since
+            if inp.now - self._align_since > p.approach_spin_timeout:
+                self._align_since = None
+                self._ignore_until = inp.now + p.skip_time
+                self._line_backoff_until = inp.now + p.approach_backoff_time  # EXPLORE reverses first
+                self.state = State.EXPLORE
+                self.note = f"{target.color} cube turns with the robot: back off and leave it"
+                return (-p.reverse_speed, 0.0, 0.0)
         if self._aligning:
             turn = -math.copysign(max(p.k_turn * abs(target.cx_norm), p.approach_turn_min), target.cx_norm)
             if inp.pose is None or self._fits(inp.pose, 0.0, turn, carrying=False):
                 return (0.0, 0.0, turn)
+        if (p.approach_strafe_cy > 0.0 and not self._aligning and target.cy_norm > p.approach_strafe_cy
+                and abs(target.cx_norm) > p.approach_strafe_tol):
+            self.note = "centering the cube on the scoop"
+            return (0.0, -math.copysign(p.approach_strafe_speed, target.cx_norm), 0.0)  # cube right: slide right
         if target.cy_norm > p.capture_cy and not self._aligning:
             if not self._deliverable_from(inp.pose):
                 # Captured here, the robot would face the tape with no move that keeps its body in.

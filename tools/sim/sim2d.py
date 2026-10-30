@@ -85,7 +85,7 @@ def project(xr, yr, scale=1.0):
     bearing = math.atan2(yr, xr)
     if xr <= 0.0 or abs(bearing) > HFOV / 2.0 or d < 0.10 or d > 1.2:
         return None
-    return -bearing / (HFOV / 2.0), min(0.98, 0.66 * math.sqrt(0.2 / d)), d
+    return -math.tan(bearing) / math.tan(HFOV / 2.0), min(0.98, 0.66 * math.sqrt(0.2 / d)), d
 
 
 @dataclass
@@ -137,7 +137,7 @@ def observe(r, other, cubes):
     peer = None
     pp = project(*to_robot(r, other.x, other.y))
     if pp:
-        peer = (-pp[0] * HFOV / 2.0, pp[2])
+        peer = (math.atan(-pp[0] * math.tan(HFOV / 2.0)), pp[2])
     inp = dict(cubes=cam, line_front=black(r.x, r.y), scoop_color=scoop, peer_seen=peer)
     if sq:
         inp.update(square_visible=True, square_cx=sq[0], square_cy=sq[1], square_area=20000.0)

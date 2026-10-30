@@ -485,3 +485,26 @@ def test_a_color_cannot_be_both_target_and_forbidden():
     with pytest.raises(ValueError):
         fsm.set_mission(["blue", "red"], avoid=["red"])
     assert fsm.targets == ()
+
+
+def test_a_close_cube_off_the_scoop_axis_is_centered_by_sliding_not_spinning():
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), approach_strafe_cy=0.45, approach_align=0.15))
+    fsm.set_mission(("red",), ())
+    fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.3, 800.0)], line_front=False))
+    cmd = fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.08, 0.55, 2500.0)], line_front=False))
+    assert cmd == pytest.approx((0.0, -fsm.params.approach_strafe_speed, 0.0))  # cube to the right: slide right
+    centered = fsm.step(BehaviorInput(now=0.2, cubes=[Cube("red", 0.01, 0.56, 2500.0)], line_front=False))
+    assert centered[0] > 0.0 and centered[1] == 0.0
+
+
+def test_a_target_that_turns_with_the_robot_is_left_behind():
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), approach_spin_timeout=4.0, approach_align=0.15))
+    fsm.set_mission(("red",), ())
+    stuck = [Cube("red", -0.3, 0.7, 2000.0)]  # always at the same place in the image: it rides on the robot
+    t = 0.0
+    while fsm.state is not State.EXPLORE or t == 0.0:
+        cmd = fsm.step(BehaviorInput(now=t, cubes=stuck, line_front=False))
+        t += 0.1
+        assert t < 6.0
+    assert cmd[0] < 0.0 and "turns with the robot" in fsm.note
+    assert fsm.step(BehaviorInput(now=t, cubes=stuck, line_front=False))[0] < 0.0  # still backing off

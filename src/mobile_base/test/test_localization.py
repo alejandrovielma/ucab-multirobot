@@ -18,7 +18,7 @@ def sight(pose, name):
     x, y, th = pose
     b = math.remainder(math.atan2(ly - y, lx - x) - th, 2.0 * math.pi)
     d = math.hypot(lx - x, ly - y)
-    return -b / (CAM.hfov / 2.0), 0.66 * math.sqrt(0.2 / d)  # the table's model
+    return -math.tan(b) / math.tan(CAM.hfov / 2.0), 0.66 * math.sqrt(0.2 / d)  # the table's model
 
 
 def test_tape_map_matches_the_measured_track():
@@ -129,3 +129,20 @@ def test_guided_exploration_turns_before_the_estimated_tape():
 def test_without_an_estimate_exploration_is_the_old_one():
     fsm = explorer()
     assert fsm.step(BehaviorInput(now=0.1, cubes=[], line_front=False)) == (fsm.params.explore_speed, 0.0, 0.0)
+
+
+def test_mounted_camera_table_matches_its_geometry():
+    cam = CameraModel.from_mount(1.60, 640, 480, 0.11, 0.42, 0.075)
+    focal = 320.0 / math.tan(0.8)
+    for d in (0.15, 0.3, 0.6):
+        cy = 0.5 + focal * math.tan(math.atan2(0.11, d) - 0.42) / 480.0
+        assert cam.distance(cy) == pytest.approx(d, rel=0.03)
+    assert cam.bearing(1.0) == pytest.approx(-0.8)  # the image edge is half the field of view
+
+
+def test_a_lone_rectangle_is_not_a_landmark():
+    from mobile_base.vision import RefsView, SquareView, landmark_sightings
+
+    one = RefsView(seen=(("red", 0.1, 0.4),))
+    assert landmark_sightings(None, one) == []  # two red cubes side by side look the same
+    assert [n for n, _, _ in landmark_sightings(SquareView(True, 0.0, 0.5, 20000.0), one)] == ["square", "red"]

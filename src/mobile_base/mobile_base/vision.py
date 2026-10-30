@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from mobile_base.core.colors import DEFAULT_HUE_RANGES, DEFAULT_S_MIN, DEFAULT_V_MIN, HueRanges, classify
+from mobile_base.core.colors import DEFAULT_HUE_RANGES, DEFAULT_S_MIN, DEFAULT_V_MIN, HueRanges
 
 
 @dataclass(frozen=True)
@@ -80,14 +80,6 @@ class Detection:
     cx_norm: float  # [-1, 1], left negative
     cy_norm: float  # [0, 1], 0 = top
     area_px: float
-
-
-def _dominant_hue(hues: np.ndarray) -> float:
-    """Median hue that is robust to the red wrap-around at 0/179."""
-    angles = hues.astype(np.float64) * (2.0 * math.pi / 180.0)
-    ref = math.atan2(np.sin(angles).mean(), np.cos(angles).mean()) * 180.0 / (2.0 * math.pi)
-    diffs = (hues.astype(np.float64) - ref + 90.0) % 180.0 - 90.0
-    return float((ref + np.median(diffs)) % 180.0)
 
 
 def _painted(hsv: np.ndarray, params: VisionParams) -> np.ndarray:
@@ -156,46 +148,50 @@ def detect_refs(bgr: np.ndarray, params: VisionParams = VisionParams()) -> RefsV
 
 
 def landmark_sightings(square: SquareView | None, refs: RefsView | None) -> list[tuple[str, float, float]]:
-    """(name, cx, cy) of the landmarks in view, named like core/localization.LANDMARKS."""
+    """(name, cx, cy) of the landmarks in view, named like core/localization.LANDMARKS.
+
+    A rectangle alone is not trusted: two touching cubes of its color make the same elongated blob (seen
+    in Webots). It counts with the square or with the other rectangle in view."""
     out = [("square", square.cx_norm, square.cy_norm)] if square is not None and square.visible else []
-    return out + list(refs.seen if refs is not None else ())
+    seen = list(refs.seen if refs is not None else ())
+    return out + seen if out or len(seen) >= 2 else out
 
 
 def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list[Detection]:
     height, width = bgr.shape[:2]
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-    mask = _open(_painted(hsv, params), params)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    painted = _painted(hsv, params)
     square, _ = _square_region(hsv, params)
-    square_mask = np.zeros(mask.shape, np.uint8)
+    square_mask = np.zeros(painted.shape, np.uint8)
     if square is not None:
         cv2.drawContours(square_mask, [square], -1, 255, thickness=cv2.FILLED)
 
+    # One mask per color: two touching cubes of different colors stay two blobs (one painted-pixels mask
+    # merged them into a shape no filter accepted: in Webots the red and orange cubes at the scoop vanished).
+    candidates = []
+    for color, spans in params.hue_ranges.items():
+        in_range = np.zeros(painted.shape, bool)
+        for low, high in spans:
+            in_range |= (hsv[..., 0] >= low) & (hsv[..., 0] <= high)
+        contours, _ = cv2.findContours(_open(in_range & painted, params), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates += [(color, c) for c in contours]
+
     detections = []
-    for contour in contours:
+    for color, contour in candidates:
         area = cv2.contourArea(contour)
         if not params.min_area <= area <= params.max_area:
             continue
         x, y, w, h = cv2.boundingRect(contour)
+        if x <= 1 or y <= 1 or x + w >= width - 1:
+            continue  # cut by the left, right or top edge: its shape and color are unreliable (the bottom
+            # edge stays: a close cube in front of the scoop reaches it)
         if not params.aspect_min <= w / h <= params.aspect_max:
             continue
         hull_area = cv2.contourArea(cv2.convexHull(contour))
         if hull_area <= 0.0 or area / hull_area < params.min_solidity:
             continue
-        blob = np.zeros(mask.shape, np.uint8)
+        blob = np.zeros(painted.shape, np.uint8)
         cv2.drawContours(blob, [contour], -1, 255, thickness=cv2.FILLED)
-        pixels = hsv[blob > 0]
-        hue = round(_dominant_hue(pixels[:, 0])) % 180
-        color = classify(
-            hue,
-            float(np.median(pixels[:, 1])),
-            float(np.median(pixels[:, 2])),
-            params.hue_ranges,
-            params.s_min,
-            params.v_min,
-        )
-        if color is None:
-            continue
         if color == params.square_color and (area >= params.square_min_area or square_mask[blob > 0].any()):
             continue  # the delivery square, not a cube
         if color in params.ref_colors and _is_ref_shape(contour, params):

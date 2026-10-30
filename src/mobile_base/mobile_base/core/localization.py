@@ -69,7 +69,21 @@ class CameraModel:
     camera_x: float = 0.0  # m, camera ahead of the robot center (the table already measures from it)
 
     def bearing(self, cx: float) -> float:
-        return -cx * self.hfov / 2.0
+        """Pinhole: the angle grows like atan, not linearly, toward the image edges."""
+        return -math.atan(cx * math.tan(self.hfov / 2.0))
+
+    @classmethod
+    def from_mount(cls, hfov: float, width: int, height: int, cam_height: float, pitch: float,
+                   camera_x: float) -> "CameraModel":
+        """Distance table of a pinhole camera cam_height m above the floor, tilted pitch rad down
+        (square pixels, no lens distortion: right for Webots; the real 120 deg lens needs measuring)."""
+        focal = (width / 2.0) / math.tan(hfov / 2.0)  # px
+        rows = []
+        for d in np.geomspace(0.06, 2.5, 40):
+            cy = 0.5 + focal * math.tan(math.atan2(cam_height, d) - pitch) / height
+            if 0.0 <= cy <= 1.0:
+                rows.append((round(cy, 4), round(float(d), 4)))
+        return cls(hfov, tuple(sorted(rows)), camera_x)
 
     def distance(self, cy: float) -> float:
         cys, ds = zip(*self.cy_table)
