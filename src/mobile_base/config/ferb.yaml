@@ -27,6 +27,7 @@
     approach_strafe_cy: 0.45  # cube this close: center it on the U by sliding sideways (the mouth is ~4 cm)
     approach_strafe_tol: 0.04  # |cx| counted as centered
     approach_strafe_speed: 0.03  # m/s
+    spin_hold: 1.0  # s a carry spin keeps its direction (two cues flipping it made the robot dither)
     approach_spin_timeout: 4.0  # s centering by spinning: longer = the cube turns with the robot
     approach_backoff_time: 1.5  # s backing off to leave it
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
@@ -173,9 +174,11 @@
     # reported apart (square_* in the cubes message) and never as a cube. Calibrate on the robot.
     square_color: blue
     square_min_area: 12000.0
+    square_far_area: 300.0  # px, a far square is a thin strip
+    square_far_aspect: 4.0  # width / height: a cube is never that elongated
     # Green and red rectangles beside the square (delivery axis): told from cubes by size and shape.
     # PLACEHOLDERS: measure the real rectangles and calibrate from the robot camera.
-    ref_min_area: 3000.0  # px
+    ref_min_area: 500.0  # px, small: seen from afar they are thin strips (they are landmarks for the filter)
     ref_min_aspect: 2.0  # long side / short side
     # The other robot, seen by this camera (no overhead camera, 2026-10-27): ArUco DICT_4X4_50 on it,
     # side marker_size m. Phineas carries id 1 and Ferb id 2, as for the overhead camera.

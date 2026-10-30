@@ -249,3 +249,14 @@ def test_a_blob_cut_by_the_side_of_the_image_is_not_a_cube():
     img[440:480, 300:340] = RED  # at the bottom, in front of the scoop: kept
     reds = [d for d in detect_cubes(img) if d.color == "red"]
     assert len(reds) == 1 and reds[0].cy_norm > 0.9
+
+
+def test_a_far_square_is_a_thin_strip_but_a_blue_cube_is_not_the_square():
+    from mobile_base.vision import detect_square
+
+    far = _canvas()
+    far[100:110, 250:330] = (200, 110, 30)  # 80 x 10 px: the square seen from the far end
+    assert detect_square(far).visible
+    cube = _canvas()
+    cube[300:330, 300:330] = (200, 110, 30)  # a blue cube
+    assert not detect_square(cube).visible

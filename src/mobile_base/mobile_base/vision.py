@@ -42,6 +42,10 @@ class VisionParams:
     # scoop mouth covers a few thousand px with the IMX219-120 at 640 x 480: calibrate on the robot.
     square_color: str = "blue"
     square_min_area: float = 12000.0  # px
+    # Seen from the far end of the track the square is a thin strip (Webots: ~50 x 10 px at 1 m), far
+    # below square_min_area: a long flat blob of this area counts too (a cube is never that elongated).
+    square_far_area: float = 300.0  # px
+    square_far_aspect: float = 4.0  # width / height of the bounding box
     # Delivery axis (team decision 2026-10-30): a green and a red rectangle stand on both sides of the
     # square; the axis is the perpendicular through their midpoint. They are told from cubes by size and
     # shape: at least ref_min_area px and a long side ref_min_aspect times the short one. PLACEHOLDERS
@@ -100,9 +104,13 @@ def _square_region(hsv: np.ndarray, params: VisionParams):
     mask = _open(in_range & _painted(hsv, params), params)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     best = max(contours, key=cv2.contourArea, default=None)
-    if best is None or cv2.contourArea(best) < params.square_min_area:
+    if best is None:
         return None, 0.0
-    return best, float(cv2.contourArea(best))
+    area = float(cv2.contourArea(best))
+    _, _, w, h = cv2.boundingRect(best)
+    if area < params.square_min_area and not (area >= params.square_far_area and w / max(h, 1) >= params.square_far_aspect):
+        return None, 0.0
+    return best, area
 
 
 def detect_square(bgr: np.ndarray, params: VisionParams = VisionParams()) -> SquareView:

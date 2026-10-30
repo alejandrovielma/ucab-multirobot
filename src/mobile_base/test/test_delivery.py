@@ -428,9 +428,13 @@ def test_axis_on_the_axis_it_drives_straight_and_keeps_going_when_the_rectangles
     assert axis_cam(fsm, 1.2, square=(0.0, 0.4)) == pytest.approx((p.carry_speed, 0.0, 0.0))
 
 
-def test_axis_without_rectangles_or_a_previous_alignment_it_searches_by_spinning():
+def test_axis_from_afar_it_heads_for_the_square_until_the_rectangles_show_and_searches_if_it_sees_nothing():
     fsm = axis_fsm()
-    assert axis_cam(fsm, 1.0, square=(0.0, 0.4)) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))
+    p = fsm.params
+    assert axis_cam(fsm, 1.0) == pytest.approx((0.0, 0.0, p.carry_max_turn))  # nothing in view: search
+    assert axis_cam(fsm, 1.1, square=(0.5, 0.3)) == pytest.approx((0.0, 0.0, -p.carry_max_turn))  # right: spin right
+    assert axis_cam(fsm, 1.2, square=(0.0, 0.3)) == pytest.approx((p.carry_speed, 0.0, 0.0))  # centered: drive
+    assert axis_cam(fsm, 1.3, refs=(0.5, 0.2), square=(0.0, 0.3))[2] != 0.0  # the rectangles take over
 
 
 def test_axis_the_push_is_straight_even_if_the_square_looks_off_center():
@@ -485,3 +489,14 @@ def test_the_push_is_called_off_if_a_non_target_cube_is_in_its_path():
     assert fsm.state is State.DELIVER
     cam2(fsm, 1.5, cubes=[Cube("blue", 0.0, 0.8, 800.0)], square=(0.0, 0.8))
     assert fsm.state is State.EXPLORE and "push path" in fsm.note
+
+
+def test_a_carry_spin_does_not_flip_direction_tick_by_tick():
+    fsm = axis_fsm(spin_hold=1.0)
+    p = fsm.params
+    # (the search spin that started the carry at 0.5 s has its own hold: the test starts after it)
+    first = axis_cam(fsm, 2.0, square=(0.5, 0.3))  # right: spin right
+    flip = axis_cam(fsm, 2.1, refs=(-0.5, 0.2), square=(0.5, 0.3))  # the rectangles say left
+    assert first[2] < 0.0 and flip[2] == first[2]  # held
+    later = axis_cam(fsm, 3.2, refs=(-0.5, 0.2), square=(0.5, 0.3))  # the hold is over
+    assert later[2] == pytest.approx(p.carry_max_turn)

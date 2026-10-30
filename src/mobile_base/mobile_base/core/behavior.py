@@ -122,6 +122,10 @@ class BehaviorParams:
     # Far cubes flicker at the detector's area threshold (Webots): smaller targets are left to the
     # exploration (and the cartographer's memory) instead of being approached. 0 = any size.
     approach_min_area: float = 0.0  # px
+    # Carrying toward the square, two cues (the rectangles' midpoint, the square) can disagree tick by tick
+    # and the spin flips sign forever (Webots: 2 minutes dithering in place). A spin keeps its direction at
+    # least this long before it may reverse. 0 = off.
+    spin_hold: float = 0.0  # s
     # An open scoop hides the cube from the camera once it is inside (the plate covers the bottom of the
     # image): a target seen centered at the mouth (cy >= assume_mouth_cy) that vanishes while the robot
     # drives on in CAPTURE is ASSUMED captured, with the color it had. It cannot be verified while
@@ -312,6 +316,8 @@ class BehaviorFSM:
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
         self._guide_turning = False  # guided exploration: spinning toward the goal
+        self._spin_last = 0.0  # camera carry: last spin command and when its direction was set
+        self._spin_since = -1e9
         self._mouth: tuple[str, float] | None = None  # last target seen centered at the mouth: color, time
         self._assumed = ""  # color of the cube assumed inside the scoop (assume_capture)
         self._align_since: float | None = None  # APPROACH: spinning to center the target since
@@ -891,6 +897,16 @@ class BehaviorFSM:
             return self._face(inp.pose, z.heading)  # in front of the square: face it, then DELIVER
         return self._steer(inp.pose, *z.entry_point, p.carry_speed)
 
+    def _spin(self, inp: BehaviorInput, wz: float) -> Command:
+        """A spin command that does not reverse within spin_hold seconds of the last direction change."""
+        hold = self.params.spin_hold
+        if hold > 0.0 and self._spin_last * wz < 0.0 and inp.now - self._spin_since < hold:
+            wz = self._spin_last
+        elif self._spin_last * wz <= 0.0:
+            self._spin_since = inp.now
+        self._spin_last = wz
+        return (0.0, 0.0, wz)
+
     def _carry_by_camera(self, inp: BehaviorInput) -> Command:
         """No pose: find the blue square with the camera, center it, drive to it (slow spins only)."""
         p = self.params
@@ -905,8 +921,9 @@ class BehaviorFSM:
             return ZERO
         self._yield_since = None
         axis = p.axis_delivery
-        # Close to the square the rectangles leave the view: once on the axis, the square is enough.
-        seen = inp.refs_visible or (self._on_axis and inp.square_visible) if axis else inp.square_visible
+        # From afar only the square shows (the rectangles are thin strips): head for it until the
+        # rectangles appear; close to it they leave the view again and, once on the axis, it is enough.
+        seen = (inp.refs_visible or inp.square_visible) if axis else inp.square_visible
         if not seen:
             self._on_axis = False
             self._search_since = inp.now if self._search_since is None else self._search_since
@@ -915,20 +932,20 @@ class BehaviorFSM:
                 self._probe_until = inp.now + p.square_probe_time
                 self.note = "square not seen: drive forward and look again"
                 return (p.carry_speed, 0.0, 0.0)
-            return (0.0, 0.0, turn)
+            return self._spin(inp, turn)
         self._search_since = None
         if axis and inp.refs_visible:
             # Two decoupled corrections, no arcs: spin to center the midpoint, strafe to even the rectangles.
             if abs(inp.refs_cx) > p.axis_align:
                 self._on_axis = False
-                return (0.0, 0.0, -math.copysign(turn, inp.refs_cx))
+                return self._spin(inp, -math.copysign(turn, inp.refs_cx))
             if abs(inp.refs_skew) > p.axis_skew_tol:
                 self._on_axis = False
                 self.note = "getting onto the delivery axis"
                 return (0.0, -math.copysign(p.axis_strafe_speed, inp.refs_skew), 0.0)
             self._on_axis = True
-        elif not axis and abs(inp.square_cx) > p.square_align:
-            return (0.0, 0.0, -math.copysign(turn, inp.square_cx))  # square on the right: spin right
+        elif not (axis and self._on_axis) and abs(inp.square_cx) > p.square_align:
+            return self._spin(inp, -math.copysign(turn, inp.square_cx))  # square on the right: spin right
         obstacle = self._blocking(inp.cubes)
         if obstacle is not None:
             if not self._dodging:

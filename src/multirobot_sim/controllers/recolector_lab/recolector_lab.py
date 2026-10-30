@@ -134,6 +134,7 @@ def main():
             row = dict(t=round(now, 3), state=fsm.state.value, note=fsm.note, cmd=[round(v, 3) for v in cmd],
                        reason=reason, black=bool(black), scoop=scoop, delivered=fsm.delivered,
                        forbidden=fsm.forbidden_touches, cubes=[d.color for d in dets], square=square.visible,
+                       sqv=[round(square.cx_norm, 2), round(square.cy_norm, 2), round(square.area_px)],
                        refs=[n for n, _, _ in refs.seen])
             if est is not None:
                 row["est"] = [round(est.x, 3), round(est.y, 3), round(est.theta, 3), round(est.spread, 3),
