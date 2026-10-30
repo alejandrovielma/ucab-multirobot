@@ -21,6 +21,9 @@
     approach_align: 0.15
     lost_timeout: 1.0
     approach_min_area: 400.0  # px, smaller (far) targets are not approached: they flicker
+    assume_capture: true  # the real scoop is open: a cube at its middle plate is below the camera view (measured by the team), so a target that vanishes at the mouth while driving on is assumed captured
+    assume_mouth_cy: 0.55
+    assume_window: 1.5  # s
     approach_strafe_cy: 0.45  # cube this close: center it on the U by sliding sideways (the mouth is ~4 cm)
     approach_strafe_tol: 0.04  # |cx| counted as centered
     approach_strafe_speed: 0.03  # m/s

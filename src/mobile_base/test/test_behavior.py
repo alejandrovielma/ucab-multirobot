@@ -508,3 +508,25 @@ def test_a_target_that_turns_with_the_robot_is_left_behind():
         assert t < 6.0
     assert cmd[0] < 0.0 and "turns with the robot" in fsm.note
     assert fsm.step(BehaviorInput(now=t, cubes=stuck, line_front=False))[0] < 0.0  # still backing off
+
+
+def test_a_cube_that_vanishes_at_the_mouth_while_driving_on_is_assumed_captured():
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_time=1.0))
+    fsm.set_mission(("red",), ())
+    fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.4, 900.0)], line_front=False))
+    fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.0, 0.7, 3000.0)], line_front=False))  # at the mouth
+    assert fsm.state is State.CAPTURE
+    for t in (0.5, 1.0):  # the plate hides it: nothing in the image, nothing in the scoop window
+        fsm.step(BehaviorInput(now=t, cubes=[], line_front=False))
+    fsm.step(BehaviorInput(now=1.3, cubes=[], line_front=False))
+    assert fsm.state is State.CARRY and fsm.carrying
+    assert fsm._carried_color == "red"
+
+
+def test_without_a_sighting_at_the_mouth_nothing_is_assumed():
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_time=1.0))
+    fsm.set_mission(("red",), ())
+    fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.4, 900.0)], line_front=False))
+    for t in (0.5, 1.0, 1.5, 2.0):
+        fsm.step(BehaviorInput(now=t, cubes=[], line_front=False))
+    assert fsm.state is not State.CARRY

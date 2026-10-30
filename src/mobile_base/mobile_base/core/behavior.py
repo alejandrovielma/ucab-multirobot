@@ -122,6 +122,13 @@ class BehaviorParams:
     # Far cubes flicker at the detector's area threshold (Webots): smaller targets are left to the
     # exploration (and the cartographer's memory) instead of being approached. 0 = any size.
     approach_min_area: float = 0.0  # px
+    # An open scoop hides the cube from the camera once it is inside (the plate covers the bottom of the
+    # image): a target seen centered at the mouth (cy >= assume_mouth_cy) that vanishes while the robot
+    # drives on in CAPTURE is ASSUMED captured, with the color it had. It cannot be verified while
+    # carrying; the counts are the cameras's best guess. False = trust scoop_color only.
+    assume_capture: bool = False
+    assume_mouth_cy: float = 0.55
+    assume_window: float = 1.5  # s since the last sighting at the mouth
     # The U is barely twice a cube wide: once the cube is close (cy above approach_strafe_cy) the last
     # centering is a sideways slide, not a spin (a spin swings the scoop's mouth). 0 = off.
     approach_strafe_cy: float = 0.0
@@ -305,6 +312,8 @@ class BehaviorFSM:
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
         self._guide_turning = False  # guided exploration: spinning toward the goal
+        self._mouth: tuple[str, float] | None = None  # last target seen centered at the mouth: color, time
+        self._assumed = ""  # color of the cube assumed inside the scoop (assume_capture)
         self._align_since: float | None = None  # APPROACH: spinning to center the target since
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
@@ -336,7 +345,27 @@ class BehaviorFSM:
         actions, self._actions = self._actions, []
         return actions
 
+    def _occlusion(self, inp: BehaviorInput) -> BehaviorInput:
+        """assume_capture: put the assumed cube's color in scoop_color while the camera cannot see it."""
+        p = self.params
+        if inp.scoop_color or self.state in (State.EXPLORE, State.APPROACH, State.IDLE, State.STOP):
+            self._assumed = ""  # seen for real, or not holding anything
+        if not self.carrying and self.state is not State.CAPTURE:
+            close = [c for c in inp.cubes if is_mine(c.color, self.targets) and c.cy_norm >= p.assume_mouth_cy
+                     and abs(c.cx_norm) <= p.approach_align * 2.0]
+            if close:
+                self._mouth = (max(close, key=lambda c: c.cy_norm).color, inp.now)
+        if self.state is State.CAPTURE and not self._assumed and not inp.scoop_color and self._mouth is not None:
+            still_there = any(is_mine(c.color, self.targets) and c.cy_norm >= p.assume_mouth_cy for c in inp.cubes)
+            if inp.now - self._mouth[1] <= p.assume_window and not still_there:
+                self._assumed = self._mouth[0]
+        if self._assumed and not inp.scoop_color:
+            return dataclasses.replace(inp, scoop_color=self._assumed)
+        return inp
+
     def step(self, inp: BehaviorInput) -> Command:
+        if self.params.assume_capture:
+            inp = self._occlusion(inp)
         if self.state is not State.STOP:
             if not self.targets:
                 if self.state is not State.IDLE:

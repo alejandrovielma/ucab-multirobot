@@ -65,7 +65,7 @@ def main():
     # The YAML window is the real robot's (to be measured with its camera).
     vparams = dataclasses.replace(vparams, scoop_y_min=0.82, scoop_y_max=0.95, scoop_x_half=0.46)
     values = {k: v for k, v in cfg["behavior"].items() if k in BehaviorParams.__dataclass_fields__ and k != "my_colors"}
-    values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
+    values.update(assume_capture=True, has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
                   approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))
     targets, avoid = parse_colors(args.targets), parse_colors(args.avoid)
     fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values))
