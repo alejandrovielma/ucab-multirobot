@@ -117,10 +117,6 @@ class BehaviorParams:
     k_turn: float = 1.5  # rad/s per unit of cx_norm
     approach_speed: float = 0.10  # m/s
     approach_turn_min: float = 0.4  # rad/s, slowest spin while centering a cube (slower stalls the motors)
-    # Steer while driving toward a cube (an arc, the mecanum wheels allow it): rad/s per unit of cx_norm,
-    # capped at approach_arc_max. 0 = drive straight (the spin above is the only correction).
-    approach_arc_gain: float = 0.0
-    approach_arc_max: float = 0.3
     approach_align: float = 0.15  # |cx_norm| below which the cube counts as straight ahead
     lost_timeout: float = 1.0  # s
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
@@ -682,9 +678,6 @@ class BehaviorFSM:
             self._capture_until = inp.now + p.capture_time
             return self._capture(inp)
         cmd = (p.approach_speed, 0.0, 0.0)
-        if p.approach_arc_gain > 0.0:
-            arc = -p.approach_arc_gain * target.cx_norm
-            cmd = (p.approach_speed, 0.0, max(-p.approach_arc_max, min(p.approach_arc_max, arc)))
         if self._aligning or (inp.pose is not None and not self._fits(inp.pose, cmd[0], 0.0, carrying=False)):
             # No room to spin toward it, or the body cannot advance with the cube centered: give up.
             self._ignore_until = inp.now + p.skip_time

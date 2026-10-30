@@ -54,7 +54,7 @@
     <span></span>
   </div>
   <p class="hint">Mantener presionado para mover: W/S adelante y atrás, A/D a los lados, W+A y similares en diagonal, Q/E girar
-    (solo Q/E: en el sitio; con W/S: un arco, el robot limita la velocidad y el giro juntos). Al soltar se detiene; si la página pierde
+    en el sitio (girar y trasladarse a la vez no se permite: manda el giro). Al soltar se detiene; si la página pierde
     el foco o la red, el robot se detiene en 0,4 s. De lado, en diagonal y hacia atrás va a 0,05 m/s como máximo
     (el sensor de línea está en el centro). Esc: parada que se mantiene hasta pulsar el botón otra vez.</p>
 </main>
@@ -77,8 +77,9 @@ function command() {
   if (held.has("w")) vx += 1; if (held.has("s")) vx -= 1;
   if (held.has("a")) vy += 1; if (held.has("d")) vy -= 1;
   if (held.has("q")) wz += 1; if (held.has("e")) wz -= 1;
-  const n = Math.hypot(vx, vy) || 1;  // translation and spin together make an arc (the robot caps both)
-  return { vx: vx / n * Number(speed.value), vy: vy / n * Number(speed.value), wz: wz * Number(turn.value) };
+  if (wz) return { vx: 0, vy: 0, wz: wz * Number(turn.value) };  // star motion: a spin is in place only
+  const n = Math.hypot(vx, vy) || 1;
+  return { vx: vx / n * Number(speed.value), vy: vy / n * Number(speed.value), wz: 0 };
 }
 
 let lastSent = "";

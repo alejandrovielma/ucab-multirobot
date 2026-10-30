@@ -79,14 +79,13 @@ class SafetyParams:
     # the U (observed in Webots), so with a cube the spins are slow.
     carry_max_turn: float = 0.4  # rad/s, spin-rate limit with a cube
     max_side_speed: float = 0.05  # m/s, any translation that is not straight ahead (rule 3)
-    # Mecanum wheels turn and translate at once (one command spread over the four wheels): arcs are
-    # allowed when allow_arcs, with both rates capped. False = star motion (spin wins).
-    allow_arcs: bool = False
-    max_arc_speed: float = 0.08  # m/s, translation while spinning
-    max_arc_turn: float = 0.6  # rad/s, spin while translating
-    # Slew limits (0 = off): hard starts make the rollers slip and stall the motors; stopping is never limited.
+    # Slew limits (0 = off). Speeding up is ramped always (hard starts slip the rollers and stall the
+    # motors). Slowing down is ramped only with a cube in the scoop (it keeps its inertia and slides out
+    # of the delivery axis) and near the other robot; the emergency stop and the tape stop stay immediate.
     max_accel: float = 0.0  # m/s^2
     max_alpha: float = 0.0  # rad/s^2
+    max_decel_carry: float = 0.0  # m/s^2, braking with a cube
+    max_decel_alpha_carry: float = 0.0  # rad/s^2, braking a spin with a cube
     line_clear_time: float = 0.3  # s of white before a new black reading counts as a new tape (rule 4)
     track_horizon: float = 0.3  # s, body geofence prediction
     body_front: float = 0.095  # m, body rectangle without the scoop (wheels reach 0.093 / 0.0805)
@@ -143,21 +142,23 @@ class SafetyGate:
     def filter(self, inp: SafetyInput) -> tuple[Command, str]:
         self._follow_rotation(inp)
         cmd, reason = self._filter(inp)
-        cmd = self._slew(cmd, inp.now)
+        hard = inp.estop or "line ahead" in reason or reason.startswith("stop")
+        cmd = self._slew(cmd, inp.now, soft_brake=inp.carrying and not hard)
         self._last_wz = cmd[2]
         return cmd, reason
 
-    def _slew(self, cmd: Command, now: float) -> Command:
+    def _slew(self, cmd: Command, now: float, soft_brake: bool = False) -> Command:
         p = self.params
         dt = 0.1 if self._out_at is None else min(max(now - self._out_at, 0.0), 0.5)
         self._out_at = now
-        limits = (p.max_accel, p.max_accel, p.max_alpha)
+        up = (p.max_accel, p.max_accel, p.max_alpha)
+        down = (p.max_decel_carry, p.max_decel_carry, p.max_decel_alpha_carry) if soft_brake else (0.0, 0.0, 0.0)
         out = []
-        for new, old, rate in zip(cmd, self._out, limits):
+        for new, old, rate_up, rate_down in zip(cmd, self._out, up, down):
+            slowing = abs(new) <= abs(old) and new * old >= 0.0
+            rate = rate_down if slowing else rate_up
             step = rate * dt
-            # Only speeding up (or reversing) is ramped; slowing down or stopping goes through at once.
-            out.append(new if rate <= 0.0 or abs(new) <= abs(old) and new * old >= 0.0
-                       else old + max(-step, min(step, new - old)))
+            out.append(new if rate <= 0.0 else old + max(-step, min(step, new - old)))
         self._out = (out[0], out[1], out[2])
         return self._out
 
@@ -245,15 +246,9 @@ class SafetyGate:
             self._travel_dir = (vx / norm, vy / norm)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
 
-    def _star(self, vx: float, vy: float, wz: float, reasons: list[str]) -> Command:
-        """Without arcs: translate or spin in place, never both (the spin wins). With arcs: cap both rates."""
-        if wz != 0.0 and (vx != 0.0 or vy != 0.0) and self.params.allow_arcs:
-            p = self.params
-            vx, vy = self._cap(vx, vy, p.max_arc_speed, "arc: slow", reasons)
-            if abs(wz) > p.max_arc_turn:
-                wz = math.copysign(p.max_arc_turn, wz)
-                reasons.append("arc: slow turn")
-            return vx, vy, wz
+    @staticmethod
+    def _star(vx: float, vy: float, wz: float, reasons: list[str]) -> Command:
+        """Translate or spin in place, never both: the spin wins (it is how the robot changes heading)."""
         if wz != 0.0 and (vx != 0.0 or vy != 0.0):
             if "spin in place only" not in reasons:
                 reasons.append("spin in place only")

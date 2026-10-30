@@ -435,29 +435,36 @@ def test_without_poses_the_peer_seen_by_the_camera_stops_and_turns_the_robot_awa
     assert beside == pytest.approx(FORWARD)  # outside the front cone: not in the way
 
 
-def _arcs_gate(**kw):
-    return SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False, allow_arcs=True, **kw))
+def _slew_gate(**kw):
+    return SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False, **kw))
 
 
-def _inp(cmd, now=0.0):
-    return SafetyInput(cmd=cmd, line_front=False, own_pose=None, peer_pose=None, now=now, heartbeat_age=None)
+def _slew_inp(cmd, now, carrying=False, line=False, estop=False):
+    return SafetyInput(cmd=cmd, line_front=line, own_pose=None, peer_pose=None, now=now, heartbeat_age=None,
+                       carrying=carrying, estop=estop)
 
 
-def test_arc_keeps_both_rates_but_caps_them():
-    cmd, reason = _arcs_gate().filter(_inp((0.2, 0.0, 2.0)))
-    assert cmd == pytest.approx((0.08, 0.0, 0.6))
-    assert "arc" in reason
+def test_slew_ramps_up_and_empty_robot_stops_at_once():
+    gate = _slew_gate(max_accel=0.4, max_decel_carry=0.3)
+    first = gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.0))[0]
+    assert 0.0 < first[0] <= 0.4 * 0.1 + 1e-9
+    for i in range(1, 4):
+        out = gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.1 * i))[0]
+    assert out[0] == pytest.approx(0.08)
+    assert gate.filter(_slew_inp((0.0, 0.0, 0.0), 0.5))[0] == (0.0, 0.0, 0.0)
 
 
-def test_arcs_off_spin_wins():
-    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False))
-    assert gate.filter(_inp((0.1, 0.0, 0.5)))[0] == (0.0, 0.0, 0.5)
-
-
-def test_slew_ramps_up_and_stops_at_once():
-    gate = _arcs_gate(max_accel=0.4)
-    first = gate.filter(_inp((0.08, 0.0, 0.0), 0.0))[0]
-    assert 0.0 < first[0] <= 0.4 * 0.1 + 1e-9  # 0.1 s default step on the first tick
-    speeds = [gate.filter(_inp((0.08, 0.0, 0.0), 0.1 * i))[0][0] for i in range(1, 4)]
-    assert speeds == sorted(speeds) and speeds[-1] == pytest.approx(0.08)
-    assert gate.filter(_inp((0.0, 0.0, 0.0), 0.5))[0] == (0.0, 0.0, 0.0)
+def test_carrying_brakes_gradually_but_line_and_estop_stop_at_once():
+    gate = _slew_gate(max_accel=1.0, max_decel_carry=0.3)
+    for i in range(3):
+        gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.1 * i, carrying=True))
+    slowed = gate.filter(_slew_inp((0.0, 0.0, 0.0), 0.3, carrying=True))[0]
+    assert 0.0 < slowed[0] < 0.08  # a cube in the scoop: no instant stop, it would slide out
+    gate = _slew_gate(max_accel=1.0, max_decel_carry=0.3)
+    for i in range(3):
+        gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.1 * i, carrying=True))
+    assert gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.3, carrying=True, line=True))[0][0] == 0.0
+    gate = _slew_gate(max_accel=1.0, max_decel_carry=0.3)
+    for i in range(3):
+        gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.1 * i, carrying=True))
+    assert gate.filter(_slew_inp((0.08, 0.0, 0.0), 0.3, carrying=True, estop=True))[0] == (0.0, 0.0, 0.0)
