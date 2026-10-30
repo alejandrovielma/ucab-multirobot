@@ -476,3 +476,13 @@ def test_line_does_not_stop_the_delivery_push_when_the_sequencer_says_so():
     assert gate.filter(SafetyInput(**base))[0][0] == 0.0  # the tape stops a normal advance
     gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False))
     assert gate.filter(SafetyInput(**base, delivering=True))[0][0] == pytest.approx(0.1)
+
+
+def test_the_peer_that_left_the_view_still_blocks_for_a_while():
+    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False, peer_memory=2.0))
+    base = dict(line_front=False, own_pose=None, peer_pose=None, heartbeat_age=None)
+    gate.filter(SafetyInput(cmd=(0.0, 0.0, 0.0), now=0.0, peer_seen=(0.0, 0.1), **base))  # right ahead and close
+    held = gate.filter(SafetyInput(cmd=(0.1, 0.0, 0.0), now=1.0, **base))[0]
+    assert held[0] == 0.0  # still blocked from memory
+    free = gate.filter(SafetyInput(cmd=(0.1, 0.0, 0.0), now=3.5, **base))[0]
+    assert free[0] == pytest.approx(0.1)  # forgotten after peer_memory

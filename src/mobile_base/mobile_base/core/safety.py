@@ -79,6 +79,10 @@ class SafetyParams:
     # the U (observed in Webots), so with a cube the spins are slow.
     carry_max_turn: float = 0.4  # rad/s, spin-rate limit with a cube
     max_side_speed: float = 0.05  # m/s, any translation that is not straight ahead (rule 3)
+    # The camera looks forward only: a sideways or backward move can take the other robot out of view.
+    # For this many seconds after it was last seen, its last bearing (turned with the robot's spins) and
+    # distance still count (0 = off).
+    peer_memory: float = 0.0  # s
     # Slew limits (0 = off). Speeding up is ramped always (hard starts slip the rollers and stall the
     # motors). Slowing down is ramped only with a cube in the scoop (it keeps its inertia and slides out
     # of the delivery axis) and near the other robot; the emergency stop and the tape stop stay immediate.
@@ -140,6 +144,7 @@ class SafetyGate:
         self._last_theta: float | None = None  # own heading at the previous tick (fresh pose only)
         self._last_wz = 0.0  # spin let through at the previous tick
         self._out: Command = STOP  # what the previous tick let through, for the slew limit
+        self._peer_mem: tuple[float, float, float] | None = None  # bearing, distance, time of the last sighting
         self._out_at: float | None = None
 
     def filter(self, inp: SafetyInput) -> tuple[Command, str]:
@@ -179,6 +184,9 @@ class SafetyGate:
         if dtheta:
             self._line_dir = _rotate(self._line_dir, -dtheta)
             self._travel_dir = _rotate(self._travel_dir, -dtheta)
+            if self._peer_mem is not None:
+                b, d, t = self._peer_mem
+                self._peer_mem = (math.remainder(b - dtheta, 2.0 * math.pi), d, t)
 
     def _filter(self, inp: SafetyInput) -> tuple[Command, str]:
         p = self.params
@@ -220,14 +228,19 @@ class SafetyGate:
             reasons.append("line ahead" if line_blocks else "no translation away from the track")
 
         own, peer = inp.own_pose, (inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None)
-        if (not own_fresh or peer is None) and inp.peer_seen is not None:
+        peer_seen = inp.peer_seen
+        if peer_seen is not None:
+            self._peer_mem = (peer_seen[0], peer_seen[1], inp.now)
+        elif self._peer_mem is not None and p.peer_memory > 0.0 and inp.now - self._peer_mem[2] <= p.peer_memory:
+            peer_seen = self._peer_mem[:2]  # out of view, probably beside or behind us
+        if (not own_fresh or peer is None) and peer_seen is not None:
             # No overhead poses: put the peer the camera sees in the robot's own frame. Its heading is
             # unknown: taken as facing us (the worst case, so the deadlock rule still applies).
-            bearing, dist = inp.peer_seen
+            bearing, dist = peer_seen
             own = Pose2D(0.0, 0.0, 0.0, inp.now)
             peer = Pose2D(dist * math.cos(bearing), dist * math.sin(bearing), math.pi + bearing, inp.now)
         blocked = False
-        if own is not None and peer is not None and (own_fresh or inp.peer_seen is not None):
+        if own is not None and peer is not None and (own_fresh or peer_seen is not None):
             # The lease holder has right of way near the square: only slow down / stop, no turn-away.
             # Turning away froze a carrying robot in the corridor for 8 minutes (Webots run 17) and kept
             # a lease holder replanning next to the waiting robot for 10 minutes (run 20).

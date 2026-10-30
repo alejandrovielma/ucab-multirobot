@@ -186,6 +186,13 @@ class BehaviorParams:
     axis_align: float = 0.1  # |refs_cx| below which the midpoint counts as straight ahead
     axis_skew_tol: float = 0.06  # |refs_skew| below which the robot counts as on the axis
     axis_strafe_speed: float = 0.04  # m/s sideways to get onto the axis (the gate caps it at max_side_speed)
+    # Sharing the square without the zone arbiter: the robot with yield_to_peer waits while the other
+    # robot's marker is within peer_yield_distance (m) and gives the cube up after yield_timeout s.
+    yield_to_peer: bool = False
+    peer_yield_distance: float = 0.5
+    yield_timeout: float = 10.0
+    # Non-target cubes in the way while carrying: strafe around them, give up after dodge_limit tries.
+    dodge_limit: int = 3
     deliver_push_time: float = 2.0  # s pushing in at enter_speed (10 cm)
     deliver_back_time: float = 2.5  # s backing out at reverse_speed (10 cm)
     # The line sensor reads the blue square as white and its track side has no tape: while exploring
@@ -221,6 +228,7 @@ class BehaviorInput:
     square_cx: float = 0.0  # [-1, 1], left negative
     square_cy: float = 0.0  # [0, 1], 0 = top
     square_area: float = 0.0  # px
+    peer_seen: tuple[float, float] | None = None  # the other robot's marker: (bearing rad, distance m)
     refs_visible: bool = False  # green and red rectangles beside the square (vision.detect_refs)
     refs_cx: float = 0.0  # [-1, 1], midpoint between them
     refs_skew: float = 0.0  # left cy - right cy: > 0 means the robot is left of the axis
@@ -271,6 +279,9 @@ class BehaviorFSM:
         self._search_since: float | None = None  # camera carry: spinning without the square since
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
+        self._yield_since: float | None = None  # camera carry: waiting for the other robot since
+        self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
+        self._dodging = False
         self._on_axis = False  # camera carry: lined up on the delivery axis (the rectangles may leave the view)
         self.delivered = 0  # deliveries counted by this robot (the arbiter keeps the official count)
         self._actions: list[ZoneAction] = []
@@ -464,6 +475,7 @@ class BehaviorFSM:
         self.note = why
         self.plan = None
         self._on_axis = False
+        self._yield_since, self._dodges, self._dodging = None, 0, False
         self._give_up_cube(inp)
         self.state = State.EXPLORE
         self._start_turn(inp.now, inp.pose)
@@ -792,6 +804,13 @@ class BehaviorFSM:
         turn = p.turn_speed if self.gate_closed else p.carry_max_turn
         if inp.now < self._probe_until:
             return (p.carry_speed, 0.0, 0.0)  # looking for the square from somewhere else
+        if (p.yield_to_peer and inp.peer_seen is not None and inp.peer_seen[1] <= p.peer_yield_distance):
+            self._yield_since = inp.now if self._yield_since is None else self._yield_since
+            if inp.now - self._yield_since > p.yield_timeout:
+                return self._abandon_transport(inp, "the other robot blocks the way to the square")
+            self.note = "waiting for the other robot"
+            return ZERO
+        self._yield_since = None
         axis = p.axis_delivery
         # Close to the square the rectangles leave the view: once on the axis, the square is enough.
         seen = inp.refs_visible or (self._on_axis and inp.square_visible) if axis else inp.square_visible
@@ -817,6 +836,16 @@ class BehaviorFSM:
             self._on_axis = True
         elif not axis and abs(inp.square_cx) > p.square_align:
             return (0.0, 0.0, -math.copysign(turn, inp.square_cx))  # square on the right: spin right
+        obstacle = self._blocking(inp.cubes)
+        if obstacle is not None:
+            if not self._dodging:
+                self._dodges += 1
+            self._dodging = True
+            if self._dodges > p.dodge_limit:
+                return self._abandon_transport(inp, "a non-target cube keeps blocking the way")
+            self.note = f"{obstacle.color} cube ahead: sidestep"
+            return (0.0, math.copysign(p.axis_strafe_speed, obstacle.cx_norm if obstacle.cx_norm else 1.0), 0.0)
+        self._dodging = False
         if not (inp.square_visible and inp.square_cy >= p.square_reach_cy):
             return (p.carry_speed, 0.0, 0.0)
         self._ask_lease(inp)
@@ -835,6 +864,8 @@ class BehaviorFSM:
             if not self._still_holding(inp):
                 return self._abandon_transport(inp, "cube lost while entering")
             if inp.now < self._push_until:
+                if self._blocking(inp.cubes) is not None:  # pushing on would take it into the square
+                    return self._abandon_transport(inp, "non-target cube in the push path")
                 vy = 0.0
                 if inp.square_visible and not p.axis_delivery:  # on the axis the push is straight
                     vy = max(-p.enter_speed, min(p.enter_speed, -p.square_align_gain * p.enter_speed * inp.square_cx))
@@ -858,6 +889,7 @@ class BehaviorFSM:
         self._zone_action(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
         self._on_axis = False
+        self._yield_since, self._dodges, self._dodging = None, 0, False
         self._carried_color = ""
         self.state = State.EXPLORE
         self.note = "delivered" if left_behind else "delivery failed: the cube is still in the scoop"

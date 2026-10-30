@@ -439,3 +439,49 @@ def test_axis_the_push_is_straight_even_if_the_square_looks_off_center():
     axis_cam(fsm, 1.0, refs=(0.0, 0.0), square=(0.0, 0.7))
     assert fsm.state is State.DELIVER
     assert axis_cam(fsm, 2.0, square=(0.4, 0.8)) == pytest.approx((p.enter_speed, 0.0, 0.0))
+
+
+# ---- Reactive gaps: the other robot at the square, non-target cubes on the way
+
+def cam2(fsm, now, cubes=(), peer=None, refs=(0.0, 0.0), square=(0.0, 0.3), scoop="red"):
+    return fsm.step(BehaviorInput(
+        now=now, cubes=list(cubes), line_front=False, pose=None, scoop_color=scoop, peer_seen=peer,
+        refs_visible=refs is not None, refs_cx=refs[0] if refs else 0.0, refs_skew=refs[1] if refs else 0.0,
+        square_visible=square is not None, square_cx=square[0] if square else 0.0,
+        square_cy=square[1] if square else 0.0, square_area=20000.0))
+
+
+def test_the_yielding_robot_waits_for_the_other_and_gives_up_after_the_timeout():
+    fsm = axis_fsm(yield_to_peer=True, peer_yield_distance=0.5, yield_timeout=3.0)
+    assert cam2(fsm, 1.0, peer=(0.0, 0.3)) == (0.0, 0.0, 0.0)
+    assert cam2(fsm, 2.0, peer=(0.0, 0.3)) == (0.0, 0.0, 0.0)
+    assert cam2(fsm, 3.0, peer=(0.0, 0.9))[0] == pytest.approx(fsm.params.carry_speed)  # it left: go on
+    cam2(fsm, 4.0, peer=(0.0, 0.3))
+    cam2(fsm, 7.5, peer=(0.0, 0.3))
+    assert fsm.state is State.EXPLORE and "blocks" in fsm.note
+
+
+def test_the_robot_with_priority_does_not_wait():
+    fsm = axis_fsm(yield_to_peer=False)
+    assert cam2(fsm, 1.0, peer=(0.0, 0.3))[0] == pytest.approx(fsm.params.carry_speed)
+
+
+def test_a_non_target_cube_ahead_is_sidestepped_to_the_free_side_then_given_up_after_too_many_tries():
+    fsm = axis_fsm(dodge_limit=2)
+    p = fsm.params
+    green_right = Cube("green", 0.1, 0.7, 800.0)
+    assert cam2(fsm, 1.0, cubes=[green_right]) == pytest.approx((0.0, p.axis_strafe_speed, 0.0))  # cube right: go left
+    assert cam2(fsm, 1.1, cubes=[Cube("green", -0.1, 0.7, 800.0)]) == pytest.approx((0.0, -p.axis_strafe_speed, 0.0))
+    cam2(fsm, 1.2)  # clear: it goes straight again
+    cam2(fsm, 1.3, cubes=[green_right])  # second episode
+    cam2(fsm, 1.4)
+    cam2(fsm, 1.5, cubes=[green_right])  # third episode: over the limit
+    assert fsm.state is State.EXPLORE and "blocking" in fsm.note
+
+
+def test_the_push_is_called_off_if_a_non_target_cube_is_in_its_path():
+    fsm = axis_fsm()
+    cam2(fsm, 1.0, square=(0.0, 0.7))
+    assert fsm.state is State.DELIVER
+    cam2(fsm, 1.5, cubes=[Cube("blue", 0.0, 0.8, 800.0)], square=(0.0, 0.8))
+    assert fsm.state is State.EXPLORE and "push path" in fsm.note

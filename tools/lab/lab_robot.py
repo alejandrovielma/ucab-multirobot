@@ -399,7 +399,7 @@ def mode_chase(args, cfg):
             refs = detect_refs(frame, vparams) if frame is not None else None  # green and red rectangles
             want = fsm.step(BehaviorInput(
                 now=now, cubes=cubes, line_front=black, scoop_color=scoop,
-                refs_visible=refs is not None and refs.visible,
+                refs_visible=refs is not None and refs.visible, peer_seen=peer,
                 refs_cx=refs.center_cx if refs is not None else 0.0,
                 refs_skew=refs.skew if refs is not None else 0.0,
                 square_visible=square is not None and square.visible,
@@ -483,7 +483,7 @@ def mode_dashboard(args, cfg):
                 square_cx=square.cx_norm if square is not None else 0.0,
                 square_cy=square.cy_norm if square is not None else 0.0,
                 square_area=square.area_px if square is not None else 0.0,
-                refs_visible=refs is not None and refs.visible,
+                refs_visible=refs is not None and refs.visible, peer_seen=peer,
                 refs_cx=refs.center_cx if refs is not None else 0.0,
                 refs_skew=refs.skew if refs is not None else 0.0))
             change = dash.take_change()

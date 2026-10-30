@@ -76,6 +76,10 @@
     axis_align: 0.1  # |refs_cx| below which the midpoint counts as straight ahead
     axis_skew_tol: 0.06  # |refs_skew| below which the robot counts as on the axis (calibrate)
     axis_strafe_speed: 0.04  # m/s sideways to get onto the axis
+    yield_to_peer: false  # waits for the other robot near the square (Ferb yields to Phineas)
+    peer_yield_distance: 0.5  # m, other robot's marker closer than this: wait
+    yield_timeout: 10.0  # s waiting before giving the cube up
+    dodge_limit: 3  # sidesteps around non-target cubes while carrying
     deliver_push_time: 2.0  # s pushing in at enter_speed
     deliver_back_time: 2.5  # s backing out at reverse_speed
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).
@@ -116,6 +120,7 @@
     escape_time: 1.5
     carry_max_turn: 0.4  # rad/s, slow in-place spin with a cube (no arcs: team rule 2026-10-27)
     max_side_speed: 0.05  # m/s, any translation that is not straight ahead (sideways, diagonal, back)
+    peer_memory: 2.0  # s the other robot's last bearing still counts after it leaves the camera view
     max_accel: 0.4  # m/s^2, ramp when speeding up (rollers slip and motors stall on hard starts); stopping is immediate
     max_alpha: 2.0  # rad/s^2
     max_decel_carry: 0.3  # m/s^2, braking with a cube (it keeps its inertia and slides off the delivery axis)
