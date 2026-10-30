@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import pytest
 
-from mobile_base.vision import VisionParams, detect_cubes, detect_refs
+from mobile_base.vision import VisionParams, detect_cubes, detect_refs, scoop_content
 
 
 def _board_with_cubes():
@@ -186,3 +186,25 @@ def test_refs_a_cube_sized_blob_is_not_a_reference_and_a_reference_is_not_a_cube
     big = _canvas()
     _rect(big, 100, 300, 260, 340, RED)  # long red rectangle
     assert not [d for d in detect_cubes(big, params) if d.color == "red"]
+
+
+# ---- two cubes in the scoop
+
+
+def _scoop_frame(left, right=None):
+    img = _canvas()
+    x0, x1, xm = int(0.4 * 640), int(0.6 * 640), int(0.5 * 640)
+    y0, y1 = int(0.74 * 480), int(0.84 * 480)
+    img[y0:y1, x0:(xm if right else x1)] = left
+    if right:
+        img[y0:y1, xm:x1] = right
+    return img
+
+
+def test_scoop_one_cube_is_its_color_and_two_colors_are_mixed():
+    assert scoop_content(_scoop_frame(RED))[0] == "red"
+    assert scoop_content(_scoop_frame(RED, GREEN))[0] == "mixed"
+
+
+def test_scoop_two_cubes_of_the_same_color_are_that_color():
+    assert scoop_content(_scoop_frame(RED))[0] == "red"

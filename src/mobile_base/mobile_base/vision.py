@@ -35,6 +35,9 @@ class VisionParams:
     scoop_y_min: float = 0.74
     scoop_y_max: float = 0.84
     scoop_min_fill: float = 0.30
+    # Two colors each filling at least this much of the window: two cubes in the scoop, reported as "mixed"
+    # (never a target, so the robot backs off and leaves them). PLACEHOLDER: calibrate with two cubes in the U.
+    scoop_mixed_fill: float = 0.15
     # Delivery square: hue range of this color (blue), at least this many px. A 2 cm cube at the
     # scoop mouth covers a few thousand px with the IMX219-120 at 640 x 480: calibrate on the robot.
     square_color: str = "blue"
@@ -213,13 +216,17 @@ def scoop_content(bgr: np.ndarray, params: VisionParams = VisionParams()) -> tup
     hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     painted = (sat > params.s_min) & (val > params.v_min)
     best, best_fill = "", 0.0
+    present = 0
     for name, spans in params.hue_ranges.items():
         in_range = np.zeros(hue.shape, bool)
         for low, high in spans:
             in_range |= (hue >= low) & (hue <= high)
         fill = float((in_range & painted).mean())
+        present += fill >= params.scoop_mixed_fill
         if fill > best_fill:
             best, best_fill = name, fill
+    if present >= 2:
+        return "mixed", best_fill  # two cubes of different colors: neither is safe to deliver
     return (best if best_fill >= params.scoop_min_fill else ""), best_fill
 
 

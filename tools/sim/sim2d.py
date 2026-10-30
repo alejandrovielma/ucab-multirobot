@@ -125,11 +125,9 @@ def observe(r, other, cubes):
             cam.append(Cube(c["color"], p[0], p[1], 3000.0 * (0.2 / p[2]) ** 2))
     sq = project(*to_robot(r, *SQUARE_C))
     refs = [project(*to_robot(r, *REF_GREEN)), project(*to_robot(r, *REF_RED))]
-    scoop = ""
-    for c in cubes:
-        xr, yr = to_robot(r, c["x"], c["y"])
-        if 0.09 <= xr <= 0.19 and abs(yr) < 0.06:
-            scoop = c["color"]
+    in_scoop = {c["color"] for c in cubes if 0.09 <= to_robot(r, c["x"], c["y"])[0] <= 0.19
+                and abs(to_robot(r, c["x"], c["y"])[1]) < 0.06}
+    scoop = "mixed" if len(in_scoop) > 1 else next(iter(in_scoop), "")  # like vision.scoop_content
     peer = None
     pp = project(*to_robot(r, other.x, other.y))
     if pp:

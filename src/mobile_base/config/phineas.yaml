@@ -71,7 +71,7 @@
     square_search_time: 15.0  # s spinning without seeing the square before a short drive forward
     square_probe_time: 1.5
     square_align: 0.15  # |square_cx| that counts as centered
-    square_reach_cy: 0.6  # square centroid this low in the image: the scoop is at its edge
+    square_reach_cy: 0.47  # DELIVER starts ~0.40 m from the square center (entry offset 0.298 before its boundary); depends on the camera model, calibrate
     axis_delivery: true  # line up on the perpendicular between the green and red rectangles, push straight
     axis_align: 0.1  # |refs_cx| below which the midpoint counts as straight ahead
     axis_skew_tol: 0.06  # |refs_skew| below which the robot counts as on the axis (calibrate)
@@ -80,7 +80,7 @@
     peer_yield_distance: 0.5  # m, other robot's marker closer than this: wait
     yield_timeout: 10.0  # s waiting before giving the cube up
     dodge_limit: 3  # sidesteps around non-target cubes while carrying
-    deliver_push_time: 2.0  # s pushing in at enter_speed
+    deliver_push_time: 4.0  # s pushing in at enter_speed: 0.20 m from the entry to the drop point (core/delivery.py)
     deliver_back_time: 2.5  # s backing out at reverse_speed
     # Provisional (calibrate facing the square at 30 and 10 cm; cubes next to the scoop appear at cy ~0.80).
     # Enabled on purpose: a wrong value only makes the robot turn away early, while 0.0 (off) lets the
