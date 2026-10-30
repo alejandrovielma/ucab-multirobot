@@ -183,3 +183,18 @@ cat prueba-dashboard-*.log      # la direccion completa, con ?t=<token>
 Corre desacoplado (se puede quitar el cable). Todo comando pasa por el `SafetyGate` (línea, otro robot),
 el robot se detiene 0,4 s después del último comando y Esc es una parada que se mantiene hasta pulsar el
 botón otra vez. El token evita que otra persona de la red lo maneje.
+
+## Posición estimada y memoria (cartógrafo)
+
+`chase` y `dashboard` estiman dónde está el robot sin cámara cenital (filtro de partículas,
+`core/localization.py`): predicen con las órdenes enviadas a los motores y se corrigen con la cinta
+(sensor de línea), el cuadro azul y los rectángulos verde y rojo. Recuerdan las zonas vistas, los cubos
+objetivo vistos y los toques de cinta (`core/cartographer.py`), y exploran hacia lo no visto girando antes
+de la cinta. La línea del video y el estado del dashboard muestran "en (x, y) grados +-cm" cuando la
+estimación es confiable, o "buscando" mientras no.
+
+- `--no-map` vuelve a la exploración anterior (choca y gira), para comparar en la pista.
+- Antes de confiar en ella hay que medir: la tabla distancia/altura en la imagen de la cámara
+  (`CameraModel.cy_table`) y la posición real de los rectángulos (`LANDMARKS`); hoy son supuestos.
+- Quieto y viendo solo el cuadro, el error puede llegar a 10-15 cm a lo largo de la línea de vista;
+  se corrige al moverse y al tocar la cinta.

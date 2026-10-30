@@ -217,3 +217,19 @@ def test_a_cube_on_the_blue_square_is_delivered_not_a_target():
     img[100:130, 500:530] = RED  # a red cube elsewhere
     reds = [d for d in detect_cubes(img) if d.color == "red"]
     assert len(reds) == 1 and reds[0].cx_norm > 0.5
+
+
+def test_each_reference_rectangle_is_a_landmark_even_alone():
+    from mobile_base.vision import SquareView, landmark_sightings
+
+    img = _canvas()
+    _rect(img, 100, 300, 220, 340, GREEN)
+    alone = detect_refs(img, VisionParams(ref_min_area=2000.0))
+    assert not alone.visible and [s[0] for s in alone.seen] == ["green"]
+    both = _canvas()
+    _rect(both, 100, 300, 220, 340, GREEN)
+    _rect(both, 420, 260, 540, 300, RED)
+    refs = detect_refs(both, VisionParams(ref_min_area=2000.0))
+    names = [n for n, _, _ in landmark_sightings(SquareView(True, 0.0, 0.4, 20000.0), refs)]
+    assert names == ["square", "green", "red"]
+    assert landmark_sightings(None, None) == []

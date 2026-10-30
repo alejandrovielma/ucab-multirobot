@@ -178,7 +178,8 @@ async function poll() {
     document.getElementById("status").textContent =
       `motores: vx, vy, wz = ${c}   (${s.reason})\n` +
       `línea: ${s.line ? "NEGRO" : "blanco"}   pala: ${s.scoop || "-"}   otro robot: ${s.peer === null ? "-" : s.peer.toFixed(2) + " m"}\n` +
-      `cubos: ${s.cubes.join(", ") || "-"}   cuadro azul: ${s.square ? "sí" : "no"}   ${s.fps.toFixed(0)} fps`;
+      `cubos: ${s.cubes.join(", ") || "-"}   cuadro azul: ${s.square ? "sí" : "no"}   ${s.fps.toFixed(0)} fps\n` +
+      `posición estimada: ${s.est || "-"}`;
   } catch (_) {
     document.getElementById("status").innerHTML = '<span class="warn">Sin conexión con el robot.</span>';
   }

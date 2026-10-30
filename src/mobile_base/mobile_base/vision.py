@@ -71,6 +71,7 @@ class RefsView:
     visible: bool = False
     center_cx: float = 0.0  # [-1, 1], midpoint between them, left negative
     skew: float = 0.0
+    seen: tuple[tuple[str, float, float], ...] = ()  # (color, cx, cy) of each one found, even alone
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,8 @@ def _is_ref_shape(contour, params: VisionParams) -> bool:
 
 
 def detect_refs(bgr: np.ndarray, params: VisionParams = VisionParams()) -> RefsView:
-    """The green and red reference rectangles, both or nothing (one alone says nothing about the axis)."""
+    """The green and red reference rectangles. visible needs both (one alone says nothing about the axis);
+    seen lists each one found, a landmark for the particle filter even alone."""
     height, width = bgr.shape[:2]
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
     painted = _painted(hsv, params)
@@ -144,12 +146,19 @@ def detect_refs(bgr: np.ndarray, params: VisionParams = VisionParams()) -> RefsV
             in_range |= (hsv[..., 0] >= low) & (hsv[..., 0] <= high)
         contours, _ = cv2.findContours(_open(in_range & painted, params), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         blobs = [c for c in contours if _is_ref_shape(c, params)]
-        if not blobs:
-            return RefsView()
-        m = cv2.moments(max(blobs, key=cv2.contourArea))
-        found.append((m["m10"] / m["m00"] / width * 2.0 - 1.0, m["m01"] / m["m00"] / height))
-    (lx, ly), (rx, ry) = sorted(found)
-    return RefsView(True, (lx + rx) / 2.0, ly - ry)
+        if blobs:
+            m = cv2.moments(max(blobs, key=cv2.contourArea))
+            found.append((color, m["m10"] / m["m00"] / width * 2.0 - 1.0, m["m01"] / m["m00"] / height))
+    if len(found) < 2:
+        return RefsView(seen=tuple(found))
+    (_, lx, ly), (_, rx, ry) = sorted(found, key=lambda f: f[1])
+    return RefsView(True, (lx + rx) / 2.0, ly - ry, tuple(found))
+
+
+def landmark_sightings(square: SquareView | None, refs: RefsView | None) -> list[tuple[str, float, float]]:
+    """(name, cx, cy) of the landmarks in view, named like core/localization.LANDMARKS."""
+    out = [("square", square.cx_norm, square.cy_norm)] if square is not None and square.visible else []
+    return out + list(refs.seen if refs is not None else ())
 
 
 def detect_cubes(bgr: np.ndarray, params: VisionParams = VisionParams()) -> list[Detection]:

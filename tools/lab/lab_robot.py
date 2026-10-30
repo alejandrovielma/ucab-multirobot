@@ -31,10 +31,12 @@ from stream import FrameBuffer, serve
 from dashboard import Dashboard
 from teleop import Teleop
 
+from mobile_base.core.cartographer import Cartographer  # noqa: E402
+from mobile_base.core.localization import Localizer  # noqa: E402
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
 from mobile_base.core.colors import DEFAULT_HUE_RANGES, parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
-from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_refs, detect_square, scoop_content  # noqa: E402
+from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_refs, detect_square, landmark_sightings, scoop_content  # noqa: E402
 
 COLORS_BGR = {"red": (0, 0, 255), "orange": (0, 140, 255), "yellow": (0, 230, 230), "green": (0, 200, 0),
               "blue": (255, 80, 0), "purple": (200, 0, 160)}
@@ -353,6 +355,38 @@ def mode_camera(args, cfg):
                 LOG.warn(f"no se pudo guardar la imagen en {args.save_dir}/ (disco lleno o sin permiso?)")
 
 
+class MapRunner:
+    """The cartographer (particle filter + memory) in a lab loop. The command sent at one tick moved the
+    robot until the next one: it is applied there, with the real elapsed time."""
+
+    def __init__(self, enabled: bool):
+        self.carto = Cartographer(Localizer()) if enabled else None
+        self._sent = None  # (cmd, time)
+
+    def inputs(self, now, black, square, refs, cubes, fsm) -> dict:
+        if self.carto is None:
+            return {}
+        if self._sent is not None:
+            cmd, t = self._sent
+            self.carto.moved(cmd, max(0.0, now - t))
+        est = self.carto.observe(now, black, landmark_sightings(square, refs), cubes, fsm.targets,
+                                 carrying=fsm.carrying)
+        goal = self.carto.goal_for(now, fsm.targets)
+        if not est.localized:
+            return {}
+        return dict(est_pose=(est.x, est.y, est.theta), explore_goal=goal, tape_ahead=self.carto.tape_ahead())
+
+    def sent(self, cmd, now) -> None:
+        self._sent = (cmd, now)
+
+    def text(self) -> str:
+        if self.carto is None:
+            return "sin mapa"
+        e = self.carto.est
+        where = f"({e.x:+.2f}, {e.y:+.2f}) {math.degrees(e.theta):+4.0f} grados +-{e.spread * 100:.0f} cm"
+        return ("en " if e.localized else "buscando, cerca de ") + where + f", ruedas {e.scale:.2f}"
+
+
 def mode_chase(args, cfg):
     gpio = open_gpio(args.chip, args.dry_run)
     motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
@@ -383,6 +417,7 @@ def mode_chase(args, cfg):
     serve(frames, args.port)
     print(f"objetivo {list(targets)}, prohibidos {list(avoid)}; video en http://<ip-del-robot>:{args.port}/ ; Ctrl+C para parar",
           flush=True)
+    mapper = MapRunner(not args.no_map)
     t0 = time.monotonic()
     previous = None
     try:
@@ -397,8 +432,9 @@ def mode_chase(args, cfg):
             scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
             peer = detect_peer(frame, vparams) if frame is not None else None  # the other robot's marker
             refs = detect_refs(frame, vparams) if frame is not None else None  # green and red rectangles
+            where = mapper.inputs(now, black, square, refs, cubes, fsm)
             want = fsm.step(BehaviorInput(
-                now=now, cubes=cubes, line_front=black, scoop_color=scoop,
+                **where, now=now, cubes=cubes, line_front=black, scoop_color=scoop,
                 refs_visible=refs is not None and refs.visible, peer_seen=peer,
                 refs_cx=refs.center_cx if refs is not None else 0.0,
                 refs_skew=refs.skew if refs is not None else 0.0,
@@ -422,9 +458,11 @@ def mode_chase(args, cfg):
                         frames.put(annotate(f, detect_cubes(f, vparams), vparams, ["CAPTURE: parado"]))
                     time.sleep(0.1)
             motors.drive(*cmd)
+            mapper.sent(cmd, now)
             if frame is not None:
                 frames.put(annotate(frame, dets, vparams,
-                                    [f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
+                                    [mapper.text(),
+                                     f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
                                      f"prohibidos tocados={fsm.forbidden_touches} entregados={fsm.delivered}"
                                      + (f" otro robot a {peer[1]:.2f} m" if peer else ""),
                                      f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
@@ -465,6 +503,7 @@ def mode_dashboard(args, cfg):
     except OSError:
         ip = "<ip-del-robot>"
     print(f"control: http://{ip}:{args.port}/?t={token}   (Ctrl+C o pkill -INT para parar)", flush=True)
+    mapper = MapRunner(not args.no_map)
     t0 = time.monotonic()
     last = t0
     try:
@@ -477,8 +516,10 @@ def mode_dashboard(args, cfg):
             scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
             peer = detect_peer(frame, vparams) if frame is not None else None
             refs = detect_refs(frame, vparams) if frame is not None else None
+            cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
+            where = mapper.inputs(now, black, square, refs, cubes, fsm)  # also while driving by hand
             auto = fsm.step(BehaviorInput(
-                now=now, cubes=[Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets], line_front=black,
+                **where, now=now, cubes=cubes, line_front=black,
                 scoop_color=scoop, square_visible=square is not None and square.visible,
                 square_cx=square.cx_norm if square is not None else 0.0,
                 square_cy=square.cy_norm if square is not None else 0.0,
@@ -495,8 +536,10 @@ def mode_dashboard(args, cfg):
                 heartbeat_age=None, carrying=fsm.carrying and not manual, peer_seen=peer, estop=teleop.estop,
                 delivering=fsm.state is State.DELIVER and not manual))
             motors.drive(*cmd)
+            mapper.sent(cmd, now)
             t = time.monotonic()
             dash.update_status(fsm=fsm.state.value, delivered=fsm.delivered, forbidden=fsm.forbidden_touches,
+                               est=mapper.text(),
                                reason=reason, line=bool(black), scoop=scoop or "",
                                  peer=peer[1] if peer else None, cubes=[d.color for d in dets],
                                  square=square is not None and square.visible, fps=1.0 / max(t - last, 1e-3))
@@ -544,6 +587,8 @@ def main():
     parser.add_argument("--target", default=None, help="chase: target colors, comma separated (the mission)")
     parser.add_argument("--avoid", default=None, help="chase: forbidden colors, comma separated")
     parser.add_argument("--max-turn", type=float, default=1.0, help="teleop: rad/s cap of the spin")
+    parser.add_argument("--no-map", action="store_true",
+                        help="chase/dashboard: no particle filter or memory (the old bump-and-turn exploration)")
     parser.add_argument("--stop-at-capture", action="store_true",
                         help="chase: stop when a cube reaches the scoop instead of carrying it to the square")
     args = parser.parse_args()
