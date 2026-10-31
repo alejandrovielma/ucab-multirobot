@@ -171,7 +171,7 @@ python3 tools/lab/lab_robot.py chase --dry-run --camera file:src/mobile_base/tes
 
 ## Dashboard en el navegador (misión + manual)
 
-Botones de misión (color objetivo, prohibido, neutro; INICIAR / DETENER), cámara del robot, parada de
+Botones de misión (color objetivo: solo amarillo o azul, uno por robot, asignado el día de la prueba; prohibido: cualquiera; neutro; INICIAR / DETENER), cámara del robot, parada de
 emergencia y modo manual con WASD (Q/E giran en el sitio), desde un celular o laptop en la misma red. Sin
 modelo de lenguaje: es la capa deliberativa de la arquitectura híbrida (decisión 2026-10-30):
 

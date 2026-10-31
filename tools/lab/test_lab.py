@@ -197,8 +197,11 @@ def test_mission_colors_come_from_the_arguments_and_a_bad_name_exits_with_a_mess
 
     from lab_robot import mission_colors
 
-    ns = SimpleNamespace(target="blue, green", avoid="red")
-    assert mission_colors(ns, {}) == (("blue", "green"), ("red",))
+    assert mission_colors(SimpleNamespace(target="yellow", avoid=None), {}) == (("yellow",), ())
+    assert mission_colors(SimpleNamespace(target="blue", avoid="red"), {}) == (("blue",), ("red",))
+    for bad in ("yellow,blue", "red"):  # one color per robot, and only yellow or blue
+        with pytest.raises(SystemExit, match="mision invalida"):
+            mission_colors(SimpleNamespace(target=bad, avoid=None), {})
     assert mission_colors(SimpleNamespace(target=None, avoid=None), {"my_colors": "", "avoid_colors": ""}) == ((), ())
     with pytest.raises(SystemExit, match="mision invalida.*rosa"):
         mission_colors(SimpleNamespace(target="rosa", avoid=None), {})

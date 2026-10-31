@@ -26,20 +26,21 @@ def test_mission_is_validated_and_does_not_start_by_itself(dash):
 
 
 @pytest.mark.parametrize("body", [{"targets": ["pink"]}, {"targets": "blue"}, {"targets": ["blue"], "avoid": ["blue"]},
-                                  {"targets": [1]}])
+                                  {"targets": [1]},
+                                  {"targets": ["red"]}, {"targets": ["yellow", "blue"]}])
 def test_bad_missions_are_400(dash, body):
     assert call(dash, "POST", "/mission", body)[0] == 400
 
 
 def test_start_needs_a_target_then_start_and_stop_drive_the_sequencer(dash):
     assert call(dash, "POST", "/start")[0] == 400
-    call(dash, "POST", "/mission", {"targets": ["blue", "green"], "avoid": ["red"]})
+    call(dash, "POST", "/mission", {"targets": ["blue"], "avoid": ["red", "green"]})
     dash.take_change()
     assert call(dash, "POST", "/start")[0] == 200
-    assert dash.take_change() == (("blue", "green"), ("red",))
+    assert dash.take_change() == (("blue",), ("red", "green"))
     assert dash.take_change() is None  # reported once
     call(dash, "POST", "/stop")
-    assert dash.take_change() == ((), ("red",))
+    assert dash.take_change() == ((), ("red", "green"))  # stopping keeps the forbidden colors
 
 
 def test_manual_and_mission_are_exclusive(dash):

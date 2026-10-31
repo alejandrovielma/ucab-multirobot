@@ -57,3 +57,19 @@ def parse_colors(text: str, known: Iterable[str] = DEFAULT_HUE_RANGES) -> tuple[
     if unknown:
         raise ValueError(f"unknown color(s) {unknown}: use {', '.join(known)}")
     return colors
+
+
+# Competition rule: only yellow and blue cubes are collected, and each robot is assigned ONE of them.
+# The detector still sees every color (other cubes are obstacles to sidestep); this limits the mission only.
+MISSION_COLORS = ("yellow", "blue")
+
+
+def check_targets(targets: Iterable[str]) -> tuple[str, ...]:
+    """The mission targets as a tuple, or ValueError unless empty (IDLE) or exactly one of MISSION_COLORS."""
+    targets = tuple(targets)
+    bad = [c for c in targets if c not in MISSION_COLORS]
+    if bad:
+        raise ValueError(f"target color(s) {bad} not allowed: each robot collects one color, yellow or blue")
+    if len(targets) > 1:
+        raise ValueError(f"a robot collects ONE color, got {list(targets)}")
+    return targets

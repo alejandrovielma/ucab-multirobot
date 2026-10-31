@@ -35,7 +35,7 @@ from teleop import Teleop
 from mobile_base.core.cartographer import Cartographer  # noqa: E402
 from mobile_base.core.localization import Localizer  # noqa: E402
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, State  # noqa: E402
-from mobile_base.core.colors import DEFAULT_HUE_RANGES, parse_colors, ranges_from_flat  # noqa: E402
+from mobile_base.core.colors import DEFAULT_HUE_RANGES, check_targets, parse_colors, ranges_from_flat  # noqa: E402
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams  # noqa: E402
 from mobile_base.vision import VisionParams, detect_cubes, detect_peer, detect_refs, detect_square, landmark_sightings, scoop_content  # noqa: E402
 
@@ -412,7 +412,7 @@ def stop_on_signals() -> None:
 def mission_colors(args, bcfg):
     """(targets, avoid) from --target/--avoid or the YAML; a bad color name exits with a message, not a traceback."""
     try:
-        return (parse_colors(args.target if args.target is not None else bcfg.get("my_colors", "")),
+        return (check_targets(parse_colors(args.target if args.target is not None else bcfg.get("my_colors", ""))),
                 parse_colors(args.avoid if args.avoid is not None else bcfg.get("avoid_colors", "")))
     except ValueError as exc:
         raise SystemExit(f"mision invalida: {exc}") from None

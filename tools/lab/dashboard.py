@@ -5,9 +5,14 @@ This is the deliberative layer of the hybrid architecture: a person picks the mi
 decision 2026-10-30: no language model), the sequencer executes it and the safety gate filters it."""
 
 import json
+import pathlib
+import sys
 import threading
 
 from teleop import Teleop
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "src" / "mobile_base"))
+from mobile_base.core.colors import check_targets  # noqa: E402
 
 
 class Dashboard:
@@ -67,7 +72,7 @@ class Dashboard:
         if data is None:
             return self._bad("expected a JSON object")
         try:
-            targets, avoid = self._colors(data, "targets"), self._colors(data, "avoid")
+            targets, avoid = check_targets(self._colors(data, "targets")), self._colors(data, "avoid")
         except ValueError as exc:
             return self._bad(str(exc))
         both = set(targets) & set(avoid)

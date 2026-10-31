@@ -6,7 +6,7 @@
 #
 #   bash tools/lab/prueba_mision.sh <target colors> [forbidden colors] [seconds] [delay s] [max speed m/s]
 #   bash tools/lab/prueba_mision.sh blue red 60 15 0.05
-# Colors are comma separated: red, orange, yellow, green, blue, purple. Without the overhead camera
+# target: yellow or blue, one per robot; forbidden: any color (comma separated: red, orange, yellow, green, blue, purple). Without the overhead camera
 # there is no pose: the robot stops at the scoop mouth (CAPTURE), it does not carry the cube yet.
 set -euo pipefail
 
@@ -28,8 +28,9 @@ if [ -n "$running" ]; then
 fi
 # Bad color names fail here, before the countdown, instead of in the background. The colors travel as
 # arguments, never pasted into code (a quote in them would inject it).
-python3 -c 'import sys; sys.path.insert(0, "src/mobile_base"); from mobile_base.core.colors import parse_colors
-for text in sys.argv[1:]: parse_colors(text)' "$target" "$avoid"
+python3 -c 'import sys; sys.path.insert(0, "src/mobile_base"); from mobile_base.core.colors import check_targets, parse_colors
+check_targets(parse_colors(sys.argv[1]))
+parse_colors(sys.argv[2])' "$target" "$avoid"
 
 log="prueba-mision-$(date +%Y%m%d-%H%M%S)-${target//,/_}.log"
 setsid nohup bash -c 'sleep "$1"; exec timeout --signal=INT "$2" python3 tools/lab/lab_robot.py chase \

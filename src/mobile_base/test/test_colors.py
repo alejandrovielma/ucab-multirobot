@@ -61,3 +61,18 @@ def test_mission_colors_parse_from_a_comma_separated_string():
     assert parse_colors(" Blue, green ,") == ("blue", "green")
     with pytest.raises(ValueError):
         parse_colors("blue,pink")
+
+
+@pytest.mark.parametrize("targets", [(), ("yellow",), ("blue",)])
+def test_check_targets_accepts_idle_or_one_yellow_or_blue(targets):
+    from mobile_base.core.colors import check_targets
+
+    assert check_targets(targets) == targets
+
+
+@pytest.mark.parametrize("targets", [("red",), ("green",), ("yellow", "blue"), ("rosa",)])
+def test_check_targets_rejects_other_colors_and_more_than_one(targets):
+    from mobile_base.core.colors import check_targets
+
+    with pytest.raises(ValueError):
+        check_targets(targets)

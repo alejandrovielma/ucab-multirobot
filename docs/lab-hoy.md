@@ -123,7 +123,7 @@ Con `drive --battery <V> --max-speed 0.05`, en el piso y con un cubo de 2 cm del
 
 - [ ] F: cada tecla de `drive` hace lo que dice; desviación al avanzar 1 m: ____ cm; vuelta completa con
       `q`: ____ s.
-- [ ] G: `chase --battery <V> --max-speed 0.05 --capture-cy <valor de E>`, 5 intentos: llega al cubo y se
+- [ ] G: `chase --target blue --battery <V> --max-speed 0.05 --capture-cy <valor de E>`, 5 intentos: llega al cubo y se
       detiene ____ de 5.
 
 ## 3. Antes de irse

@@ -53,7 +53,7 @@ Con `tools/lab/lab_robot.py`, como el 2026-10-20. Lista completa en [lab-hoy.md]
 | Sensor sobre el cuadro azul | `python3 tools/lab/lab_robot.py line` | ¿`blanco` o `NEGRO`? |
 | Pala (bloque E) | `python3 tools/lab/lab_robot.py drive --battery <V> --max-speed 0.05` | Con un cubo: `w` recto, `u`/`o` arcos, `q`/`e` giro, `s` atrás: ¿lo conserva? |
 | Manejo (bloque F) | El mismo `drive` | Desviación al avanzar 1 m; tiempo de una vuelta con `q` |
-| Persecución (bloque G) | `python3 tools/lab/lab_robot.py chase --battery <V> --max-speed 0.05 2>&1 \| tee chase.log` | 5 intentos: ¿llega al cubo y se detiene? ¿Retrocede al ver la cinta? |
+| Persecución (bloque G) | `python3 tools/lab/lab_robot.py chase --target blue --battery <V> --max-speed 0.05 2>&1 \| tee chase.log` | 5 intentos: ¿llega al cubo y se detiene? ¿Retrocede al ver la cinta? |
 
 **Terminada si:** la tabla está llena y se trajeron `capturas/` y los `.log`.
 
