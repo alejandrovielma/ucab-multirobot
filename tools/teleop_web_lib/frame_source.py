@@ -37,6 +37,8 @@ DEFAULT_PICAMERA_ID_HINT = "i2c@80000"
 # In Picamera2/DRM, "RGB888" gives [B, G, R] bytes (the BGR order OpenCV
 # expects).
 PICAMERA_FORMAT = "RGB888"
+# Bit depth of the sensor modes the IMX219 offers at the sizes we use.
+SENSOR_BIT_DEPTH = 10
 DEFAULT_VFLIP = True
 DEFAULT_HFLIP = False
 
@@ -125,6 +127,7 @@ def _picamera2_source(cfg: dict, width_px: int, height_px: int) -> FrameSource:
     camera.configure(
         camera.create_video_configuration(
             main={"size": (width_px, height_px), "format": PICAMERA_FORMAT},
+            sensor=_sensor_mode(cfg.get("sensor_size")),
         )
     )
     camera.start()
@@ -141,6 +144,20 @@ def _picamera2_source(cfg: dict, width_px: int, height_px: int) -> FrameSource:
         return frame if flip_code is None else cv2.flip(frame, flip_code)
 
     return read_frame
+
+
+def _sensor_mode(sensor_size) -> dict | None:
+    """
+    The sensor mode to request, or None to let libcamera pick one. Asking for
+    the full-frame binned size (1640x1232) keeps the whole field of view; the
+    default 640x480 mode is a small crop of the centre (about 28 degrees).
+    """
+    if not sensor_size:
+        return None
+    return {
+        "output_size": tuple(sensor_size),
+        "bit_depth": SENSOR_BIT_DEPTH,
+    }
 
 
 def _flip_code(vflip: bool, hflip: bool) -> int | None:
