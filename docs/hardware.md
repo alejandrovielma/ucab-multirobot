@@ -45,6 +45,14 @@ Fill in with what is measured on the HAT and copy the same numbers into `src/mob
 | Board | ≈ 1.93 × 1.22 m (from the photo) | measure |
 | Tape width | ≈ 19 mm | measure |
 | Delivery area | blue + green paper in a gap of the line, ≈ 24 cm per side; green landmark on the left, red on the right | measure |
+| Arena (inside the black line) | 116.5 cm long × 70 cm wide (measured) | measured |
+| Temporary delivery area | blue sheet 16.5 cm wide × 13.6 cm long (measured); pink line where it starts; black tape closes it at the back | measured; check which side is the depth |
+| Landmarks (legos) | 8.4 cm high (measured); ≈ 34.5 cm apart, it changes | measured; 8.4 cm with the base; the coloured section the camera sees is 6.4 cm. The code uses an effective 13.25 cm: the configured hfov (0.94 rad) is about twice the real ~0.48 rad (cropped 640x480 sensor mode), so distances by size need it |
+| Camera (browser tool) | lens centre 5.8 cm above the table; sensor mode 1640x1232 (hfov ~1.18 rad, ~68 deg); tilt 0.061 rad (3.5 deg); fitted to cubes at 20/30/40/60 cm within 2.1 px (`camera.model` in `tools/teleop_web.yaml`) | measured |
+| Drive speeds (browser tool) | forward at 0.42 ~0.31 m/s; backward at 0.35 ~0.23 m/s (measured from the legos' size in the camera, 4 and 2 pushes) | measured |
+| Camera vs scoop | scoop starts 4.8 cm below the lens centre; the scoop front is ~0.7 cm ahead of the lens (a cube touching it is seen from 5.2 cm of separation, when its top edge reaches row 479) | measured |
+| Image bottom row (479) | sees a whole cube down to 10 cm from the lens (~9 cm from the scoop); only its top edge from 5.7 cm; a cube touching the scoop is blind | derived from the fit |
+| Line sensor over blue, pink, white, black | AO 285 / 290 / 299 / 3383 counts (blue and pink read as white) | measured: cannot detect them |
 | Line sensor over the area paper | must read white on blue and green | measure |
 | Cubes | 2.5 cm, ≈ 9.4 g | measure |
 | Colours | red, orange, yellow, green, blue, purple/maroon | confirm maroon |
