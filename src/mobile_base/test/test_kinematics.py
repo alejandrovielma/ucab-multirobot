@@ -1,3 +1,4 @@
+import math
 import pytest
 
 from mobile_base.core.kinematics import (
@@ -51,10 +52,20 @@ def test_normalize_preserves_ratios():
 
 def test_duty_cap():
     assert duty_cap(8.4) == pytest.approx(6.0 / 8.4)
-    assert duty_cap(5.0) == pytest.approx(1.0)
-    assert duty_cap(12.0, v_motor_max=3.0) == pytest.approx(0.25)
-    with pytest.raises(ValueError):
-        duty_cap(0.0)
+    assert duty_cap(6.0) == pytest.approx(1.0)
+    assert duty_cap(9.0, v_motor_max=3.0) == pytest.approx(1.0 / 3.0)
+    for battery in (0.0, 5.0, 12.0, math.nan, math.inf):
+        with pytest.raises(ValueError):
+            duty_cap(battery)
+    for motor in (0.0, -6.0, math.nan):
+        with pytest.raises(ValueError):
+            duty_cap(8.4, v_motor_max=motor)
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_non_finite_wheel_speed_gives_zero_duty_not_the_cap(bad):
+    assert to_duty((bad, 5.0, -bad, 0.0), 10.5, 0.7) == pytest.approx((0.0, 0.7 * 5.0 / 10.5, 0.0, 0.0))
+    assert normalize((bad, 5.0, 0.0, 0.0), 10.5) == (0.0, 5.0, 0.0, 0.0)
 
 
 def test_to_duty_maps_and_clamps():

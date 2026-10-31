@@ -4,6 +4,7 @@ Conventions: wheel order FL, FR, RL, RR; vx forward, vy positive to the left,
 wz positive counter-clockwise. Wheel speeds are in rad/s.
 """
 
+import math
 from dataclasses import dataclass
 
 WheelSpeeds = tuple[float, float, float, float]
@@ -29,6 +30,7 @@ def wheel_speeds(vx: float, vy: float, wz: float, geom: MecanumGeometry = Mecanu
 
 def normalize(speeds: WheelSpeeds, max_speed: float) -> WheelSpeeds:
     """Scale all wheels by the same factor so none exceeds max_speed (keeps the motion direction)."""
+    speeds = tuple(s if math.isfinite(s) else 0.0 for s in speeds)  # min(cap, nan) is cap: never let a NaN through
     peak = max(abs(s) for s in speeds)
     if peak <= max_speed or peak == 0.0:
         return tuple(speeds)
@@ -38,8 +40,11 @@ def normalize(speeds: WheelSpeeds, max_speed: float) -> WheelSpeeds:
 
 def duty_cap(v_battery: float, v_motor_max: float = 6.0) -> float:
     """Largest PWM duty that keeps the average motor voltage under v_motor_max."""
-    if v_battery <= 0.0:
-        raise ValueError("battery voltage must be positive")
+    # 5 V or NaN would give cap 1.0 (8.4 V on a 6 V motor) and a negative rating a negative cap.
+    if not (math.isfinite(v_battery) and 6.0 <= v_battery <= 9.0):
+        raise ValueError(f"battery voltage must be finite and within 6.0-9.0 V, got {v_battery}")
+    if not (math.isfinite(v_motor_max) and v_motor_max > 0.0):
+        raise ValueError(f"motor max voltage must be finite and positive, got {v_motor_max}")
     return min(1.0, v_motor_max / v_battery)
 
 
@@ -49,6 +54,8 @@ def to_duty(speeds: WheelSpeeds, max_wheel_speed: float, duty_cap: float) -> Whe
     max_wheel_speed is the wheel speed reached at duty_cap (motor at its rated voltage).
     """
     def one(speed: float) -> float:
+        if not math.isfinite(speed):
+            return 0.0
         duty = speed / max_wheel_speed * duty_cap
         return max(-duty_cap, min(duty_cap, duty))
 

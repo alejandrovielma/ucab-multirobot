@@ -178,7 +178,7 @@ class SafetyGate:
         if fresh and self._last_theta is not None:
             dtheta = math.remainder(inp.own_pose.theta - self._last_theta, 2.0 * math.pi)
         elif self._last_now is not None:
-            dtheta = self._last_wz * max(0.0, inp.now - self._last_now)
+            dtheta = self._last_wz * min(max(0.0, inp.now - self._last_now), 0.5)  # a long gap is not a long spin
         else:
             dtheta = 0.0
         self._last_theta = inp.own_pose.theta if fresh else None
@@ -197,6 +197,8 @@ class SafetyGate:
             self._escape_until = None
             self._blocked_since = None
             return STOP, "stop: emergency stop"
+        if not all(math.isfinite(c) for c in inp.cmd):
+            return STOP, "stop: non-finite command"
         if p.require_heartbeat and (inp.heartbeat_age is None or inp.heartbeat_age > p.heartbeat_timeout):
             return STOP, "stop: coordinator heartbeat lost"
         own_fresh = self._is_fresh(inp.own_pose, inp.now)

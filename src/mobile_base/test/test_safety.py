@@ -495,3 +495,21 @@ def test_a_braking_ramp_never_mixes_translation_and_spin():
         gate.filter(SafetyInput(cmd=(0.08, 0.0, 0.0), now=0.1 * i, **base))
     vx, vy, wz = gate.filter(SafetyInput(cmd=(0.0, 0.0, 0.4), now=0.3, **base))[0]
     assert vx > 0.0 and wz == 0.0  # still braking: no spin yet
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize("slot", [0, 1, 2])
+def test_non_finite_command_is_a_full_stop(bad, slot):
+    cmd = [0.0, 0.0, 0.0]
+    cmd[slot] = bad
+    out, reason = SafetyGate(SafetyParams()).filter(make_input(cmd=tuple(cmd)))
+    assert out == (0.0, 0.0, 0.0)
+    assert reason == "stop: non-finite command"
+
+
+def test_a_long_gap_between_ticks_does_not_spin_the_line_memory_by_many_radians():
+    gate = SafetyGate(SafetyParams(require_pose=False, require_heartbeat=False))
+    gate.filter(make_input(now=0.0, cmd=(0.0, 0.0, 0.4), own_pose=None))
+    gate.filter(make_input(now=20.0, cmd=(0.0, 0.0, 0.0), own_pose=None))  # motors were stopped for 20 s
+    # 0.4 rad/s for the clamped 0.5 s, not for 20 s (8 rad)
+    assert abs(math.atan2(gate._line_dir[1], gate._line_dir[0])) == pytest.approx(0.2)
