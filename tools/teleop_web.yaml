@@ -234,12 +234,14 @@ auto:
   # After the push, back up this long: at 0.35 measured ~0.23 m/s, 1.0 s is 23 cm, enough to
   # leave the area.
   floor_deliver_backup_s: 1.0
-  # Delivery: facing the paper's centre within drop_align_tolerance_rad and this close (m) to it,
-  # push the cube straight to it from wherever the robot is (also diagonally). The push lasts
-  # (distance - cube_ahead_m) / forward_speed_mps: forward at 0.42 measured ~0.31 m/s, the cube's
-  # centre sits ~2.2 cm ahead of the lens. A squared, perpendicular entry needed the pink line,
-  # which was missed at 30 cm, and the robot backed off instead of delivering. TODO measure
-  deliver_commit_distance_m: 0.30
+  # Delivery: facing the paper's centre within drop_align_tolerance_rad, with its near edge this
+  # close (m), push the cube straight in from wherever the robot is (also diagonally), until the
+  # cube is deliver_insert_m past that edge (half the 13.6 cm sheet). The push lasts
+  # (edge + insert - cube_ahead_m) / forward_speed_mps: forward at 0.42 measured ~0.31 m/s, the
+  # cube's centre sits ~2.2 cm ahead of the lens. A squared, perpendicular entry needed the pink
+  # line, which was missed at 30 cm, and the robot backed off instead of delivering. TODO measure
+  deliver_commit_distance_m: 0.20
+  deliver_insert_m: 0.07
   forward_speed_mps: 0.31
   cube_ahead_m: 0.022
   # Carrying with the paper this close (m), the black line is the area's tape or the border next
