@@ -26,7 +26,7 @@ def test_starts_exploring_forward():
 
 
 def test_border_triggers_turn_in_place_then_resumes():
-    fsm = make_fsm(turn_min=1.0, turn_max=1.0)
+    fsm = make_fsm(blind_turn_min=1.2, blind_turn_max=1.2)
     tick(fsm, 0.0)
     cmd = tick(fsm, 0.1, line_front=True)
     assert cmd[0] == pytest.approx(0.0)
@@ -40,7 +40,7 @@ def test_border_triggers_turn_in_place_then_resumes():
 
 def test_line_backoff_reverses_before_spinning_without_pose():
     # Line sensor at the robot center: the body front is already past the tape when it fires.
-    fsm = make_fsm(line_backoff=0.14, turn_min=1.0, turn_max=1.0)
+    fsm = make_fsm(line_backoff=0.14, blind_turn_min=1.2, blind_turn_max=1.2)
     tick(fsm, 0.0)
     back = 0.14 / fsm.params.reverse_speed
     assert tick(fsm, 0.1, line_front=True) == pytest.approx((-fsm.params.reverse_speed, 0.0, 0.0))
@@ -130,7 +130,7 @@ def test_blue_square_is_not_a_border_while_carrying():
 def test_turn_duration_is_within_bounds_and_seeded():
     durations = []
     for _ in range(2):
-        fsm = make_fsm(turn_min=0.5, turn_max=1.5)
+        fsm = make_fsm(blind_turn_min=0.6, blind_turn_max=1.8)
         tick(fsm, 0.0, line_front=True)
         t = 0.0
         while tick(fsm, t)[2] != 0.0:
@@ -282,7 +282,7 @@ def test_explore_stops_dodging_a_red_cube_that_turns_with_the_robot():
 
 
 def test_red_cube_in_the_scoop_is_backed_off_then_turned_away():
-    fsm = not_red_fsm(shed_distance=0.08, shed_confirm=0.3, turn_min=1.0, turn_max=1.0)
+    fsm = not_red_fsm(shed_distance=0.08, shed_confirm=0.3, blind_turn_min=1.2, blind_turn_max=1.2)
     tick(fsm, 0.0)
     back = 0.08 / fsm.params.reverse_speed
     assert tick(fsm, 0.1, scoop="red")[0] == pytest.approx(fsm.params.explore_speed)  # not confirmed yet
@@ -439,7 +439,7 @@ def test_a_target_that_keeps_hiding_behind_another_cube_is_reached_by_pushing_it
 
 
 def test_repeated_border_hits_in_a_corner_back_off_further_and_turn_around():
-    fsm = make_fsm(line_backoff=0.1, corner_hits=3, corner_window=10.0, turn_min=0.5, turn_max=0.5)
+    fsm = make_fsm(line_backoff=0.1, corner_hits=3, corner_window=10.0, blind_turn_min=0.6, blind_turn_max=0.6)
     reverse = 0.1 / fsm.params.reverse_speed
     t = 0.0
     for _ in range(2):  # two ordinary border reactions

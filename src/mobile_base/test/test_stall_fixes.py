@@ -132,3 +132,16 @@ def test_a_cube_abandoned_at_the_border_is_not_approached_again_at_once():
     for i in range(2, 25):  # up to ~2.4 s: inside skip_time
         approach(fsm, 0.1 * i, cube)
         assert fsm.state is not State.APPROACH
+
+
+@pytest.mark.parametrize("turn_speed", [1.2, 0.5])
+def test_the_blind_border_turn_covers_the_same_angle_at_any_turn_speed(turn_speed):
+    # The lab caps the spin at 0.5 rad/s; a turn timed in seconds then covered 23-57 deg instead of 55-137.
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, use_lease=False, turn_speed=turn_speed,
+                                     blind_turn_min=1.0, blind_turn_max=1.0), rng=random.Random(1))
+    fsm.step(BehaviorInput(now=0.0, cubes=[], line_front=False))
+    fsm.step(BehaviorInput(now=0.1, cubes=[], line_front=True))
+    t = 0.1
+    while fsm.step(BehaviorInput(now=t, cubes=[], line_front=False))[2] != 0.0:
+        t += 0.01
+    assert (t - 0.1) * turn_speed == pytest.approx(1.0, abs=0.05)

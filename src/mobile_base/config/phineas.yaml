@@ -11,8 +11,8 @@
     cube_timeout: 0.5
     explore_speed: 0.12
     turn_speed: 1.2
-    turn_min: 0.8
-    turn_max: 2.0
+    blind_turn_min: 0.96  # rad, border turn without a pose (0.8 s at 1.2 rad/s)
+    blind_turn_max: 2.4  # rad (2.0 s at 1.2 rad/s)
     turn_angle_min: 2.356  # 135 deg
     turn_angle_max: 3.927  # 225 deg
     k_turn: 1.5

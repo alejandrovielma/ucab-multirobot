@@ -110,8 +110,8 @@ class BehaviorParams:
     my_colors: Sequence[str] = ()
     explore_speed: float = 0.12  # m/s
     turn_speed: float = 1.2  # rad/s
-    turn_min: float = 0.8  # s
-    turn_max: float = 2.0  # s
+    blind_turn_min: float = 0.96  # rad, border turn without a pose (timed: angle / turn_speed)
+    blind_turn_max: float = 2.4  # rad
     turn_angle_min: float = math.radians(135.0)  # border turn with pose: face back into the track
     turn_angle_max: float = math.radians(225.0)
     k_turn: float = 1.5  # rad/s per unit of cx_norm
@@ -592,7 +592,7 @@ class BehaviorFSM:
         self._turn_dir = self._rng.choice((-1.0, 1.0))
         if pose is None:
             self._turn_goal = None
-            self._turn_until = now + self._rng.uniform(p.turn_min, p.turn_max)
+            self._turn_until = now + self._rng.uniform(p.blind_turn_min, p.blind_turn_max) / p.turn_speed
             return
         # A timed turn can stop with the front sensor already beyond the tape (it then reads white
         # and the robot drives off the track): turn a measured angle that points back inside.
