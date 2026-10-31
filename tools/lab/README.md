@@ -198,3 +198,20 @@ estimación es confiable, o "buscando" mientras no.
   (`CameraModel.cy_table`) y la posición real de los rectángulos (`LANDMARKS`); hoy son supuestos.
 - Quieto y viendo solo el cuadro, el error puede llegar a 10-15 cm a lo largo de la línea de vista;
   se corrige al moverse y al tocar la cinta.
+
+## Encontrar la IP de la Raspberry
+
+Sin instalar nada (solo Python 3, en Windows, Linux o macOS), desde el PC conectado a la misma red Wi-Fi
+que el robot o a su cable Ethernet:
+
+```bash
+python tools/lab/encontrar_pi.py              # nombres (phineas.local...), tabla ARP y barrido de tus redes /24
+python tools/lab/encontrar_pi.py --linklocal  # además el cable (169.254.x.x), tarda ~1 minuto
+python tools/lab/encontrar_pi.py --ip 10.68.17  # otra red /24 que quieras barrer
+```
+
+Muestra los equipos con el puerto 22 abierto y marca con `PI` los que tienen la dirección MAC de una
+Raspberry Pi. **No inicia sesión ni usa contraseñas**: después se entra a mano con `ssh <usuario>@<ip>`.
+Si no sale nada: esperar ~30 s tras conectar el cable, comprobar que la Pi está encendida y probar
+`--linklocal`. Si el PC enruta el tráfico por una VPN o un proxy (Throne, sing-box...), el barrido puede no
+llegar a la red local: apagarla un momento solo para buscar la IP.
