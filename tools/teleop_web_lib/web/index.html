@@ -29,6 +29,8 @@
   #strip { width: 100%; height: 28px; background: #222; border-radius: 6px; }
   #tuneInfo { color: #ccc; }
   #tuneInfo.changing { color: #ffd54f; font-weight: 700; }
+  #aoChart { width: 100%; height: 90px; background: #222; border-radius: 6px; }
+  #aoInfo { color: #90caf9; }
 </style></head><body>
 <h2 style="margin:0">Collector</h2>
 <img id="cam" src="/stream.mjpg" alt="camera">
@@ -36,6 +38,8 @@
 <div class="tune">
   <canvas id="strip" width="600" height="28"></canvas>
   <div id="tuneInfo">sensor output history (red = dark, green = light)</div>
+  <canvas id="aoChart" width="600" height="90"></canvas>
+  <div id="aoInfo">AO (analog): not wired</div>
   <div class="row">
     <label><input id="beep" type="checkbox"> beep when the reading changes</label>
     <button id="tuneReset" class="btn">Reset counters</button>
@@ -74,6 +78,8 @@ const TUNE = {
   beepMs: 80,
   msPerSecond: 1000,
   percentScale: 100,
+  adcMaxCounts: 4095,    // 12-bit ADC of the Fusion HAT+
+  millivoltsPerVolt: 1000,
 };
 
 const down = new Set();
@@ -110,7 +116,7 @@ const strip = document.getElementById("strip"), tuneInfo = document.getElementBy
 const beepBox = document.getElementById("beep");
 let rawHistory = [], flips = 0, lastRaw = null, lastFlipMs = null, audio = null;
 document.getElementById("tuneReset").onclick = () => {
-  rawHistory = []; flips = 0; lastFlipMs = null;
+  rawHistory = []; aoHistory = []; flips = 0; lastFlipMs = null;
 };
 function beep() {
   audio = audio || new AudioContext();
@@ -128,6 +134,31 @@ function drawStrip() {
     ctx.fillStyle = v ? "#ff5252" : "#4caf50";
     ctx.fillRect(i * barW, 0, Math.ceil(barW), strip.height);
   });
+}
+const aoChart = document.getElementById("aoChart"), aoInfo = document.getElementById("aoInfo");
+let aoHistory = [];
+function drawAo() {
+  const ctx = aoChart.getContext("2d");
+  const stepX = aoChart.width / (TUNE.historySamples - 1);
+  ctx.clearRect(0, 0, aoChart.width, aoChart.height);
+  ctx.strokeStyle = "#90caf9";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  aoHistory.forEach((c, i) => {
+    const y = aoChart.height * (1 - c / TUNE.adcMaxCounts);
+    if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * stepX, y);
+  });
+  ctx.stroke();
+}
+function tuneAnalog(counts, mv) {
+  if (counts === null || counts === undefined) return;
+  aoHistory.push(counts);
+  if (aoHistory.length > TUNE.historySamples) aoHistory.shift();
+  drawAo();
+  aoInfo.textContent = `AO ${counts} / ${TUNE.adcMaxCounts} · ` +
+    `${(mv / TUNE.millivoltsPerVolt).toFixed(2)} V · ` +
+    `last samples min ${Math.min(...aoHistory)} max ${Math.max(...aoHistory)} ` +
+    `(graph: 0 at the bottom, ${TUNE.adcMaxCounts} at the top)`;
 }
 function tune(raw) {
   if (raw === null || raw === undefined) return;
@@ -164,6 +195,7 @@ async function tick() {
     autoBtn.classList.toggle("on", !!s.auto);
     autoBtn.textContent = `Auto (P): ${s.auto ? "ON" : "OFF"}`;
     tune(s.line_raw);
+    tuneAnalog(s.line_counts, s.line_mv);
     const rawInfo = s.line_raw !== null && s.line_raw !== undefined ? ` (DO=${s.line_raw})` : "";
     if (s.line === "BLACK" || s.line_black) {
       lineBox.className = "line-box black";
