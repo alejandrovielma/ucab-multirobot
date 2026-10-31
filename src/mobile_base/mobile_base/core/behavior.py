@@ -193,6 +193,11 @@ class BehaviorParams:
     avoid_cy: float = 0.45  # a cube lower in the image than this is about to enter the scoop
     avoid_cx: float = 0.3  # |cx_norm| of the scoop's path at that distance
     avoid_timeout: float = 3.0  # s turning away (~200 deg at turn_speed) before ignoring it for skip_time
+    # Avoiding a cube spins away from it, the guided spin toward a goal behind it spins back: after
+    # avoid_cycles such engagements within avoid_window the guide is off for guide_off_time (straight on).
+    avoid_cycles: int = 3
+    avoid_window: float = 6.0  # s
+    guide_off_time: float = 4.0  # s driving straight on the cleared heading instead of spinning toward the goal
     shed_distance: float = 0.08  # m reversed so a cube in the U (48 mm deep) ends past the scoop tips
     shed_confirm: float = 0.3  # s the foreign color must stay in the scoop before backing off
     clear_after: int = 2  # skips of a target behind the same kind of obstacle before pushing through
@@ -309,6 +314,8 @@ class BehaviorFSM:
         self._foreign_since: float | None = None  # foreign cube seen in the scoop since (not yet confirmed)
         self._avoid_since: float | None = None  # turning away from a foreign cube since
         self._avoid_ignore_until = 0.0
+        self._avoid_starts: list[float] = []  # times the avoid spin engaged (guide/avoid ping-pong detector)
+        self._guide_off_until = 0.0
         self._aligning = False  # APPROACH: spinning to center the target (hysteresis)
         self._skips: list[float] = []  # times a target was skipped behind another cube
         self._clear_until = 0.0  # pushing through to a target until then
@@ -703,7 +710,13 @@ class BehaviorFSM:
         if obstacle is None:
             self._avoid_since = None
         else:
-            self._avoid_since = inp.now if self._avoid_since is None else self._avoid_since
+            if self._avoid_since is None:
+                self._avoid_starts = [t for t in self._avoid_starts if inp.now - t <= p.avoid_window] + [inp.now]
+                if len(self._avoid_starts) >= p.avoid_cycles:
+                    # The guided spin keeps bringing it back into the path: drive straight, off the goal.
+                    self._avoid_starts = []
+                    self._guide_off_until = inp.now + p.guide_off_time
+                self._avoid_since = inp.now
             if inp.now - self._avoid_since <= p.avoid_timeout:
                 # Turn away from it (cube on the right, cx > 0: counterclockwise) until it leaves the path.
                 return (0.0, 0.0, math.copysign(p.turn_speed, obstacle.cx_norm))
@@ -711,7 +724,7 @@ class BehaviorFSM:
             # misread part of the robot), so dodging it never ends. Ignore it for a while.
             self._avoid_ignore_until = inp.now + p.skip_time
             self._avoid_since = None
-        if inp.est_pose is not None:
+        if inp.est_pose is not None and inp.now >= self._guide_off_until:
             guided = self._guided(inp)
             if guided is not None:
                 return guided

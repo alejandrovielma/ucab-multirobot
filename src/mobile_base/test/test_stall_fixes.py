@@ -54,3 +54,32 @@ def test_a_cube_that_blinks_does_not_hold_the_robot_forever():
         if fsm.state is not State.CARRY:
             break
     assert fsm.state is State.EXPLORE
+
+
+def exploring_fsm(**overrides):
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, use_lease=False, **overrides), rng=random.Random(1))
+    fsm.set_mission(PHINEAS, ("blue",))
+    return fsm
+
+
+def explore(fsm, now, cubes, goal=(0.0, 0.0), est=(0.0, 0.3, 0.0)):
+    """Guided exploration (estimated pose): the goal is behind the robot's left, past a blue cube."""
+    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=False, pose=None, est_pose=est,
+                                  explore_goal=goal, tape_ahead=None))
+
+
+def test_avoiding_a_cube_and_heading_for_the_goal_do_not_alternate_forever():
+    # Seed yellow 6: the avoid spin (cx<0: clockwise) clears the cube, the guided spin (goal behind it:
+    # counterclockwise) brings it back into the path, and avoid_timeout never accumulates because the
+    # episode restarts every time the cube leaves the path. The spin direction flipped every ~0.5 s.
+    fsm = exploring_fsm()
+    path, aside = Cube("blue", -0.15, 0.51, 800.0), Cube("blue", -0.44, 0.51, 800.0)
+    turns = []
+    for i in range(300):
+        cubes = [path] if (i // 5) % 2 == 0 else [aside]
+        turns.append(explore(fsm, 1.0 + i * 0.1, cubes, goal=(-1.0, 1.0), est=(0.0, 0.0, 0.0))[2])
+    # After the bound, the robot must stop spinning (drive straight on the clear heading) at least in the
+    # ticks where the cube is out of the path.
+    assert any(w == 0.0 for w in turns[100:]), "never stopped alternating the two spins"
+    flips = sum(1 for a, b in zip(turns, turns[1:]) if a * b < 0)
+    assert flips <= 8

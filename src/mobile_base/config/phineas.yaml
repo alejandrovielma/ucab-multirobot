@@ -70,6 +70,9 @@
     avoid_cy: 0.45  # cube of another color (red) lower in the image than this is in the scoop path: steer around it; calibrate
     avoid_cx: 0.3  # |cx_norm| of the scoop path at that distance; calibrate
     avoid_timeout: 3.0  # s dodging the same cube (it turns with the robot: stuck or misread) before ignoring it for skip_time
+    avoid_cycles: 3  # avoid spins within avoid_window: the guided spin toward a goal behind the cube keeps undoing them
+    avoid_window: 6.0  # s
+    guide_off_time: 4.0  # s driving straight on the cleared heading (no spin toward the exploration goal) after avoid_cycles
     shed_distance: 0.08  # red cube in the U (48 mm deep): reverse this far, then turn away
     shed_confirm: 0.3  # s a non-target color must stay in the scoop window (neighbor hues: red and orange)
     clear_after: 2  # skips of a target hidden behind other cubes before pushing through

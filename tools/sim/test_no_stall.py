@@ -23,6 +23,8 @@ STALL_S = 30.0
 IGNORE_LAST_S = 10.0
 # Seeds that stalled in CARRY (sidestep jitter) before the dodge was latched and time-bounded.
 CASES = [("blue", 29), ("blue", 17), ("blue", 18), ("yellow", 5), ("yellow", 22), ("yellow", 33)]
+# Seeds that stalled in EXPLORE (avoid spin vs guided spin alternating) before the guide was switched off.
+CASES += [("yellow", 6), ("yellow", 23), ("blue", 20), ("blue", 22)]
 
 
 def simulate(color, seed):
