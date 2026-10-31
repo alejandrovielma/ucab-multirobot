@@ -13,6 +13,7 @@ from vision.zone import (
     ZoneLocator,
     ZoneParams,
     choose_zone,
+    entry_edge,
     is_plausible_floor,
     without_cubes_in_zone,
 )
@@ -108,3 +109,75 @@ def test_an_area_blob_reaching_the_bottom_is_not_the_paper_when_asked():
 
 def test_there_is_no_paper_without_a_blob():
     assert not is_plausible_floor(None, 480, ZoneParams())
+
+
+def test_the_area_paper_is_aimed_at_the_middle_of_its_width():
+    # A strip whose lowest rows are at its left end, like a robot seen at an
+    # angle: the nearest point is on the left, the aim must stay centred.
+    img = blank()
+    paint_hsv(img, 100, 300, 400, 40, BLUE)
+    paint_hsv(img, 100, 340, 60, 20, BLUE)
+    params = ZoneParams(floor_colors=["blue"])
+    zone = ZoneLocator(RANGES, CAM, params).locate(img)
+    assert zone is not None and zone.color == "floor"
+    assert abs(zone.u - 300) <= 2  # the middle of x 100..500
+
+
+def test_the_gate_can_be_aimed_at_the_midpoint_between_the_legos():
+    img = blank()
+    paint_hsv(img, 140, 150, 20, 50, GREEN)
+    paint_hsv(img, 460, 150, 20, 50, RED)
+    default = ZoneLocator(RANGES, CAM, ZoneParams()).locate(img)
+    centred = ZoneLocator(
+        RANGES, CAM, ZoneParams(gate_aim_fraction=0.5)
+    ).locate(img)
+    assert default is not None and centred is not None
+    assert centred.u > default.u  # 0.5 is further right than 0.38
+    assert abs(centred.u - 310) <= 2  # between x 150 and 470
+
+
+def test_a_delivered_cube_near_the_right_edge_of_the_area_is_ignored():
+    img = blank()
+    paint_hsv(img, 140, 150, 20, 50, GREEN)
+    paint_hsv(img, 460, 150, 20, 50, RED)
+    # Inside the area (it spans about x 246..374 around the midpoint, 310),
+    # near its right edge.
+    delivered = Detection("yellow", 372, 195, 12, 12, (366, 183, 12, 12))
+    old = ZoneLocator(RANGES, CAM, ZoneParams()).locate(img)
+    centred = ZoneLocator(
+        RANGES, CAM, ZoneParams(gate_aim_fraction=0.5)
+    ).locate(img)
+    # Aimed at 0.38 the right part of the area is not covered: the cube was
+    # picked up again. Aimed at the midpoint it is.
+    assert without_cubes_in_zone([delivered], old, margin_px=10) == [delivered]
+    assert without_cubes_in_zone([delivered], centred, margin_px=10) == []
+
+
+def test_entry_edge_square_on_has_no_yaw_and_aims_at_its_middle():
+    xs = np.arange(200, 441)
+    u, v, yaw_rad = entry_edge(xs, np.full(xs.shape, 400), CAM)
+    assert (u, round(v)) == (320, 400)
+    assert abs(yaw_rad) < 1e-6
+
+
+def test_entry_edge_nearer_on_the_right_means_turn_right():
+    # The right end lower in the image is nearer: the robot is turned to
+    # the left of the edge's normal and must turn right (negative).
+    xs = np.arange(200, 441)
+    _, _, yaw_rad = entry_edge(xs, 400 + (xs - 200) * 0.2, CAM)
+    assert yaw_rad < -0.05
+    _, _, mirrored = entry_edge(xs, 448 - (xs - 200) * 0.2, CAM)
+    assert mirrored > 0.05
+
+
+def test_the_paper_is_aimed_at_its_entry_edge_when_it_is_in_view():
+    ranges = {**RANGES, "pink": parse_hsv_ranges([160, 80, 80, 175, 255, 255])}
+    params = ZoneParams(floor_colors=["blue", "pink"], entry_color="pink")
+    img = blank()
+    paint_hsv(img, 150, 330, 300, 50, BLUE)
+    paint_hsv(img, 150, 380, 300, 14, (168, 200, 200))
+    zone = ZoneLocator(ranges, CAM, params).locate(img)
+    assert zone.color == "floor" and abs(zone.entry_angle_rad) < 0.01
+    assert abs(zone.u - 300) <= 2 and 380 <= zone.v <= 394
+    no_entry = ZoneLocator(ranges, CAM, ZoneParams(floor_colors=["blue"]))
+    assert no_entry.locate(img).entry_angle_rad is None
