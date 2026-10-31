@@ -6,6 +6,7 @@ This tool talks straight to the HAT, so it does NOT go through obstacle_guard.
 Use it with the wheels off the ground or a hand near the switch.
 """
 
+import logging
 import threading
 import time
 
@@ -18,6 +19,9 @@ from teleop_web_lib.autopilot import (
 )
 from teleop_web_lib.config import AutoConfig
 from teleop_web_lib.kinematics import WHEELS, clamp, mecanum_wheel_ratios
+from teleop_web_lib.line_sensor import counts_to_millivolts
+
+log = logging.getLogger("teleop_web")
 
 # Pause between two control iterations.
 LOOP_PERIOD_S = 0.02
@@ -58,6 +62,8 @@ class Drive:
         self._pilot = AutoPilot(auto_cfg or AutoConfig())
         self.line_black = False
         self.line_raw: int | None = None
+        self.line_counts: int | None = None  # AO through the ADC, if wired
+        self._was_black = False
         self._lock = threading.Lock()
         self._cmd = DriveCommand()  # last manual command
         self._stamp = 0.0
@@ -112,6 +118,12 @@ class Drive:
                 "line": self._line_label(),
                 "line_black": self.line_black,
                 "line_raw": self.line_raw,
+                "line_counts": self.line_counts,
+                "line_mv": (
+                    None
+                    if self.line_counts is None
+                    else counts_to_millivolts(self.line_counts)
+                ),
             }
 
     def _line_label(self) -> str:
@@ -132,9 +144,12 @@ class Drive:
             if self._line is not None:
                 self.line_raw = self._line.raw_value()
                 self.line_black = self._line.is_black()
+                self.line_counts = self._line.analog_counts()
+                self._log_line_edge()
             else:
                 self.line_raw = None
                 self.line_black = False
+                self.line_counts = None
             command = self._next_command(now)
             with self._lock:
                 self._pilot.note_motion(now, command)
@@ -142,6 +157,23 @@ class Drive:
             ratios = mecanum_wheel_ratios(command.vx, command.vy, command.wz)
             self._motors.set({w: r * scale for w, r in ratios.items()})
             time.sleep(LOOP_PERIOD_S)
+
+    def _log_line_edge(self) -> None:
+        """
+        Log every time the line sensor turns black, with the analog value and
+        the state: real tape reads ~3300 counts or more and lasts a few
+        iterations; a false trigger (the sensor lifting off the floor when the
+        robot pitches or turns) reads something else.
+        """
+        if self.line_black and not self._was_black:
+            with self._lock:
+                state = self._pilot.state
+            log.info(
+                "line sensor black: ao=%s state=%s",
+                self.line_counts,
+                state,
+            )
+        self._was_black = self.line_black
 
     def _next_command(self, now: float) -> DriveCommand:
         """
