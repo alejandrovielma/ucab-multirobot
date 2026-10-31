@@ -112,12 +112,12 @@ def test_close_blue_square_is_a_border_while_approaching():
 
 
 def test_blue_square_is_not_a_border_while_carrying():
-    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_time=0.1)
+    fsm = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_distance=0.008)
     tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
     tick(fsm, 0.5, scoop="red")
     assert fsm.state is State.CARRY
-    plain = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_time=0.1)
+    plain = make_fsm(square_border_cy=0.55, line_backoff=0.14, capture_distance=0.008)
     tick(plain, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     tick(plain, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
     tick(plain, 0.5, scoop="red")
@@ -201,7 +201,7 @@ def test_lost_target_returns_to_explore():
 
 
 def test_close_cube_triggers_capture_then_carry():
-    fsm = make_fsm(capture_time=1.0)
+    fsm = make_fsm(capture_distance=0.08)
     tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     cmd = tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
     assert fsm.state is State.CAPTURE
@@ -214,7 +214,7 @@ def test_close_cube_triggers_capture_then_carry():
 
 
 def test_carry_never_reverses():
-    fsm = make_fsm(capture_time=0.1)
+    fsm = make_fsm(capture_distance=0.008)
     tick(fsm, 0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)])
     tick(fsm, 0.5, scoop="red")
@@ -316,7 +316,7 @@ def test_red_cube_in_the_scoop_on_the_line_reverses_at_least_line_backoff():
 
 
 def test_red_cube_in_the_scoop_after_a_capture_is_not_carried():
-    fsm = not_red_fsm(capture_time=0.5, shed_confirm=0.3)
+    fsm = not_red_fsm(capture_distance=0.04, shed_confirm=0.3)
     tick(fsm, 0.0, cubes=[Cube("yellow", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("yellow", 0.0, 0.95, 3000.0)])
     assert fsm.state is State.CAPTURE
@@ -382,7 +382,7 @@ def test_a_mission_starts_the_robot_and_clearing_it_stops_it():
 
 
 def test_clearing_the_mission_while_carrying_releases_the_lease():
-    fsm = BehaviorFSM(BehaviorParams(capture_time=0.1), rng=random.Random(1))
+    fsm = BehaviorFSM(BehaviorParams(capture_distance=0.008), rng=random.Random(1))
     fsm.set_mission(["blue"])
     tick(fsm, 0.0, cubes=[Cube("blue", 0.0, 0.3, 400.0)])
     tick(fsm, 0.1, cubes=[Cube("blue", 0.0, 0.95, 3000.0)])
@@ -458,7 +458,7 @@ def test_repeated_border_hits_in_a_corner_back_off_further_and_turn_around():
 def test_every_command_is_a_translation_or_a_spin_never_both(seed):
     # Team rule 2026-10-27: random inputs through every state must never yield an arc.
     rng = random.Random(seed)
-    fsm = BehaviorFSM(BehaviorParams(capture_time=0.2, shed_confirm=0.1), rng=random.Random(seed))
+    fsm = BehaviorFSM(BehaviorParams(capture_distance=0.016, shed_confirm=0.1), rng=random.Random(seed))
     fsm.set_mission(["blue", "green"], avoid=["red"])
     colors = ["blue", "green", "red", "yellow"]
     for k in range(400):
@@ -511,7 +511,7 @@ def test_a_target_that_turns_with_the_robot_is_left_behind():
 
 
 def test_a_cube_that_vanishes_at_the_mouth_while_driving_on_is_assumed_captured():
-    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_time=1.0))
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_distance=0.08))
     fsm.set_mission(("red",), ())
     fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.4, 900.0)], line_front=False))
     fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.0, 0.7, 3000.0)], line_front=False))  # at the mouth
@@ -524,7 +524,7 @@ def test_a_cube_that_vanishes_at_the_mouth_while_driving_on_is_assumed_captured(
 
 
 def test_without_a_sighting_at_the_mouth_nothing_is_assumed():
-    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_time=1.0))
+    fsm = BehaviorFSM(BehaviorParams(my_colors=("red",), assume_capture=True, capture_distance=0.08))
     fsm.set_mission(("red",), ())
     fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.4, 900.0)], line_front=False))
     for t in (0.5, 1.0, 1.5, 2.0):

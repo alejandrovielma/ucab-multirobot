@@ -71,3 +71,9 @@ def test_square_border_cy_reaches_behavior_params(robot, expected):
     fields = {f.name for f in dataclasses.fields(BehaviorParams)}
     values = {k: v for k, v in behavior.items() if k in fields and k != "my_colors"}
     assert BehaviorParams(my_colors=("red",), **values).square_border_cy == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("robot", ["phineas", "ferb"])
+def test_the_corner_window_spans_more_than_one_border_cycle(robot):
+    # One border cycle (reverse + turn) lasts >= 5 s at the lab speed caps: 3 hits never fit in 10 s.
+    assert load(robot)[f"/{robot}/behavior"]["ros__parameters"]["corner_window"] >= 20.0

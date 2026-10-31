@@ -191,7 +191,7 @@ def test_capture_allowed_when_a_plan_to_the_square_exists():
 
 
 def test_carry_with_no_plan_drops_the_cube_by_backing_off():
-    f = fsm(capture_time=0.1)
+    f = fsm(capture_distance=0.008)
     step(f, 0.0, (1.0, 1.0, 0.0), cubes=[Cube("red", 0.0, 0.3, 400.0)])
     step(f, 0.1, (1.0, 1.0, 0.0), cubes=[Cube("red", 0.0, 0.7, 3000.0)])
     step(f, 0.3, (1.0, 1.0, 0.0), scoop="red")
@@ -296,7 +296,7 @@ def test_closed_loop_with_pose_never_mixes_translation_and_spin():
 
     for seed in range(3):
         rng = random.Random(seed)
-        f = BehaviorFSM(BehaviorParams(my_colors=("red",), capture_time=0.2, **ZONE), rng=random.Random(seed),
+        f = BehaviorFSM(BehaviorParams(my_colors=("red",), capture_distance=0.016, **ZONE), rng=random.Random(seed),
                         track=ARENA)
         pose, delivered = (1.0, 1.5, rng.uniform(-math.pi, math.pi)), 0
         for k in range(1500):

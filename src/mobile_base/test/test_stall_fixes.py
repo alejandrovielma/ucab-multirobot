@@ -11,7 +11,7 @@ PHINEAS = ("red", "orange", "yellow")
 
 def carrying_fsm(**overrides):
     """Camera carry (no pose) right after capturing a red cube."""
-    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_time=0.1, use_lease=False, **overrides),
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_distance=0.008, use_lease=False, **overrides),
                       rng=random.Random(1))
     fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)], line_front=False))
     fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)], line_front=False))
@@ -107,7 +107,7 @@ def test_a_cube_that_keeps_slipping_out_of_the_scoop_is_given_up_after_capture_f
         states.append((t, fsm.state))
         t += 0.1
     left = next(t for t, s in states if s is State.EXPLORE)
-    assert left < 3 * (fsm.params.capture_time + 0.3)
+    assert left < 3 * (fsm.params.capture_distance / fsm.params.capture_speed + 0.3)
     assert all(s is State.EXPLORE for t, s in states if left <= t < left + fsm.params.skip_time - 0.2)
 
 
@@ -159,3 +159,29 @@ def test_the_turn_away_from_the_estimated_tape_keeps_one_direction():
         th += wz * 0.1
         signs.append(wz)
     assert sum(1 for a, b in zip(signs, signs[1:]) if a * b < 0) <= 1
+
+
+@pytest.mark.parametrize("capture_speed", [0.08, 0.05])
+def test_the_capture_push_covers_its_distance_at_any_capture_speed(capture_speed):
+    # Timed in seconds the lab-capped push (0.05 m/s) was 5 cm against a U 4.8 cm deep, 8 cm at the YAML speed.
+    fsm = approaching_fsm(capture_speed=capture_speed, capture_distance=0.08)
+    approach(fsm, 0.0, Cube("red", 0.0, 0.4, 900.0))
+    approach(fsm, 0.1, Cube("red", 0.0, 0.7, 3000.0))
+    assert fsm.state is State.CAPTURE
+    t = 0.1
+    while fsm.state is State.CAPTURE and t < 5.0:
+        t += 0.01
+        approach(fsm, t, None, scoop="red")
+    assert (t - 0.1) * capture_speed == pytest.approx(0.08, abs=0.001)
+
+
+def test_the_square_probe_covers_its_distance_at_the_carry_speed():
+    fsm = carrying_fsm(square_search_time=1.0, square_probe_distance=0.12, carry_speed=0.05)
+
+    def look(now):
+        return fsm.step(BehaviorInput(now=now, cubes=[], line_front=False, pose=None, scoop_color="red"))
+
+    look(1.0)
+    assert look(2.1)[0] == pytest.approx(0.05)  # probe starts: 0.12 / 0.05 = 2.4 s
+    assert look(4.4)[0] == pytest.approx(0.05)
+    assert look(4.6) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))

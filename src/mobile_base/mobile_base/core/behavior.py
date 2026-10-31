@@ -148,7 +148,9 @@ class BehaviorParams:
     approach_backoff_time: float = 1.5  # s
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
-    capture_time: float = 1.0  # s
+    # Push of this length so the cube enters the U (48 mm deep): timed as distance / capture_speed, so a
+    # slower (lab-capped) robot still pushes as far.
+    capture_distance: float = 0.08  # m
     # A cube that keeps slipping out of the scoop is pushed along forever (APPROACH <-> CAPTURE): after
     # capture_fails empty captures within capture_fail_window it is ignored for skip_time.
     capture_fails: int = 3
@@ -216,7 +218,7 @@ class BehaviorParams:
     use_lease: bool = True  # zone arbiter (Perry); False: no requests, the square is taken as free
     # Delivery with the robot's camera only (no pose); calibrate square_* and deliver_* on the track.
     square_search_time: float = 15.0  # s spinning without seeing the square before a short drive forward
-    square_probe_time: float = 1.5  # s of that drive forward
+    square_probe_distance: float = 0.12  # m of that drive forward (timed at carry_speed)
     square_align: float = 0.15  # |square_cx| below which the square counts as straight ahead
     square_reach_cy: float = 0.6  # square centroid this low in the image: the scoop is at its edge
     # Delivery along an axis (no arcs, team decision 2026-10-30): the robot lines itself up on the
@@ -508,7 +510,7 @@ class BehaviorFSM:
         p = self.params
         if pose is None or not self._track.enabled:
             return True
-        after = predict(pose, p.capture_speed, 0.0, p.capture_time)
+        after = predict(pose, p.capture_speed, 0.0, p.capture_distance / p.capture_speed)
         return self._plan_to("entry", after) is not None
 
     def _follow_plan(self, inp: BehaviorInput, kind: str) -> Command | None:
@@ -833,7 +835,7 @@ class BehaviorFSM:
                 self._start_turn(inp.now, inp.pose)
                 return self._explore(inp)
             self.state = State.CAPTURE
-            self._capture_until = inp.now + p.capture_time
+            self._capture_until = inp.now + p.capture_distance / p.capture_speed
             return self._capture(inp)
         cmd = (p.approach_speed, 0.0, 0.0)
         if self._aligning or (inp.pose is not None and not self._fits(inp.pose, cmd[0], 0.0, carrying=False)):
@@ -974,7 +976,7 @@ class BehaviorFSM:
             self._search_since = inp.now if self._search_since is None else self._search_since
             if inp.now - self._search_since >= p.square_search_time:
                 self._search_since = None
-                self._probe_until = inp.now + p.square_probe_time
+                self._probe_until = inp.now + p.square_probe_distance / p.carry_speed
                 self.note = "square not seen: drive forward and look again"
                 return (p.carry_speed, 0.0, 0.0)
             return self._spin(inp, turn)

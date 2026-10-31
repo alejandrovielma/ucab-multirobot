@@ -72,7 +72,7 @@ def test_open_gate_keeps_the_fixed_scoop_rules():
 
 
 def fsm(has_gate=True, track=ARENA):
-    params = BehaviorParams(my_colors=("red",), capture_time=0.1, has_gate=has_gate, **ZONE)
+    params = BehaviorParams(my_colors=("red",), capture_distance=0.008, has_gate=has_gate, **ZONE)
     return BehaviorFSM(params, rng=random.Random(4), track=track)
 
 

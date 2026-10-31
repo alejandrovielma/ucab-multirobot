@@ -16,7 +16,7 @@ WEST = math.pi
 
 def carrying_fsm(**overrides):
     """FSM that just captured a red cube (state CARRY at t=0.5)."""
-    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_time=0.1, **overrides), rng=random.Random(1))
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_distance=0.008, **overrides), rng=random.Random(1))
     fsm.step(BehaviorInput(now=0.0, cubes=[Cube("red", 0.0, 0.3, 400.0)], line_front=False))
     fsm.step(BehaviorInput(now=0.1, cubes=[Cube("red", 0.0, 0.95, 3000.0)], line_front=False))
     fsm.step(BehaviorInput(now=0.5, cubes=[], line_front=False, scoop_color="red"))
@@ -55,7 +55,7 @@ def test_without_pose_the_carrying_robot_spins_slowly_looking_for_the_square():
 
 
 def test_without_pose_a_square_never_seen_makes_the_robot_look_from_elsewhere():
-    fsm = carrying_fsm(use_lease=False, square_search_time=5.0, square_probe_time=1.0)
+    fsm = carrying_fsm(use_lease=False, square_search_time=5.0, square_probe_distance=0.08)
     cam(fsm, 1.0)
     assert cam(fsm, 6.1) == pytest.approx((fsm.params.carry_speed, 0.0, 0.0))  # drive forward a bit
     assert cam(fsm, 7.2)[2] != 0.0  # and spin again

@@ -64,7 +64,7 @@ ZONE = dict(zone_x=1.0, zone_y=0.4, zone_heading=-math.pi / 2, zone_square_depth
 
 
 def fsm():
-    params = BehaviorParams(my_colors=("red",), capture_time=0.1, **ZONE)
+    params = BehaviorParams(my_colors=("red",), capture_distance=0.008, **ZONE)
     return BehaviorFSM(params, rng=random.Random(2), track=ARENA)
 
 

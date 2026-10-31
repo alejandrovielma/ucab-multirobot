@@ -33,7 +33,7 @@
     approach_backoff_time: 1.5  # s backing off to leave it
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
-    capture_time: 1.0
+    capture_distance: 0.08  # m pushed so the cube enters the U (48 mm deep); time = distance / capture_speed
     capture_fails: 3  # empty captures within capture_fail_window: ignore the cube for skip_time (it keeps slipping out of the U)
     capture_fail_window: 20.0  # s
     has_gate: false  # no servo on the real robots yet: true only with the scoop gate fitted (feat/scoop-gate)
@@ -83,11 +83,11 @@
     clear_time: 5.0
     clear_turn: 1.5708  # spin that throws a caught non-target cube aside (90 deg)
     corner_hits: 3  # line events within corner_window without a pose: half turn after a longer backoff
-    corner_window: 10.0
+    corner_window: 30.0  # s (one border cycle lasts >= 5 s at the lab speed caps: 10 s never saw 3 hits)
     use_lease: false  # no zone arbiter (Perry) for now: the square is taken as free (team decision 2026-10-27)
     # Delivery with the robot camera only (no overhead pose); calibrate on the track.
     square_search_time: 15.0  # s spinning without seeing the square before a short drive forward
-    square_probe_time: 1.5
+    square_probe_distance: 0.12  # m of the short drive forward (time = distance / carry_speed)
     square_align: 0.15  # |square_cx| that counts as centered
     square_reach_cy: 0.47  # DELIVER starts ~0.40 m from the square center (entry offset 0.298 before its boundary); depends on the camera model, calibrate
     axis_delivery: true  # line up on the perpendicular between the green and red rectangles, push straight

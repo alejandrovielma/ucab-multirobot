@@ -58,7 +58,7 @@ def capture(fsm, scoop_at_end):
 
 
 def make_fsm(**kw):
-    return BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_time=1.0, **kw), rng=random.Random(3))
+    return BehaviorFSM(BehaviorParams(my_colors=PHINEAS, capture_distance=0.08, **kw), rng=random.Random(3))
 
 
 def test_capture_confirmed_by_the_camera_goes_to_carry_with_the_seen_color():
