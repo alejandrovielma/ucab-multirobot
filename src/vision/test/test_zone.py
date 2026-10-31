@@ -169,6 +169,16 @@ def test_the_paper_can_be_aimed_at_its_centre_on_the_floor():
         CAM,
         ZoneParams(floor_colors=["blue"], floor_aim_centre=True),
     ).locate(img)
-    far_edge = CAM.bearing_distance(320, 330)[1]
-    assert near_edge.distance_m < centre.distance_m < far_edge
+    assert (
+        abs(centre.distance_m - near_edge.distance_m) < 0.005
+    )  # its near edge
     assert abs(centre.bearing_rad) < 0.02
+    # Off to the left: the bearing points at the paper's centre.
+    img = blank()
+    paint_hsv(img, 40, 330, 200, 50, BLUE)
+    centre = ZoneLocator(
+        RANGES,
+        CAM,
+        ZoneParams(floor_colors=["blue"], floor_aim_centre=True),
+    ).locate(img)
+    assert abs(centre.bearing_rad - CAM.bearing_distance(140, 355)[0]) < 0.05
