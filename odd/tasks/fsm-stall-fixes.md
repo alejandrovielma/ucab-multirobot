@@ -36,7 +36,7 @@ the full suite and, when the native assessment says due, the native review; push
 - [x] T1 Regression test in the repo: deterministic closed-loop no-stall test over a few seeds per
       color (RED first with the seeds that stall today).
 - [x] T2 CARRY sidestep: root cause, direction latch and a time bound (abandon the transport).
-- [ ] T3 EXPLORE spin-in-place with a non-target cube in the scoop: root cause and a bound.
+- [x] T3 EXPLORE spin-in-place with a non-target cube in the scoop: root cause and a bound.
 - [ ] T4 APPROACH<->CAPTURE rebound counter (ignore the cube after repeated failed captures).
 - [ ] T5 APPROACH strafe timeout.
 - [ ] T6 Border cube: do not re-approach a target on or beyond the tape.
@@ -44,6 +44,8 @@ the full suite and, when the native assessment says due, the native review; push
 - [ ] T8 Runtime robustness of the lab loops: a failing tick stops the motors and the run continues;
       repeated failures abort safely (fail-safe), camera/sensor read errors never leave the motors on.
 - [ ] T9 Deep code review of behavior.py, safety.py and lab_robot.py; fix the confirmed findings.
+- [ ] T11 Efficiency: 72 % of approaches end without a capture (1373 of 1902 EXPLORE>APPROACH in the
+      80-run harness, deliveries ~0.9 per 600 s): classify why and fix what is a bug, not a trade-off.
 - [ ] T10 Final verification: full suite, harness with 100 seeds per color: 0 stalled runs; residual
       risks written down.
 
@@ -66,3 +68,13 @@ the full suite and, when the native assessment says due, the native review; push
   (600 s): CARRY stalls 13->0 yellow, 16->0 blue; stalled runs yellow 25->22, blue 30->22 (runs that
   froze in CARRY now continue and reach the EXPLORE pattern, T3). Assessed medium/under_budget: no
   native review due; reviewed boundary stays at e76031b.
+- 2026-10-31: T3 done, commit 50480b7. Diagnosis (writer recorded every stall tick): ALL 76 EXPLORE
+  stall episodes were one pattern: the avoid spin (turns away from a non-target cube inside
+  avoid_cx 0.3) and the guided spin (toward the cartographer goal, which lies behind the cube) alternate
+  every ~0.5 s; `_avoid_since` was reset whenever the cube left the path so `avoid_timeout` never
+  accumulated. NOT a sim artifact (scoop empty, spin 1.2 rad/s). Fix: after `avoid_cycles` 3
+  engagements within `avoid_window` 6 s the guide is off for `guide_off_time` 4 s (drive straight).
+  Parent verified: 81 passed (stall, config, behavior tests + tools/sim); harness seeds 1-40, 600 s,
+  rerun by the parent: stalled runs 0/40 yellow, 0/40 blue (before 25/30; after T2 22/22); deliveries
+  mean 0.95 yellow / 0.9 blue (before 0.5 / 0.3). Remaining: APPROACH<->EXPLORE flip bursts in blue
+  seeds 16 and 20 (not stalls by definition). Assessed medium/under_budget (255 accumulated lines).
