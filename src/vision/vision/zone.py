@@ -87,8 +87,9 @@ class ZoneParams:
     floor_max_area_px: int = DEFAULT_FLOOR_MAX_AREA_PX
     gate_aim_fraction: float = DEFAULT_GATE_AIM_FRACTION
     floor_ignore_touching_bottom: bool = DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM
-    # Aim at the paper's centre on the floor (its outline projected on the
-    # floor) instead of the middle of its near edge.
+    # Aim (bearing) at the paper's centre on the floor (its outline projected
+    # on the floor) instead of the middle of its near edge; the distance stays
+    # the near edge's.
     floor_aim_centre: bool = False
 
 
@@ -244,7 +245,9 @@ class ZoneLocator:
         The area paper aimed at its centre on the floor: the outline of the
         paper projected on the floor and averaged as a polygon. Its image
         centre is not its floor centre (the near part looks bigger), and the
-        robot must push the cube there from any side.
+        robot must push the cube there from any side. Only the bearing: the
+        far outline's rows are a few pixels from the horizon, so the
+        centroid's distance was off by up to 20 cm; the near edge's is not.
         """
         x, y, width_px, height_px = floor.bbox
         hsv = cv2.cvtColor(
@@ -276,7 +279,6 @@ class ZoneLocator:
             floor,
             u=x + width_px // 2,
             bearing_rad=math.atan2(left_m, forward_m),
-            distance_m=math.hypot(forward_m, left_m),
         )
 
     def _aim_at_center(self, floor: Region) -> Region:
