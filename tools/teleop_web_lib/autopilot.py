@@ -54,6 +54,8 @@ STATE_NO_CUBES = f"{PREFIX_NO_CUBES} (stopped)"
 SUFFIX_FORWARD = " (forward)"
 SUFFIX_TURN = " (turn)"
 SUFFIX_ALIGN = " (align)"
+STATE_EXPLORE_FIND_AREA = f"{STATE_EXPLORE} (find area)"
+STATE_EXPLORE_TO_CENTER = f"{STATE_EXPLORE} (to center)"
 
 # --- Direction helpers --------------------------------------------------------
 # Direction of a turn: +1 toward the left, -1 toward the right.
@@ -171,10 +173,13 @@ class AutoPilot:
         self._last_bearing_rad = 0.0
         # Cubes are ignored until then: the last one led to the border line.
         self._ignore_cubes_until = 0.0
-        # Push and back-up times of the delivery in progress (they depend on
-        # whether the area paper or the landmark gate led to it).
-        self._drop_push_s = cfg.deliver_push_s
-        self._drop_backup_s = cfg.deliver_backup_s
+        # Turn direction while avoiding the area, fixed for the whole turn.
+        self._avoid_dir = DIR_RIGHT
+        # Search without cubes (docs/auto-search.md): the last spin was made
+        # in the middle of the arena, and when the robot last had something
+        # to do (start, a cube seen, a delivery).
+        self._centered = False
+        self._idle_start_s = self._search_start_s
 
     # ---------- mode control ----------
     def configure(
@@ -195,8 +200,9 @@ class AutoPilot:
             self.state = (
                 STATE_CARRY if self.carrying and not reset else STATE_SEARCH
             )
-            self._reveal_pending = self.state == STATE_SEARCH
             self._search_start_s = now
+            self._idle_start_s = now
+            self._centered = False
             if reset:
                 self.collected_count = 0
                 self.delivered_count = 0
@@ -227,7 +233,12 @@ class AutoPilot:
             # Back from WASD or pause: if it had a cube, keep carrying it.
             self._resume_after_pause(now)
         self._line_black = line_black
-        if line_black and not self.state.startswith(PREFIX_LINE):
+        crossing = self._may_cross_line(now)
+        if (
+            line_black
+            and not crossing
+            and not self.state.startswith(PREFIX_LINE)
+        ):
             self._start_line_recovery(now)
         for phase in (self._line_phase, self._catch_phase, self._drop_phase):
             command = phase(now)
@@ -240,13 +251,30 @@ class AutoPilot:
             return self._carry_step(now)
         return self._search_step(now)
 
+    def _may_cross_line(self, now: float) -> bool:
+        """
+        True while delivering, or carrying with the area paper close: the
+        black line there is the area's own tape or the border next to its
+        entry, and turning back from it made the robot curve around instead
+        of going straight in.
+        """
+        if self.state.startswith(PREFIX_DROP):
+            return True
+        if not self.carrying:
+            return False
+        zone = self._zone_in_view(now)
+        return (
+            zone is not None
+            and zone.color == ZONE_SOURCE_FLOOR
+            and zone.distance_m <= self.cfg.carry_line_ignore_distance_m
+        )
+
     def _resume_after_pause(self, now: float) -> None:
         """
         Continue carrying if a cube is in the scoop, else search (backing
         up first: a cube may be sitting in the scoop's blind spot).
         """
         self.state = STATE_CARRY if self.carrying else STATE_SEARCH
-        self._reveal_pending = not self.carrying
         self._search_start_s = now
 
     # ---------- timed phases (return None when not active) ----------
@@ -404,16 +432,42 @@ class AutoPilot:
         if now < self._phase_until:
             return _forward(cfg.forward_speed)
         self._finish_drop()
-        backup_until = self._phase_until + self._drop_backup_s
+        backup_until = self._phase_until + cfg.floor_deliver_backup_s
         if now < backup_until:
             self.state = STATE_DROP_BACKUP
             return _backward(cfg.line_speed)
+        if self.state == STATE_DROP_BACKUP and self._cube_left_out(now):
+            # Backed up and the cube is still in front: it stayed outside.
+            self.delivered_count -= 1
+            self._end_drop(now)
+            return None
         if now < backup_until + cfg.deliver_turn_s:
             self.state = STATE_DROP_TURN
             return _turn(self._search_dir, cfg.turn_speed)
+        self._end_drop(now)
+        return None
+
+    def _end_drop(self, now: float) -> None:
+        """
+        Back to looking for cubes, with a fresh search.
+        """
         self.state = STATE_SEARCH
         self._search_start_s = now
-        return None
+        self._idle_start_s = now
+        self._centered = False
+
+    def _cube_left_out(self, now: float) -> bool:
+        """
+        True when a cube (not one inside the area) is in view this close
+        right after backing up from a delivery.
+        """
+        if self.vision is None:
+            return False
+        det = self.vision.latest_detection(now, self.cfg.lost_timeout_s)
+        return (
+            det is not None
+            and det.distance_m <= self.cfg.drop_verify_distance_m
+        )
 
     # ---------- looking for cubes ----------
     def _search_step(self, now: float) -> DriveCommand:
@@ -432,6 +486,8 @@ class AutoPilot:
         self._last_bearing_rad = det.bearing_rad
         self._reveal_pending = det.distance_m <= cfg.reveal_max_distance_m
         self._search_start_s = now
+        self._idle_start_s = now
+        self._centered = False
         self._search_dir = _side_of(det.bearing_rad)
 
         # Cube at the scoop threshold (~18.5 cm or image bottom) and aligned.
@@ -463,14 +519,20 @@ class AutoPilot:
         )
         if recently_seen:
             return STOP
-        # After searching too long without seeing any cube, stop.
-        if (now - self._search_start_s) >= cfg.no_cubes_stop_s:
-            if self.delivered_count > 0:
-                self.state = f"{PREFIX_DONE} ({self.delivered_count} delivered)"
-            else:
-                self.state = STATE_NO_CUBES
-            return STOP
+        # Hard limit: searching this long without seeing any cube, stop.
+        if (now - self._idle_start_s) >= cfg.no_cubes_stop_s:
+            return self._give_up()
         return self._scan_step(now)
+
+    def _give_up(self) -> DriveCommand:
+        """
+        No cube left to find: stop for good.
+        """
+        if self.delivered_count > 0:
+            self.state = f"{PREFIX_DONE} ({self.delivered_count} delivered)"
+        else:
+            self.state = STATE_NO_CUBES
+        return STOP
 
     def _scan_step(self, now: float) -> DriveCommand:
         """
@@ -486,10 +548,43 @@ class AutoPilot:
             self.state = STATE_EXPLORE_BACKUP
             return _backward(cfg.line_speed)
         zone = self._zone_in_view(now)
-        if self._must_avoid(zone):
-            self.state = STATE_EXPLORE_AVOID
-            return _turn(-_side_of(zone.bearing_rad), cfg.search_turn_speed)
-        return self._reacquire_step(now) or self._roam(now, STATE_EXPLORE)
+        if self._spinning(now) and self._must_avoid(zone):
+            return self._avoid_step(zone)
+        return self._reacquire_step(now) or self._explore_step(now, zone)
+
+    def _spinning(self, now: float) -> bool:
+        """
+        True during the spin in place that scans for cubes.
+        """
+        return now - self._search_start_s < self.cfg.search_spin_s
+
+    def _explore_step(self, now: float, zone) -> DriveCommand:
+        """
+        No cube in view (docs/auto-search.md): spin once in place; if none
+        showed up, go to the middle of the arena (search_center_distance_m
+        from the area, the only landmark) and spin once more; then stop.
+        """
+        cfg = self.cfg
+        if self._spinning(now):
+            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
+            return _turn(self._search_dir, cfg.search_turn_speed)
+        if self._centered:
+            return self._give_up()
+        if zone is None:
+            self.state = STATE_EXPLORE_FIND_AREA
+            return _turn(self._search_dir, cfg.search_turn_speed)
+        error_m = zone.distance_m - cfg.search_center_distance_m
+        if abs(error_m) <= cfg.search_center_tolerance_m:
+            self._centered = True
+            self._search_start_s = now  # spin again from here
+            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
+            return _turn(self._search_dir, cfg.search_turn_speed)
+        self.state = STATE_EXPLORE_TO_CENTER
+        if abs(zone.bearing_rad) > cfg.align_tolerance_rad:
+            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
+        if error_m > 0:
+            return _forward(cfg.roam_forward_speed)
+        return _backward(cfg.line_speed)
 
     def _reacquire_step(self, now: float) -> DriveCommand | None:
         """
@@ -508,16 +603,28 @@ class AutoPilot:
 
     def _must_avoid(self, zone) -> bool:
         """
-        True when a landmark gate is this close: past it there is no border
-        line to stop at. The area paper never needs avoiding: black tape
-        closes it at the back, and turning away from it just stalled the
-        robot in the field.
+        True when the delivery area or its legos are this close and no cube
+        is in view: roaming forward there ran the robot over the legos and
+        along the area's black tape.
         """
         return (
             zone is not None
-            and zone.color != ZONE_SOURCE_FLOOR
             and zone.distance_m <= self.cfg.gate_avoid_distance_m
         )
+
+    def _avoid_step(self, zone) -> DriveCommand:
+        """
+        Turn away from the area. The side is chosen once, when the avoidance
+        starts, and kept: choosing it every tick flips with the bearing noise
+        and the robot never turns.
+        """
+        if self.state != STATE_EXPLORE_AVOID:
+            self._avoid_dir = -_side_of(zone.bearing_rad)
+            # The scan carries on this way: turning back toward the area (the
+            # side it delivered on) wobbled in front of it until it gave up.
+            self._search_dir = self._avoid_dir
+        self.state = STATE_EXPLORE_AVOID
+        return _turn(self._avoid_dir, self.cfg.search_turn_speed)
 
     def _zone_in_view(self, now: float):
         """
@@ -530,8 +637,10 @@ class AutoPilot:
     # ---------- carrying to the delivery gate ----------
     def _carry_step(self, now: float) -> DriveCommand:
         """
-        With a cube in the scoop: find the gate between the landmarks and drive
-        through it. If the gate is never found, assume the cube was lost.
+        With a cube in the scoop: head for the area (the landmarks lead from
+        afar) and deliver only once the area paper itself is in view: a push
+        started from the landmarks left the cube ~20 cm short of the paper.
+        If the area is never found, assume the cube was lost.
         """
         cfg = self.cfg
         zone = self._zone_in_view(now)
@@ -546,11 +655,19 @@ class AutoPilot:
         )
         self._search_start_s = now
         self._search_dir = _side_of(zone.bearing_rad)
-        stop_distance_m, arrive_v_px = self._zone_thresholds(zone)
-        at_zone = zone.distance_m <= stop_distance_m or zone.v >= arrive_v_px
-        if at_zone and self._is_aligned(zone.bearing_rad):
-            self._start_drop(now, zone)
-            return _forward(cfg.forward_speed)
+        # The landmarks only lead there (slowing down near them): the push
+        # starts once the paper is in view, straight at its centre from
+        # wherever the robot is (no detour to enter square).
+        paper = zone.color == ZONE_SOURCE_FLOOR
+        at_paper = paper and (
+            zone.distance_m <= cfg.deliver_commit_distance_m
+            or zone.v >= cfg.floor_arrive_v_px
+        )
+        if at_paper:
+            return self._drop_or_align(now, zone)
+        stop_distance_m = (
+            cfg.deliver_commit_distance_m if paper else cfg.zone_stop_distance_m
+        )
         return self._steer_to(
             zone.bearing_rad,
             zone.distance_m,
@@ -558,20 +675,19 @@ class AutoPilot:
             STATE_CARRY,
         )
 
-    def _start_drop(self, now: float, zone) -> None:
+    def _drop_or_align(self, now: float, zone) -> DriveCommand:
         """
-        Begin the delivery push. Into the area paper it is short (the sheet
-        is shallow); toward the landmark gate it is the long one.
+        At the paper: turn in place to face its centre, then push the cube
+        blind just far enough to bring it there.
         """
         cfg = self.cfg
-        if zone.color == ZONE_SOURCE_FLOOR:
-            self._drop_push_s = cfg.floor_deliver_push_s
-            self._drop_backup_s = cfg.floor_deliver_backup_s
-        else:
-            self._drop_push_s = cfg.deliver_push_s
-            self._drop_backup_s = cfg.deliver_backup_s
+        if abs(zone.bearing_rad) > cfg.drop_align_tolerance_rad:
+            self.state = f"{STATE_CARRY}{SUFFIX_ALIGN}"
+            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
+        push_m = max(0.0, zone.distance_m - cfg.cube_ahead_m)
         self.state = STATE_DROP
-        self._phase_until = now + self._drop_push_s
+        self._phase_until = now + push_m / cfg.forward_speed_mps
+        return _forward(cfg.forward_speed)
 
     def _give_up_carrying(self, now: float) -> DriveCommand:
         """
@@ -584,15 +700,6 @@ class AutoPilot:
         self._search_start_s = now
         return STOP
 
-    def _zone_thresholds(self, zone) -> tuple[float, int]:
-        """
-        Arrival distance (m) and image row (px) for this kind of estimate.
-        """
-        cfg = self.cfg
-        if zone.color == ZONE_SOURCE_FLOOR:
-            return cfg.floor_stop_distance_m, cfg.floor_arrive_v_px
-        return cfg.zone_stop_distance_m, cfg.zone_arrive_v_px
-
     # ---------- motion primitives ----------
     def _is_aligned(self, bearing_rad: float) -> bool:
         """
@@ -604,11 +711,13 @@ class AutoPilot:
 
     def _roam(self, now: float, label: str) -> DriveCommand:
         """
-        Free roaming: alternate driving forward and turning to scan.
+        Free roaming: turn to scan, then drive forward to another spot at
+        the end of each period (a spin that saw nothing is not the whole
+        arena).
         """
         cfg = self.cfg
         elapsed_s = (now - self._search_start_s) % cfg.roam_period_s
-        if elapsed_s < cfg.roam_forward_s:
+        if elapsed_s >= cfg.roam_period_s - cfg.roam_forward_s:
             self.state = f"{label}{SUFFIX_FORWARD}"
             return _forward(cfg.roam_forward_speed)
         self.state = f"{label}{SUFFIX_TURN}"
@@ -630,6 +739,9 @@ class AutoPilot:
         tolerance_rad = cfg.align_tolerance_rad
         if distance <= cfg.close_align_distance_m:
             tolerance_rad *= cfg.close_align_factor
+        if self.state.endswith(SUFFIX_ALIGN) or self.state == STATE_ALIGN:
+            # Already turning: finish the turn, do not stop at the edge.
+            tolerance_rad *= cfg.align_exit_fraction
         if abs(bearing) > tolerance_rad:
             if label == STATE_APPROACH:
                 self.state = STATE_ALIGN
