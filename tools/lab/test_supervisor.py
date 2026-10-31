@@ -2,6 +2,8 @@
 
 import pathlib
 import sys
+import threading
+import time
 
 import pytest
 
@@ -121,3 +123,92 @@ def test_no_frames_for_the_abort_time_aborts_safely():
                              frame_timeout=1.0, frame_abort_time=30.0)
     assert isinstance(exc, SystemExit) and exc.code
     assert motors.stops > 0
+
+
+def test_a_camera_that_raises_counts_as_a_missing_frame_not_as_a_failing_tick(capsys):
+    def frames(n, t):
+        if 2 <= n <= 8:  # 7 raising reads in a row: more than max_consecutive_errors
+            raise TimeoutError("camera timeout")
+        return "frame"
+
+    motors, calls, exc = run(lambda n: None, frames=frames, max_calls=14)
+    assert isinstance(exc, KeyboardInterrupt) and len(calls) == 14
+    assert capsys.readouterr().out.count("read_frame raised TimeoutError") == 1  # logged once, not 7 times
+
+
+def test_a_camera_that_always_raises_aborts_after_the_frame_abort_time():
+    def frames(n, t):
+        if t >= 1:
+            raise OSError("camera gone")
+        return "frame"
+
+    motors, calls, exc = run(lambda n: None, frames=frames, frame_timeout=1.0, frame_abort_time=30.0)
+    assert isinstance(exc, SystemExit) and exc.code
+    assert motors.stops > 0
+
+
+def run_threaded(read, tick, stop, **kw):
+    """run_loop with the real clock in a worker thread; returns (thread, result list)."""
+    result = []
+
+    def target():
+        try:
+            run_loop(read, tick, stop, period=0.05, **kw)
+        except BaseException as exc:  # noqa: BLE001
+            result.append(exc)
+
+    thread = threading.Thread(target=target)
+    thread.start()
+    return thread, result
+
+
+def wait_for(cond, seconds=3.0):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end and not cond():
+        time.sleep(0.01)
+    return cond()
+
+
+def test_a_hung_read_is_stopped_once_per_hang_from_the_watchdog_and_rearms():
+    gates, reads, stops = [threading.Event(), threading.Event()], [], []
+    names = []
+
+    def read():
+        reads.append(1)
+        if len(reads) in (2, 5):  # two separate hangs
+            gates[0 if len(reads) == 2 else 1].wait(5)
+        return "frame"
+
+    def stop():
+        stops.append(1)
+        names.append(threading.current_thread().name)
+
+    def tick(frame, now):
+        if len(reads) >= 7:
+            raise KeyboardInterrupt
+
+    thread, result = run_threaded(read, tick, stop, hang_timeout=0.2)
+    assert wait_for(lambda: len(stops) == 1)
+    time.sleep(0.5)
+    assert len(stops) == 1  # one stop per hang, not one per watchdog poll
+    assert names[0] != threading.main_thread().name and names[0] != thread.name  # the blocked thread cannot do it
+    gates[0].set()
+    assert wait_for(lambda: len(reads) >= 5)  # progress resumed
+    assert wait_for(lambda: len(stops) == 2)  # re-armed: the second hang is stopped too
+    gates[1].set()
+    thread.join(3)
+    assert not thread.is_alive() and isinstance(result[0], KeyboardInterrupt)
+
+
+def test_the_watchdog_stays_quiet_on_normal_ticks_and_ends_with_the_loop():
+    stops, ticks = [], []
+
+    def tick(frame, now):
+        ticks.append(now)
+        if len(ticks) >= 12:
+            raise KeyboardInterrupt
+
+    thread, result = run_threaded(lambda: "frame", tick, lambda: stops.append(1), hang_timeout=0.2)
+    thread.join(5)
+    assert not stops and isinstance(result[0], KeyboardInterrupt)
+    assert not [t for t in threading.enumerate() if t.name == "supervisor-watchdog"]
