@@ -83,3 +83,52 @@ def test_avoiding_a_cube_and_heading_for_the_goal_do_not_alternate_forever():
     assert any(w == 0.0 for w in turns[100:]), "never stopped alternating the two spins"
     flips = sum(1 for a, b in zip(turns, turns[1:]) if a * b < 0)
     assert flips <= 8
+
+
+def approaching_fsm(**overrides):
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, use_lease=False, **overrides), rng=random.Random(1))
+    fsm.set_mission(PHINEAS, ("blue",))
+    return fsm
+
+
+def approach(fsm, now, cube, line_front=False, scoop=""):
+    return fsm.step(BehaviorInput(now=now, cubes=[cube] if cube else [], line_front=line_front, pose=None,
+                                  scoop_color=scoop))
+
+
+def test_a_cube_that_keeps_slipping_out_of_the_scoop_is_given_up_after_capture_fails():
+    # Scoop never holds it, the cube stays at the mouth: APPROACH <-> CAPTURE rebounded forever.
+    fsm = approaching_fsm()
+    cube = Cube("red", 0.0, 0.7, 3000.0)
+    states, t = [], 0.0
+    while t < 20.0:
+        approach(fsm, t, cube)
+        states.append((t, fsm.state))
+        t += 0.1
+    left = next(t for t, s in states if s is State.EXPLORE)
+    assert left < 3 * (fsm.params.capture_time + 0.3)
+    assert all(s is State.EXPLORE for t, s in states if left <= t < left + fsm.params.skip_time - 0.2)
+
+
+def test_the_approach_strafe_stops_after_approach_strafe_time():
+    # The cube sits just beyond approach_strafe_tol (it never centers): the slide must not last forever.
+    fsm = approaching_fsm(approach_strafe_cy=0.45, approach_strafe_time=3.0)
+    cube = Cube("red", 0.06, 0.5, 3000.0)
+    slide, t = 0.0, 0.0
+    while t < 10.0:
+        cmd = approach(fsm, t, cube)
+        slide += 0.1 if cmd[1] != 0.0 else 0.0
+        t += 0.1
+    assert 0.0 < slide <= 3.0 + 0.2
+
+
+def test_a_cube_abandoned_at_the_border_is_not_approached_again_at_once():
+    fsm = approaching_fsm()
+    cube = Cube("red", 0.0, 0.5, 3000.0)
+    approach(fsm, 0.0, cube)
+    assert fsm.state is State.APPROACH
+    approach(fsm, 0.1, cube, line_front=True)
+    assert fsm.state is State.EXPLORE
+    for i in range(2, 25):  # up to ~2.4 s: inside skip_time
+        approach(fsm, 0.1 * i, cube)
+        assert fsm.state is not State.APPROACH

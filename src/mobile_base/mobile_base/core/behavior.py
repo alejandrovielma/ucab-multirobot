@@ -138,6 +138,9 @@ class BehaviorParams:
     approach_strafe_cy: float = 0.0
     approach_strafe_tol: float = 0.04  # |cx| that counts as centered on the U
     approach_strafe_speed: float = 0.03  # m/s
+    # A cube that stays just beyond approach_strafe_tol would be slid toward forever: after this long
+    # (per approach episode) the slide stops and the approach goes on (drive, capture). 0 = unbounded.
+    approach_strafe_time: float = 3.0  # s
     # Centering by spinning that lasts longer than this means the target turns WITH the robot (a cube
     # dragged by the outside of a scoop wall, seen in Webots): back off approach_backoff_time to leave
     # it and ignore it for skip_time. 0 = off.
@@ -146,6 +149,10 @@ class BehaviorParams:
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
     capture_time: float = 1.0  # s
+    # A cube that keeps slipping out of the scoop is pushed along forever (APPROACH <-> CAPTURE): after
+    # capture_fails empty captures within capture_fail_window it is ignored for skip_time.
+    capture_fails: int = 3
+    capture_fail_window: float = 20.0  # s
     has_gate: bool = False  # servo gate at the mouth of the U (see the module docstring)
     gate_close_time: float = 0.4  # s, SG90 needs ~0.25 s for 134 deg at 4.8 V
     gate_open_time: float = 0.4  # s
@@ -317,6 +324,8 @@ class BehaviorFSM:
         self._avoid_starts: list[float] = []  # times the avoid spin engaged (guide/avoid ping-pong detector)
         self._guide_off_until = 0.0
         self._aligning = False  # APPROACH: spinning to center the target (hysteresis)
+        self._strafe_since: float | None = None  # first centering slide of this approach episode
+        self._capture_fails: list[float] = []  # times a capture ended with the scoop empty
         self._skips: list[float] = []  # times a target was skipped behind another cube
         self._clear_until = 0.0  # pushing through to a target until then
         self._line_hits: list[float] = []  # border reactions, for the corner guard
@@ -699,6 +708,7 @@ class BehaviorFSM:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
                 self._aligning = False
+                self._strafe_since = None
                 return self._approach(inp)
         if inp.now < self._line_backoff_until:
             return (-p.reverse_speed, 0.0, 0.0)  # body back inside the tape before spinning
@@ -765,6 +775,7 @@ class BehaviorFSM:
             # (Webots run 8: a cube just past the edge looped APPROACH <-> CAPTURE for minutes).
             self.state = State.EXPLORE
             self.note = "border before the cube" if inp.line_front else "blue square ahead"
+            self._ignore_until = inp.now + p.skip_time  # else it is re-approached right after the turn
             self._start_line_turn(inp.now, inp.pose)
             return self._explore(inp)
         obstacle = self._blocking(inp.cubes)
@@ -802,7 +813,11 @@ class BehaviorFSM:
             if inp.pose is None or self._fits(inp.pose, 0.0, turn, carrying=False):
                 return (0.0, 0.0, turn)
         if (p.approach_strafe_cy > 0.0 and not self._aligning and target.cy_norm > p.approach_strafe_cy
-                and abs(target.cx_norm) > p.approach_strafe_tol):
+                and abs(target.cx_norm) > p.approach_strafe_tol
+                and (self._strafe_since is None or p.approach_strafe_time <= 0.0
+                     or inp.now - self._strafe_since <= p.approach_strafe_time)):
+            if self._strafe_since is None:
+                self._strafe_since = inp.now
             self.note = "centering the cube on the scoop"
             return (0.0, -math.copysign(p.approach_strafe_speed, target.cx_norm), 0.0)  # cube right: slide right
         if target.cy_norm > p.capture_cy and not self._aligning:
@@ -834,7 +849,17 @@ class BehaviorFSM:
             return self._explore(inp)
         if inp.now >= self._capture_until:
             if not is_mine(inp.scoop_color, self.targets):
-                # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again.
+                # Pushed but nothing of mine in the U: the cube slipped aside. Look for it again,
+                # unless it keeps happening: then leave that cube alone for a while.
+                p = self.params
+                self._capture_fails = [t for t in self._capture_fails if inp.now - t <= p.capture_fail_window]
+                self._capture_fails.append(inp.now)
+                if len(self._capture_fails) >= p.capture_fails:
+                    self._capture_fails = []
+                    self._ignore_until = inp.now + p.skip_time
+                    self.state = State.EXPLORE
+                    self.note = "capture failed repeatedly: leave the cube"
+                    return self._explore(inp)
                 self.state = State.APPROACH
                 self.note = "capture failed: scoop empty"
                 self._last_seen = inp.now
