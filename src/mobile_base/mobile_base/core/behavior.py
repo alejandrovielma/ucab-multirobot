@@ -333,6 +333,7 @@ class BehaviorFSM:
         self._probe_until = 0.0  # camera carry: driving forward to look from elsewhere until
         self._push_until = 0.0  # camera deliver: pushing in until
         self._guide_turning = False  # guided exploration: spinning toward the goal
+        self._guide_dir = 1.0
         self._spin_last = 0.0  # camera carry: last spin command and when its direction was set
         self._spin_since = -1e9
         self._mouth: tuple[str, float] | None = None  # last target seen centered at the mouth: color, time
@@ -751,10 +752,13 @@ class BehaviorFSM:
         if near_tape and abs(err) < p.explore_heading_tol:
             err = math.pi / 2.0  # the goal is past the tape (estimate off): turn away anyway
         if near_tape or abs(err) > p.explore_heading_tol or (self._guide_turning and abs(err) > p.explore_heading_tol / 2.0):
+            if not self._guide_turning or (not near_tape and abs(err) > p.explore_heading_tol):
+                # Latched while the tape is ahead: the override and the goal bearing disagree on the sign.
+                self._guide_dir = 1.0 if err >= 0.0 else -1.0
             self._guide_turning = True
             if near_tape:
                 self.note = "tape ahead (estimated): turn before touching it"
-            return (0.0, 0.0, math.copysign(p.turn_speed, err))
+            return (0.0, 0.0, self._guide_dir * p.turn_speed)
         self._guide_turning = False
         return None
 

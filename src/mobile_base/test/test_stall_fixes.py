@@ -1,4 +1,5 @@
 """Regressions for stalls found by the closed-loop simulation (tools/sim/test_no_stall.py)."""
+import math
 import random
 
 import pytest
@@ -62,10 +63,10 @@ def exploring_fsm(**overrides):
     return fsm
 
 
-def explore(fsm, now, cubes, goal=(0.0, 0.0), est=(0.0, 0.3, 0.0)):
+def explore(fsm, now, cubes, goal=(0.0, 0.0), est=(0.0, 0.3, 0.0), tape=None):
     """Guided exploration (estimated pose): the goal is behind the robot's left, past a blue cube."""
     return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=False, pose=None, est_pose=est,
-                                  explore_goal=goal, tape_ahead=None))
+                                  explore_goal=goal, tape_ahead=tape))
 
 
 def test_avoiding_a_cube_and_heading_for_the_goal_do_not_alternate_forever():
@@ -145,3 +146,16 @@ def test_the_blind_border_turn_covers_the_same_angle_at_any_turn_speed(turn_spee
     while fsm.step(BehaviorInput(now=t, cubes=[], line_front=False))[2] != 0.0:
         t += 0.01
     assert (t - 0.1) * turn_speed == pytest.approx(1.0, abs=0.05)
+
+
+def test_the_turn_away_from_the_estimated_tape_keeps_one_direction():
+    # Seed yellow 33 at the lab caps: the goal is past the tape and just outside explore_heading_tol, so
+    # toward-the-goal (err -0.32) and the turn-away override (+pi/2) alternated every tick and the slew
+    # limit left the robot rocking in place for minutes.
+    fsm = exploring_fsm(turn_speed=0.5)
+    goal, th, signs = (0.0, 1.0), math.pi / 2 - 0.32, []  # bearing to the goal: pi/2
+    for i in range(120):
+        wz = explore(fsm, 1.0 + i * 0.1, [], goal=goal, est=(0.0, 0.0, th), tape=0.1)[2]
+        th += wz * 0.1
+        signs.append(wz)
+    assert sum(1 for a, b in zip(signs, signs[1:]) if a * b < 0) <= 1
