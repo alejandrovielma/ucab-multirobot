@@ -684,7 +684,9 @@ class AutoPilot:
         if abs(zone.bearing_rad) > cfg.drop_align_tolerance_rad:
             self.state = f"{STATE_CARRY}{SUFFIX_ALIGN}"
             return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
-        push_m = max(0.0, zone.distance_m - cfg.cube_ahead_m)
+        # The near edge's distance is precise; the centre is half the sheet
+        # past it, along the push (also from a corner).
+        push_m = zone.distance_m + cfg.deliver_insert_m - cfg.cube_ahead_m
         self.state = STATE_DROP
         self._phase_until = now + push_m / cfg.forward_speed_mps
         return _forward(cfg.forward_speed)
