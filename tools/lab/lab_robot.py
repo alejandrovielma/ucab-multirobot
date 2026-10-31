@@ -9,7 +9,7 @@
     python3 tools/lab/lab_robot.py chase --target blue --avoid red   # autonomous, with a mission
 
 Common options: --robot phineas|ferb, --dry-run (no GPIO), --chip N, --camera auto|picamera2|gstreamer|
-v4l2|file:<img>, --port 8080, --max-speed 0.10. Ctrl+C always stops the motors. See tools/lab/README.md.
+v4l2|file:<img>, --port 8080, --max-speed 0.05 m/s, --max-turn 0.5 rad/s (lab caps). Ctrl+C always stops the motors. See tools/lab/README.md.
 """
 
 import argparse
@@ -396,7 +396,11 @@ def lab_speed_caps(values: dict, args) -> dict:
                   explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
                   approach_speed=min(values.get("approach_speed", 0.10), args.max_speed),
                   turn_speed=min(values.get("turn_speed", 1.2), args.max_turn),
-                  approach_turn_min=min(values.get("approach_turn_min", 0.4), args.max_turn))
+                  approach_turn_min=min(values.get("approach_turn_min", 0.4), args.max_turn),
+                  # centering a cube spins at k_turn * |cx| (up to k_turn rad/s): cap the gain too
+                  k_turn=min(values.get("k_turn", 1.5), args.max_turn),
+                  capture_speed=min(values.get("capture_speed", 0.08), args.max_speed),
+                  carry_speed=min(values.get("carry_speed", 0.08), args.max_speed))
     return values
 
 

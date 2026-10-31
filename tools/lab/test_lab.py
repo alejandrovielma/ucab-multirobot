@@ -212,13 +212,17 @@ def test_lab_speed_caps_limit_the_spins_too_not_only_the_translation():
 
     from lab_robot import lab_speed_caps
 
-    behavior = {"explore_speed": 0.12, "approach_speed": 0.10, "turn_speed": 1.2, "approach_turn_min": 0.4}
+    behavior = {"explore_speed": 0.12, "approach_speed": 0.10, "turn_speed": 1.2, "approach_turn_min": 0.4,
+                "k_turn": 1.5, "capture_speed": 0.08, "carry_speed": 0.08}
     slow = lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=0.05, max_turn=0.5))
     assert (slow["explore_speed"], slow["approach_speed"], slow["turn_speed"]) == (0.05, 0.05, 0.5)
+    # centering a cube spins at k_turn * |cx| (up to k_turn): it needs the spin cap too; the push is capped too
+    assert (slow["k_turn"], slow["capture_speed"], slow["carry_speed"]) == (0.5, 0.05, 0.05)
     assert slow["approach_turn_min"] == 0.4 and slow["has_gate"] is False
     assert lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=0.05, max_turn=0.3))["approach_turn_min"] == 0.3
     fast = lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=1.0, max_turn=5.0))
     assert (fast["explore_speed"], fast["turn_speed"]) == (0.12, 1.2)  # a cap never speeds the robot up
+    assert (fast["k_turn"], fast["capture_speed"]) == (1.5, 0.08)
 
 
 def test_sigterm_and_sighup_unwind_the_modes_so_the_motors_stop():
