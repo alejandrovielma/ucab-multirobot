@@ -14,8 +14,10 @@ Cubes already inside the area are dropped so they are not picked up again.
 Used by the cube_detector node and by tools/teleop_web_lib.
 """
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 
+import cv2
 import numpy as np
 
 from vision.camera_model import CameraModel
@@ -41,6 +43,10 @@ DEFAULT_FLOOR_MIN_FLATNESS = 1.5
 # Cubes up to this many px nearer than the landmarks' bases count as in the
 # area when only the gate is known.
 DEFAULT_IGNORE_MARGIN_PX = 80
+# Where the area sits between the left and right landmarks, as a fraction of
+# the distance between them (0 = left one, 1 = right one). 0.38 is where the
+# original graph paper was; a centred area is 0.5.
+DEFAULT_GATE_AIM_FRACTION = 0.38
 # Largest area paper blob accepted (0 = no limit): under some white balances
 # the whole pale table reads as paper and fills the lower image.
 DEFAULT_FLOOR_MAX_AREA_PX = 0
@@ -50,6 +56,9 @@ DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM = False
 # A blob whose lowest row is within this many px of the image bottom
 # touches it.
 FLOOR_BOTTOM_MARGIN_PX = 3
+
+# Smaller polygons (twice their area, m^2) have no usable centroid.
+MIN_DOUBLE_AREA_M2 = 1e-6
 
 # Half width of the area around the gate aim column, in landmark heights.
 PAPER_HALF_SPAN_HEIGHTS = 1.8
@@ -76,7 +85,11 @@ class ZoneParams:
     floor_min_flatness: float = DEFAULT_FLOOR_MIN_FLATNESS
     ignore_margin_px: int = DEFAULT_IGNORE_MARGIN_PX
     floor_max_area_px: int = DEFAULT_FLOOR_MAX_AREA_PX
+    gate_aim_fraction: float = DEFAULT_GATE_AIM_FRACTION
     floor_ignore_touching_bottom: bool = DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM
+    # Aim at the paper's centre on the floor (its outline projected on the
+    # floor) instead of the middle of its near edge.
+    floor_aim_centre: bool = False
 
 
 def is_plausible_floor(
@@ -115,6 +128,26 @@ def in_zone(det: Detection, zone: Region, margin_px: int) -> bool:
     return abs(det.u - zone.u) <= half_span_px and det.v <= limit_v
 
 
+def polygon_centroid(
+    xs: np.ndarray,
+    ys: np.ndarray,
+) -> tuple[float, float] | None:
+    """
+    Centroid of the simple polygon with vertices (`xs`, `ys`) (shoelace
+    formula), or None when it has no area.
+    """
+    next_xs, next_ys = np.roll(xs, -1), np.roll(ys, -1)
+    cross = xs * next_ys - next_xs * ys
+    double_area = cross.sum()
+    if abs(double_area) < MIN_DOUBLE_AREA_M2:
+        return None
+    scale = 3.0 * double_area
+    return (
+        float(((xs + next_xs) * cross).sum() / scale),
+        float(((ys + next_ys) * cross).sum() / scale),
+    )
+
+
 def without_cubes_in_zone(
     detections: list[Detection],
     zone: Region | None,
@@ -144,6 +177,7 @@ class ZoneLocator:
         from the HSV `ranges` (colours without a range are skipped).
         """
         self.params = params
+        self._camera = camera
         self._landmarks = None
         if len(params.landmark_colors) == LANDMARK_COUNT and all(
             c in ranges for c in params.landmark_colors
@@ -182,7 +216,11 @@ class ZoneLocator:
             )
             for color in (left_color, right_color)
         )
-        return self._landmarks.gate_between(left, right)
+        return self._landmarks.gate_between(
+            left,
+            right,
+            p.gate_aim_fraction,
+        )
 
     def _find_floor(self, bgr: np.ndarray) -> Region | None:
         """
@@ -195,6 +233,67 @@ class ZoneLocator:
             self.params.floor_min_area_px,
             self.params.floor_min_flatness,
         )
-        if is_plausible_floor(floor, bgr.shape[0], self.params):
+        if not is_plausible_floor(floor, bgr.shape[0], self.params):
+            return None
+        if self.params.floor_aim_centre:
+            return self._aim_at_floor_centre(bgr, floor)
+        return self._aim_at_center(floor)
+
+    def _aim_at_floor_centre(self, bgr: np.ndarray, floor: Region) -> Region:
+        """
+        The area paper aimed at its centre on the floor: the outline of the
+        paper projected on the floor and averaged as a polygon. Its image
+        centre is not its floor centre (the near part looks bigger), and the
+        robot must push the cube there from any side.
+        """
+        x, y, width_px, height_px = floor.bbox
+        hsv = cv2.cvtColor(
+            bgr[y : y + height_px, x : x + width_px],
+            cv2.COLOR_BGR2HSV,
+        )
+        mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+        for color in self._floor.ranges:
+            mask |= self._floor.mask(hsv, color)
+        contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        if not contours:
+            return self._aim_at_center(floor)
+        outline = max(contours, key=cv2.contourArea).reshape(-1, 2)
+        ground = [self._camera.ground_point(u + x, v + y) for u, v in outline]
+        if None in ground:
+            return self._aim_at_center(floor)
+        centre = polygon_centroid(
+            np.array([point[0] for point in ground]),
+            np.array([point[1] for point in ground]),
+        )
+        if centre is None:
+            return self._aim_at_center(floor)
+        forward_m, left_m = centre
+        return replace(
+            floor,
+            u=x + width_px // 2,
+            bearing_rad=math.atan2(left_m, forward_m),
+            distance_m=math.hypot(forward_m, left_m),
+        )
+
+    def _aim_at_center(self, floor: Region) -> Region:
+        """
+        The area paper aimed at the middle of its width. Its nearest point
+        jumps from one end of the thin strip to the other as the robot
+        sways, so the robot aligned left and right without ever driving in.
+        """
+        x, _, width_px, _ = floor.bbox
+        u = x + width_px // 2
+        aim = self._camera.bearing_distance(u, floor.v)
+        if aim is None:
             return floor
-        return None
+        bearing_rad, distance_m = aim
+        return replace(
+            floor,
+            u=u,
+            bearing_rad=bearing_rad,
+            distance_m=distance_m,
+        )
