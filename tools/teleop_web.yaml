@@ -42,6 +42,21 @@ camera:
   hflip: true
   # Part of the camera id that identifies the CSI port of the OV5647 (picamera2 only).
   picamera_id_hint: i2c@80000
+  # Sensor mode to request. 1640x1232 is the full-frame binned mode (whole
+  # field of view, about 62 degrees); without it libcamera picks the 640x480
+  # mode, a crop of the centre of about 28 degrees. null = let libcamera pick.
+  sensor_size: [1640, 1232]
+  # Camera geometry for this tool (overrides camera.* of the shared
+  # src/vision/config/hsv_ranges.yaml, measured in the cropped mode).
+  # hfov_rad: from the lego measured at 50 cm (61 px tall, 6.4 cm: focal 477 px,
+  # about 68 degrees); height_m: 5.8 cm measured, centre of the lens to the
+  # table (the old 0.10 was wrong); tilt_rad: least-squares fit to cubes at
+  # 30, 40 and 60 cm (within 3 px); the 20 cm cube read 22 px off, to be
+  # re-measured. TODO check the near range (15-20 cm).
+  model:
+    hfov_rad: 1.1826
+    height_m: 0.058
+    tilt_rad: 0.0605
   target_colors: [yellow]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
@@ -53,14 +68,25 @@ camera:
   # old blue/green ranges (S >= 80) never matched them. TODO recheck if the
   # lighting or the white balance changes.
   area_hsv:
-    area_blue: [68, 25, 120, 95, 110, 235]
-    area_pink: [3, 30, 140, 22, 100, 235]
+    # The table, tinted cyan when the camera faces the dark wall, is H 33-71, S 25-44, V 198-220
+    # and the old range (S from 25, V to 235) took it for the area: a false zone over half the
+    # table that hid the cubes inside it. The real sheet is H 88-92, S 67-101, V 166-183.
+    # V from 140 (was 110): up close the area's black tape reads H 93-98, S 66-91, V 115-131,
+    # joined the sheet's blob and pulled its centre and near edge onto the tape; the robot
+    # aimed right of the sheet and left a cube on the tape. TODO recheck if the light changes.
+    area_blue: [74, 50, 140, 100, 140, 195]
+    # Two ranges: its hue wraps (the pink strip reads H 175-179 and 0-3, S 43-52, V 203-222 up
+    # close; the old 3-22 caught only its lower rim).
+    area_pink: [0, 25, 140, 22, 100, 235, 165, 25, 140, 179, 100, 235]
   zone:
     # The area is the blue sheet plus the pink line where it starts (the
     # robot enters across the pink one). The claw robot's blue/green parts
     # were taken for the old blue/green paper (distances of 187 cm and more),
     # so those colours stay out; these two ranges exclude it (it is dark).
     floor_colors: [area_blue, area_pink]
+    # Aim at the paper's centre on the floor (its outline projected), not the middle of its near
+    # edge: the robot pushes the cube straight there, also from a diagonal.
+    floor_aim_centre: true
     # Larger than the old default: a small blob (1600 px) matched the claw's
     # surroundings; the real area is ~14700 px at 50 cm and ~3700 at 1 m.
     floor_min_area_px: 3000
@@ -69,6 +95,32 @@ camera:
     # bigger than ~30% of the image.
     floor_max_area_px: 90000
     floor_ignore_touching_bottom: true
+    # Cubes this many px nearer than the landmarks' bases still count as already delivered when
+    # only the gate is known. The shared 80 was tuned in the old cropped mode; in this one it
+    # covered everything from the legos (86 cm) to ~30 cm in front of them, so a cube 50 cm away
+    # was thrown out as "delivered" and the robot ignored it.
+    ignore_margin_px: 10
+    # The temporary area sits at the midpoint of the two legos (the shared 0.38 was for the old
+    # graph paper). Cubes inside it are ignored by their distance from this point, so with 0.38
+    # a delivered cube near the red lego was not covered and the robot went for it again.
+    gate_aim_fraction: 0.5
+  # Accept only cubes that stand on the white table: the strip just below
+  # them must be bright and unsaturated. A yellow object in the room behind
+  # the table (a chair, a shelf) has something dark below it; it was taken
+  # for a cube 80-120 cm away and the robot drove at the table edge after it.
+  support:
+    enabled: true
+    # Strip below the cube, in cube heights, and the extra width on each side,
+    # in cube widths.
+    rows_below_ratio: 0.6
+    side_ratio: 0.5
+    # Share of that strip that must look like the table.
+    min_table_fraction: 0.5
+    # The table: brightest channel at least this, saturation at most this
+    # (0-255). This camera renders it pale and slightly yellow
+    # (V ~205, S ~25).
+    min_value: 150
+    max_saturation: 90
   # Skip cubes with the black border line just behind or under them: the scoop
   # only pushes forward, so catching one shoves it over the line for good.
   # OFF until the thresholds are tuned on real frames (see border.py).
@@ -90,49 +142,69 @@ line_sensor:
   pin: 5
   # DO value over the black tape (the usual module gives 1 on black, 0 on white).
   black_value: 1
+  # Black reads in a row (one per 20 ms loop) before the robot reacts. Single reads while moving
+  # were the sensor lifting off the table: 29 line recoveries in 2 min, 5 of them while going for
+  # a cube, each ignoring cubes for line_cube_ban_s. The 19 mm tape lasts ~3 reads at full speed,
+  # so 2 still catches it (~0.6 cm later). The log prints every black run's length. TODO tune.
+  confirm_reads: 2
+  # Fusion HAT+ analog input (0-3 = A0-A3) where the module's AO pin is wired,
+  # to see how much light each surface reflects while the potentiometer is
+  # set. null = AO not wired. AO goes to the HAT's signal pin only: keep the
+  # module's VCC on 3V3 (the output must stay under 3.3 V).
+  adc_channel: 0
 
 auto:
   # NEVER start in Auto: the operator turns it on from the page.
   enabled: false
-  # At ~16.5 cm the scoop hides the cube; at 18.5 cm (or the image bottom) the blind push starts.
-  stop_distance_m: 0.185
+  # Geometry (measured 10.2026): the image bottom (row 479) sees a cube's near edge down to
+  # 10.0 cm from the lens and the scoop front is ~0.7 cm ahead of the lens, so the last ~9 cm
+  # before the scoop are blind. The blind push starts at 12.5 cm from the lens (row 436):
+  # still seen whole, ~12 cm before the scoop. TODO re-measure the forward speed.
+  stop_distance_m: 0.125
   slow_down_distance_m: 0.45
   forward_speed: 0.42
   roam_forward_speed: 0.35
-  turn_speed: 0.38
-  search_turn_speed: 0.32
+  # Lowered from 0.38 / 0.32, then 0.34 / 0.28 (operator: the spin was too fast). TODO check
+  # the wheels still turn the robot at 0.25.
+  turn_speed: 0.32
+  search_turn_speed: 0.25
   align_tolerance_rad: 0.22
   lost_timeout_s: 0.6
   # Longest time searching without seeing any cube before stopping for good.
-  no_cubes_stop_s: 20.0
+  # Hard limit only: the search ends earlier, after a spin in the middle of the arena (search_*).
+  no_cubes_stop_s: 60.0
   # Time (s) driving straight blind at ~18.5 cm to push the cube into the scoop.
-  scoop_push_s: 0.65
+  # Forward at 0.42 measured ~0.31 m/s (4 pushes of 0.67 s moved ~21 cm each). The cube is
+  # ~11.8 cm from the scoop when the push starts, so 0.5 s (15.5 cm) touches it and seats it
+  # ~3.7 cm; longer would only shove it farther.
+  scoop_push_s: 0.5
   # Black line: stop, move opposite to the approach direction, then turn inward.
   line_stop_s: 0.2
   line_backup_s: 0.5
   line_backup_max_s: 0.9
   line_turn_s: 1.2
   line_speed: 0.35
-  # Delivery: aligned with the area and arrived, it drives blind straight onto
-  # the paper for deliver_push_s. Only the landmarks in view: arrived this close
-  # (m) to them or with them this low in the image (px).
-  zone_stop_distance_m: 0.42
-  zone_arrive_v_px: 478
-  # Area paper in view: arrived when its near edge is this close or this low.
-  floor_stop_distance_m: 0.19
-  floor_arrive_v_px: 445
+  # Delivery only starts with the area paper in view. The landmarks only lead there: closer than
+  # this (m) to them the robot slows down until the paper shows up. A push started from the
+  # landmarks (59 cm away) left the cube ~20 cm short of the paper and still counted it.
+  zone_stop_distance_m: 0.59
+  # Area paper in view: also at it when its near edge is this low in the image (px), 12.0 cm
+  # from the lens (row 436), even if its centre still reads farther than deliver_commit_distance_m.
+  floor_arrive_v_px: 436
   # Then back up leaving the cube and turn to look for the next one.
-  deliver_push_s: 1.4
-  deliver_backup_s: 1.6
   deliver_turn_s: 2.0
-  # A cube counts as at the scoop when its bottom edge passes this image row (px).
-  scoop_arrive_v_px: 445
+  # A cube counts as at the scoop when its bottom edge passes this image row (px): row 436 is
+  # a cube near edge at ~12 cm from the lens.
+  scoop_arrive_v_px: 436
   # Catch / drop only start if the bearing is within align_tolerance_rad times this.
   catch_align_factor: 1.4
-  # Roaming without a target: drive forward roam_forward_s out of every roam_period_s,
-  # turn to scan the rest.
-  roam_period_s: 3.0
-  roam_forward_s: 1.3
+  # Roaming without a target: turn to scan, then drive forward roam_forward_s at the end of every
+  # roam_period_s (~one full spin at search_turn_speed, TODO measure), so a spin that saw nothing
+  # is followed by a move to another spot. It was 0 (spin in place only) because the bursts hit
+  # the black tape 29 times in 130 s, mostly false line reads now filtered (confirm_reads); the
+  # robot gave up after one spot with a cube still in the arena.
+  roam_period_s: 8.0
+  roam_forward_s: 1.0
   # Largest sideways correction while driving to a target (0-1).
   steer_limit: 0.7
   # Slowest approach speed, as a fraction of forward_speed.
@@ -153,14 +225,35 @@ auto:
   # A line hit while going for a cube or carrying one means the cube is at the
   # border: ignore cubes for this long so the robot goes elsewhere. TODO measure
   line_cube_ban_s: 8.0
-  # Delivery into the area paper (blue sheet ~17 cm deep, entered across the
-  # pink line): the arrival is when its near edge is ~19 cm from the camera and
-  # the cube sits ~12 cm ahead of it, so ~15 cm of push puts the cube inside.
-  # Forward at 0.42 is ~0.26 m/s (backing at 0.35 measured ~13 cm in 0.6 s), so
-  # that is ~0.6 s; back up about as far and a little more. The landmark gate
-  # keeps the longer deliver_* times. TODO measure
-  floor_deliver_push_s: 0.6
+  # Once turning to align, keep turning until the bearing error is below this
+  # fraction of the tolerance (no flipping between turning and driving).
+  align_exit_fraction: 0.5
+  # Delivery needs the robot to face the area squarely: legos stand at both
+  # sides of it and a crooked push knocks them down. TODO measure
+  drop_align_tolerance_rad: 0.12
+  # After the push, back up this long: at 0.35 measured ~0.23 m/s, 1.0 s is 23 cm, enough to
+  # leave the area.
   floor_deliver_backup_s: 1.0
+  # Delivery: facing the paper's centre within drop_align_tolerance_rad and this close (m) to it,
+  # push the cube straight to it from wherever the robot is (also diagonally). The push lasts
+  # (distance - cube_ahead_m) / forward_speed_mps: forward at 0.42 measured ~0.31 m/s, the cube's
+  # centre sits ~2.2 cm ahead of the lens. A squared, perpendicular entry needed the pink line,
+  # which was missed at 30 cm, and the robot backed off instead of delivering. TODO measure
+  deliver_commit_distance_m: 0.30
+  forward_speed_mps: 0.31
+  cube_ahead_m: 0.022
+  # Carrying with the paper this close (m), the black line is the area's tape or the border next
+  # to its entry: cross it and go straight in (turning back made it curve around).
+  carry_line_ignore_distance_m: 0.45
+  # Search without cubes: spin in place this long (~one turn at search_turn_speed, TODO measure);
+  # if nothing showed up, go to this distance (m) from the area (about the middle of the arena,
+  # TODO measure) and spin once more; then stop.
+  search_spin_s: 9.0
+  search_center_distance_m: 0.55
+  search_center_tolerance_m: 0.08
+  # A cube this close (m) once backed up from a delivery was left outside: it does not count and
+  # the robot goes for it again. TODO measure
+  drop_verify_distance_m: 0.30
   # Closer than this to its target, the alignment tolerance is widened by the
   # factor below (a few cm sideways is already a big angle up close). Keep the
   # factor under catch_align_factor. TODO measure
@@ -171,7 +264,9 @@ auto:
   carry_zone_timeout_s: 15.0
   # Without a cube in view, never roam forward while the delivery gate is
   # this close or closer (past it there is no border line). TODO measure
-  gate_avoid_distance_m: 0.6
+  # Stop roaming toward the area / legos this close (m). 0.84 turned the robot away from almost
+  # anywhere in the 1.17 m arena; 0.35 leaves a robot length before the pink line.
+  gate_avoid_distance_m: 0.35
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:
@@ -179,7 +274,10 @@ detection:
   min_size_ratio: 0.50
   max_size_ratio: 2.10
   ignore_touching_bottom: false
-  max_distance_m: 1.6
+  # The arena is 116.5 x 70 cm: a cube across its diagonal, seen from a
+  # corner, is ~1.2 m from the camera. Real cubes were seen at 27-58 cm.
+  # Farther blobs were objects in the room beyond the table.
+  max_distance_m: 1.2
 
 server:
   host: 0.0.0.0
