@@ -387,6 +387,15 @@ class MapRunner:
         return ("en " if e.localized else "buscando, cerca de ") + where + f", ruedas {e.scale:.2f}"
 
 
+def mission_colors(args, bcfg):
+    """(targets, avoid) from --target/--avoid or the YAML; a bad color name exits with a message, not a traceback."""
+    try:
+        return (parse_colors(args.target if args.target is not None else bcfg.get("my_colors", "")),
+                parse_colors(args.avoid if args.avoid is not None else bcfg.get("avoid_colors", "")))
+    except ValueError as exc:
+        raise SystemExit(f"mision invalida: {exc}") from None
+
+
 def mode_chase(args, cfg):
     gpio = open_gpio(args.chip, args.dry_run)
     motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
@@ -396,8 +405,7 @@ def mode_chase(args, cfg):
     bcfg = cfg["behavior"]
     fields = BehaviorParams.__dataclass_fields__
     values = {k: v for k, v in bcfg.items() if k in fields and k != "my_colors"}
-    targets = parse_colors(args.target if args.target is not None else bcfg.get("my_colors", ""))
-    avoid = parse_colors(args.avoid if args.avoid is not None else bcfg.get("avoid_colors", ""))
+    targets, avoid = mission_colors(args, bcfg)
     if not targets:
         raise SystemExit("sin mision: pasar --target (por ejemplo --target blue --avoid red)")
     values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),

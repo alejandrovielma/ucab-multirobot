@@ -190,3 +190,15 @@ def test_motion_is_detected_after_two_steps_well_above_the_still_noise():
     assert moving_since([0.8, 0.9, 1.0, 3.5, 4.0, 6.0], still_mean=0.8, still_std=0.1) == 3
     assert moving_since([0.8, 3.5, 0.9, 1.0], still_mean=0.8, still_std=0.1) is None  # one spike is noise
     assert moving_since([], still_mean=0.8, still_std=0.1) is None
+
+
+def test_mission_colors_come_from_the_arguments_and_a_bad_name_exits_with_a_message():
+    from types import SimpleNamespace
+
+    from lab_robot import mission_colors
+
+    ns = SimpleNamespace(target="blue, green", avoid="red")
+    assert mission_colors(ns, {}) == (("blue", "green"), ("red",))
+    assert mission_colors(SimpleNamespace(target=None, avoid=None), {"my_colors": "", "avoid_colors": ""}) == ((), ())
+    with pytest.raises(SystemExit, match="mision invalida.*rosa"):
+        mission_colors(SimpleNamespace(target="rosa", avoid=None), {})
