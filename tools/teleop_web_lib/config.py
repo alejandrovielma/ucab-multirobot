@@ -88,10 +88,12 @@ DEFAULT_CARRY_ZONE_TIMEOUT_S = 15.0
 # Without a cube in view, do not roam forward with the gate this close.
 # TODO measure
 DEFAULT_GATE_AVOID_DISTANCE_M = 0.35
-# Delivery: aligned with the paper's centre this close (m), push the cube
-# straight to it. Forward at forward_speed covers forward_speed_mps; the
-# cube's centre sits cube_ahead_m ahead of the lens. TODO measure
-DEFAULT_DELIVER_COMMIT_DISTANCE_M = 0.30
+# Delivery: facing the paper's centre with its near edge this close (m),
+# push the cube straight in, deliver_insert_m past that edge. Forward at
+# forward_speed covers forward_speed_mps; the cube's centre sits
+# cube_ahead_m ahead of the lens. TODO measure
+DEFAULT_DELIVER_COMMIT_DISTANCE_M = 0.20
+DEFAULT_DELIVER_INSERT_M = 0.07
 DEFAULT_FORWARD_SPEED_MPS = 0.31
 DEFAULT_CUBE_AHEAD_M = 0.022
 # Carrying with the paper this close (m), the black line is the area's own
@@ -182,6 +184,7 @@ class AutoConfig:
     carry_zone_timeout_s: float = DEFAULT_CARRY_ZONE_TIMEOUT_S
     gate_avoid_distance_m: float = DEFAULT_GATE_AVOID_DISTANCE_M
     deliver_commit_distance_m: float = DEFAULT_DELIVER_COMMIT_DISTANCE_M
+    deliver_insert_m: float = DEFAULT_DELIVER_INSERT_M
     forward_speed_mps: float = DEFAULT_FORWARD_SPEED_MPS
     cube_ahead_m: float = DEFAULT_CUBE_AHEAD_M
     carry_line_ignore_distance_m: float = DEFAULT_CARRY_LINE_IGNORE_DISTANCE_M
