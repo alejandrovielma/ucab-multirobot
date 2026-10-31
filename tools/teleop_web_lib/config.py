@@ -10,16 +10,16 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 # --- Auto mode defaults (real values: tools/teleop_web.yaml, section auto) ----
-DEFAULT_STOP_DISTANCE_M = 0.185
+DEFAULT_STOP_DISTANCE_M = 0.125
 DEFAULT_SLOW_DOWN_DISTANCE_M = 0.45
 DEFAULT_FORWARD_SPEED = 0.42
 DEFAULT_ROAM_FORWARD_SPEED = 0.35
-DEFAULT_TURN_SPEED = 0.38
-DEFAULT_SEARCH_TURN_SPEED = 0.32
+DEFAULT_TURN_SPEED = 0.32
+DEFAULT_SEARCH_TURN_SPEED = 0.25
 DEFAULT_ALIGN_TOLERANCE_RAD = 0.22
 DEFAULT_LOST_TIMEOUT_S = 0.6
-DEFAULT_NO_CUBES_STOP_S = 20.0
-DEFAULT_SCOOP_PUSH_S = 0.65
+DEFAULT_NO_CUBES_STOP_S = 60.0
+DEFAULT_SCOOP_PUSH_S = 0.5
 DEFAULT_LINE_BACKUP_S = 0.5
 DEFAULT_LINE_TURN_S = 1.2
 # Brake pause as soon as the black border is seen, before backing up.
@@ -29,23 +29,19 @@ DEFAULT_LINE_BACKUP_MAX_S = 0.9
 # How recent the last movement must be for the line recovery to undo it.
 DEFAULT_LINE_MOTION_MEMORY_S = 1.5
 DEFAULT_LINE_SPEED = 0.35
-# Only the landmarks in view: arrived this far from them.
-DEFAULT_ZONE_STOP_DISTANCE_M = 0.42
-DEFAULT_ZONE_ARRIVE_V_PX = 478
+# Only the landmarks in view: slow down this far from them (no delivery).
+DEFAULT_ZONE_STOP_DISTANCE_M = 0.59
 # Area paper in view: arrived when its near edge is this close or this low.
-DEFAULT_FLOOR_STOP_DISTANCE_M = 0.19
-DEFAULT_FLOOR_ARRIVE_V_PX = 445
-DEFAULT_DELIVER_PUSH_S = 1.4
-DEFAULT_DELIVER_BACKUP_S = 1.6
+DEFAULT_FLOOR_ARRIVE_V_PX = 436
 DEFAULT_DELIVER_TURN_S = 2.0
 # Image row (px) from which a cube counts as at the scoop threshold.
-DEFAULT_SCOOP_ARRIVE_V_PX = 445
+DEFAULT_SCOOP_ARRIVE_V_PX = 436
 # The catch / drop alignment tolerance is align_tolerance_rad times this.
 DEFAULT_CATCH_ALIGN_FACTOR = 1.4
 # Roaming: drive forward for `roam_forward_s` out of every `roam_period_s`,
 # and turn to scan the rest of the time.
-DEFAULT_ROAM_PERIOD_S = 3.0
-DEFAULT_ROAM_FORWARD_S = 1.3
+DEFAULT_ROAM_PERIOD_S = 8.0
+DEFAULT_ROAM_FORWARD_S = 1.0
 # Largest sideways correction while driving toward a target (0-1).
 DEFAULT_STEER_LIMIT = 0.7
 # Slowest approach speed, as a fraction of forward_speed.
@@ -78,14 +74,38 @@ DEFAULT_CLOSE_ALIGN_FACTOR = 1.3
 # Forward at 0.42 is ~0.26 m/s (backing at 0.35 measured ~13 cm in 0.6 s), so
 # that is ~0.6 s; back up about as far and a little more. The landmark gate
 # keeps the longer deliver_* times. TODO measure
-DEFAULT_FLOOR_DELIVER_PUSH_S = 0.6
 DEFAULT_FLOOR_DELIVER_BACKUP_S = 1.0
+# Once turning to align, keep turning until the bearing error is below this
+# fraction of the tolerance; otherwise the error hovering around the tolerance
+# flips between turning and driving every tick (seen: 12 flips in 6 s).
+DEFAULT_ALIGN_EXIT_FRACTION = 0.5
+# Delivery needs the robot to face the area squarely: legos stand at both
+# sides of it and a crooked push knocks them down. TODO measure
+DEFAULT_DROP_ALIGN_TOLERANCE_RAD = 0.12
 # Carrying a cube without ever seeing the delivery gate for this long: assume
 # the cube slipped out of the scoop. TODO measure
 DEFAULT_CARRY_ZONE_TIMEOUT_S = 15.0
 # Without a cube in view, do not roam forward with the gate this close.
 # TODO measure
-DEFAULT_GATE_AVOID_DISTANCE_M = 0.6
+DEFAULT_GATE_AVOID_DISTANCE_M = 0.35
+# Delivery: aligned with the paper's centre this close (m), push the cube
+# straight to it. Forward at forward_speed covers forward_speed_mps; the
+# cube's centre sits cube_ahead_m ahead of the lens. TODO measure
+DEFAULT_DELIVER_COMMIT_DISTANCE_M = 0.30
+DEFAULT_FORWARD_SPEED_MPS = 0.31
+DEFAULT_CUBE_AHEAD_M = 0.022
+# Carrying with the paper this close (m), the black line is the area's own
+# tape or the border next to its entry: cross it instead of turning back.
+DEFAULT_CARRY_LINE_IGNORE_DISTANCE_M = 0.45
+# Search without cubes: one spin in place (s), then go this far (m, within
+# the tolerance) from the area, about the middle of the arena, and spin
+# again. TODO measure
+DEFAULT_SEARCH_SPIN_S = 9.0
+DEFAULT_SEARCH_CENTER_DISTANCE_M = 0.55
+DEFAULT_SEARCH_CENTER_TOLERANCE_M = 0.08
+# A cube this close (m) after backing up from a delivery was left outside
+# the area: the delivery does not count. TODO measure
+DEFAULT_DROP_VERIFY_DISTANCE_M = 0.30
 
 # --- Vision filter used by this tool (section `detection` overrides) ----------
 # Looser than the ROS cube_detector because this tool's camera is not
@@ -95,7 +115,7 @@ DEFAULT_DETECTION_FILTER = {
     "min_size_ratio": 0.50,
     "max_size_ratio": 2.10,
     "ignore_touching_bottom": False,
-    "max_distance_m": 1.6,
+    "max_distance_m": 1.2,
 }
 
 # The vision package is plain Python: it is imported straight from the repo,
@@ -141,11 +161,7 @@ class AutoConfig:
     line_motion_memory_s: float = DEFAULT_LINE_MOTION_MEMORY_S
     line_speed: float = DEFAULT_LINE_SPEED
     zone_stop_distance_m: float = DEFAULT_ZONE_STOP_DISTANCE_M
-    zone_arrive_v_px: int = DEFAULT_ZONE_ARRIVE_V_PX
-    floor_stop_distance_m: float = DEFAULT_FLOOR_STOP_DISTANCE_M
     floor_arrive_v_px: int = DEFAULT_FLOOR_ARRIVE_V_PX
-    deliver_push_s: float = DEFAULT_DELIVER_PUSH_S
-    deliver_backup_s: float = DEFAULT_DELIVER_BACKUP_S
     deliver_turn_s: float = DEFAULT_DELIVER_TURN_S
     scoop_arrive_v_px: int = DEFAULT_SCOOP_ARRIVE_V_PX
     catch_align_factor: float = DEFAULT_CATCH_ALIGN_FACTOR
@@ -158,12 +174,21 @@ class AutoConfig:
     reveal_max_distance_m: float = DEFAULT_REVEAL_MAX_DISTANCE_M
     reacquire_s: float = DEFAULT_REACQUIRE_S
     line_cube_ban_s: float = DEFAULT_LINE_CUBE_BAN_S
-    floor_deliver_push_s: float = DEFAULT_FLOOR_DELIVER_PUSH_S
+    align_exit_fraction: float = DEFAULT_ALIGN_EXIT_FRACTION
+    drop_align_tolerance_rad: float = DEFAULT_DROP_ALIGN_TOLERANCE_RAD
     floor_deliver_backup_s: float = DEFAULT_FLOOR_DELIVER_BACKUP_S
     close_align_distance_m: float = DEFAULT_CLOSE_ALIGN_DISTANCE_M
     close_align_factor: float = DEFAULT_CLOSE_ALIGN_FACTOR
     carry_zone_timeout_s: float = DEFAULT_CARRY_ZONE_TIMEOUT_S
     gate_avoid_distance_m: float = DEFAULT_GATE_AVOID_DISTANCE_M
+    deliver_commit_distance_m: float = DEFAULT_DELIVER_COMMIT_DISTANCE_M
+    forward_speed_mps: float = DEFAULT_FORWARD_SPEED_MPS
+    cube_ahead_m: float = DEFAULT_CUBE_AHEAD_M
+    carry_line_ignore_distance_m: float = DEFAULT_CARRY_LINE_IGNORE_DISTANCE_M
+    search_spin_s: float = DEFAULT_SEARCH_SPIN_S
+    search_center_distance_m: float = DEFAULT_SEARCH_CENTER_DISTANCE_M
+    search_center_tolerance_m: float = DEFAULT_SEARCH_CENTER_TOLERANCE_M
+    drop_verify_distance_m: float = DEFAULT_DROP_VERIFY_DISTANCE_M
 
     @classmethod
     def from_dict(cls, values: dict | None) -> "AutoConfig":
