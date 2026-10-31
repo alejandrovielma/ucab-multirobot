@@ -92,6 +92,7 @@
     peer_yield_distance: 0.5  # m, other robot's marker closer than this: wait
     yield_timeout: 10.0  # s waiting before giving the cube up
     dodge_limit: 3  # sidesteps around non-target cubes while carrying
+    dodge_time: 6.0  # s of one sidestep episode before the transport is abandoned
     deliver_guard_cx: 0.6  # |cx| of non-target cubes that call the push into the square off (scoop walls included)
     deliver_guard_cy: 0.5  # and closer than this cy
     deliver_push_time: 4.0  # s pushing in at enter_speed: 0.20 m from the entry to the drop point (core/delivery.py)

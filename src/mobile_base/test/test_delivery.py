@@ -475,7 +475,8 @@ def test_a_non_target_cube_ahead_is_sidestepped_to_the_free_side_then_given_up_a
     p = fsm.params
     green_right = Cube("green", 0.1, 0.7, 800.0)
     assert cam2(fsm, 1.0, cubes=[green_right]) == pytest.approx((0.0, p.axis_strafe_speed, 0.0))  # cube right: go left
-    assert cam2(fsm, 1.1, cubes=[Cube("green", -0.1, 0.7, 800.0)]) == pytest.approx((0.0, -p.axis_strafe_speed, 0.0))
+    # the direction is latched for the episode: the cube crossing the center does not flip it
+    assert cam2(fsm, 1.1, cubes=[Cube("green", -0.1, 0.7, 800.0)]) == pytest.approx((0.0, p.axis_strafe_speed, 0.0))
     cam2(fsm, 1.2)  # clear: it goes straight again
     cam2(fsm, 1.3, cubes=[green_right])  # second episode
     cam2(fsm, 1.4)

@@ -221,6 +221,7 @@ class BehaviorParams:
     yield_timeout: float = 10.0
     # Non-target cubes in the way while carrying: strafe around them, give up after dodge_limit tries.
     dodge_limit: int = 3
+    dodge_time: float = 6.0  # s of one sidestep episode before the transport is abandoned
     # While pushing into the square, a non-target cube this wide in the image (|cx|) and this low (cy) is
     # in front of the scoop's walls too: the push is called off (the cube would go in with it).
     deliver_guard_cx: float = 0.6
@@ -324,6 +325,8 @@ class BehaviorFSM:
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
         self._dodging = False
+        self._dodge_dir = 1.0  # strafe sign of the current dodge episode (latched when it starts)
+        self._dodge_since = 0.0
         self._on_axis = False  # camera carry: lined up on the delivery axis (the rectangles may leave the view)
         self.delivered = 0  # deliveries counted by this robot (the arbiter keeps the official count)
         self._actions: list[ZoneAction] = []
@@ -950,11 +953,14 @@ class BehaviorFSM:
         if obstacle is not None:
             if not self._dodging:
                 self._dodges += 1
+                self._dodge_since = inp.now
+                # Latched: with two cubes either side, the nearest one (and the sign) flipped every tick.
+                self._dodge_dir = math.copysign(1.0, obstacle.cx_norm if obstacle.cx_norm else 1.0)
             self._dodging = True
-            if self._dodges > p.dodge_limit:
+            if self._dodges > p.dodge_limit or inp.now - self._dodge_since > p.dodge_time:
                 return self._abandon_transport(inp, "a non-target cube keeps blocking the way")
             self.note = f"{obstacle.color} cube ahead: sidestep"
-            return (0.0, math.copysign(p.axis_strafe_speed, obstacle.cx_norm if obstacle.cx_norm else 1.0), 0.0)
+            return (0.0, self._dodge_dir * p.axis_strafe_speed, 0.0)
         self._dodging = False
         if not (inp.square_visible and inp.square_cy >= p.square_reach_cy):
             return (p.carry_speed, 0.0, 0.0)
