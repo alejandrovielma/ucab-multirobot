@@ -33,9 +33,9 @@ Direct commits to `main` (user instruction 2026-10-23, memory push-directo-a-mai
 the full suite and, when the native assessment says due, the native review; push after approval.
 
 ## Tasks
-- [ ] T1 Regression test in the repo: deterministic closed-loop no-stall test over a few seeds per
+- [x] T1 Regression test in the repo: deterministic closed-loop no-stall test over a few seeds per
       color (RED first with the seeds that stall today).
-- [ ] T2 CARRY sidestep: root cause, direction latch and a time bound (abandon the transport).
+- [x] T2 CARRY sidestep: root cause, direction latch and a time bound (abandon the transport).
 - [ ] T3 EXPLORE spin-in-place with a non-target cube in the scoop: root cause and a bound.
 - [ ] T4 APPROACH<->CAPTURE rebound counter (ignore the cube after repeated failed captures).
 - [ ] T5 APPROACH strafe timeout.
@@ -57,3 +57,12 @@ the full suite and, when the native assessment says due, the native review; push
 
 ## Progress
 - 2026-10-31: document created; no source change yet.
+- 2026-10-31: T1+T2 done, commit bc6bb28 (writer, delegated: 2+ non-trivial files + mapping trigger).
+  Root cause: two non-target cubes flank the robot, one sits at the avoid_cx 0.3 edge, each 2 cm strafe
+  tick flips which one is nearest, so the sign of the sidestep flipped every tick; `_dodges` counted
+  episodes, not time. Fix: direction latched per episode + `dodge_time` 6.0 s. RED: tools/sim
+  test_no_stall 6/6 failed, test_stall_fixes 2/3. GREEN observed by the parent: 68 passed (new tests +
+  test_delivery + test_config); full suite 368 tests, 1 known OpenCV-4.6 failure. Harness seeds 1-40
+  (600 s): CARRY stalls 13->0 yellow, 16->0 blue; stalled runs yellow 25->22, blue 30->22 (runs that
+  froze in CARRY now continue and reach the EXPLORE pattern, T3). Assessed medium/under_budget: no
+  native review due; reviewed boundary stays at e76031b.
