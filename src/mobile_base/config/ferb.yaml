@@ -24,6 +24,7 @@
     assume_capture: true  # the real scoop is open: a cube at its middle plate is below the camera view (measured by the team), so a target that vanishes at the mouth while driving on is assumed captured
     assume_mouth_cy: 0.55
     assume_window: 1.5  # s
+    assume_confirm: 0.3  # s the cube must stay out of sight before it counts as captured (one dropped frame is not a capture)
     approach_strafe_cy: 0.45  # cube this close: center it on the U by sliding sideways (the mouth is ~4 cm)
     approach_strafe_tol: 0.04  # |cx| counted as centered
     approach_strafe_speed: 0.03  # m/s

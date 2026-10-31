@@ -185,3 +185,141 @@ def test_the_square_probe_covers_its_distance_at_the_carry_speed():
     assert look(2.1)[0] == pytest.approx(0.05)  # probe starts: 0.12 / 0.05 = 2.4 s
     assert look(4.4)[0] == pytest.approx(0.05)
     assert look(4.6) == pytest.approx((0.0, 0.0, fsm.params.carry_max_turn))
+
+
+# ---- Behavior audit (2026-10-31): episode state, assumed captures, border reactions
+
+AT_MOUTH = Cube("red", 0.0, 0.7, 3000.0)
+
+
+def assuming_fsm(**overrides):
+    fsm = BehaviorFSM(BehaviorParams(my_colors=PHINEAS, assume_capture=True, use_lease=False, **overrides),
+                      rng=random.Random(1))
+    fsm.set_mission(PHINEAS, ("blue",))
+    return fsm
+
+
+def tick(fsm, now, cubes=(), **kw):
+    return fsm.step(BehaviorInput(now=now, cubes=list(cubes), line_front=kw.pop("line_front", False), pose=None, **kw))
+
+
+def test_one_dropped_frame_in_capture_is_not_taken_for_a_capture():
+    fsm = assuming_fsm()
+    tick(fsm, 0.0, [Cube("red", 0.0, 0.4, 900.0)])
+    tick(fsm, 0.1, [AT_MOUTH])
+    assert fsm.state is State.CAPTURE
+    tick(fsm, 0.2)  # a single frame without the cube
+    for i in range(3, 12):
+        tick(fsm, 0.1 * i, [AT_MOUTH])
+    tick(fsm, 1.2, [AT_MOUTH])  # the push is over and the cube is still in view: it was never captured
+    assert not fsm.carrying and "capture failed" in fsm.note
+
+
+def deliver_after_assumed_capture(fsm):
+    tick(fsm, 0.0, [Cube("red", 0.0, 0.4, 900.0)])
+    tick(fsm, 0.1, [AT_MOUTH])
+    t = 0.2
+    while fsm.state is State.CAPTURE and t < 5.0:  # the plate hides the cube from the camera
+        tick(fsm, t)
+        t += 0.1
+    assert fsm.state is State.CARRY
+    while fsm.state is not State.EXPLORE and t < 40.0:
+        tick(fsm, t, square_visible=True, square_cx=0.0, square_cy=0.8)
+        t += 0.1
+
+
+def test_a_delivery_after_an_assumed_capture_counts():
+    # scoop_color is the substituted color all along, so "the cube left the scoop" was never true.
+    fsm = assuming_fsm()
+    deliver_after_assumed_capture(fsm)
+    assert fsm.delivered == 1 and fsm.note == "delivered"
+
+
+def test_the_delivery_axis_is_forgotten_after_a_sidestep():
+    # A 6 s sidestep moves the robot off the axis: it must line up again instead of driving straight on.
+    fsm = carrying_fsm(axis_delivery=True)
+    on_axis = dict(refs_visible=True, refs_cx=0.0, refs_skew=0.0, square_visible=True, square_cx=0.0, square_cy=0.3)
+    fsm.step(BehaviorInput(now=1.0, cubes=[], line_front=False, pose=None, scoop_color="red", **on_axis))
+    fsm.step(BehaviorInput(now=1.1, cubes=[Cube("green", 0.1, 0.7, 800.0)], line_front=False, pose=None,
+                           scoop_color="red", **on_axis))
+    cmd = fsm.step(BehaviorInput(now=1.2, cubes=[], line_front=False, pose=None, scoop_color="red",
+                                 square_visible=True, square_cx=0.5, square_cy=0.3))
+    assert cmd[0] == 0.0 and cmd[2] != 0.0
+
+
+def test_a_new_approach_does_not_inherit_the_centering_timer_of_an_old_one():
+    fsm = approaching_fsm(approach_spin_timeout=4.0)
+    off = Cube("red", 0.6, 0.3, 3000.0)
+    approach(fsm, 0.0, off)  # centering by spinning starts
+    for i in range(1, 25):  # lost for 2.4 s: back to EXPLORE
+        approach(fsm, 0.1 * i, None)
+    assert fsm.state is State.EXPLORE
+    approach(fsm, 10.0, off)
+    assert fsm.state is State.APPROACH and "turns with the robot" not in fsm.note
+
+
+def test_a_new_transport_does_not_inherit_the_square_search_timer():
+    fsm = carrying_fsm()
+    fsm.step(BehaviorInput(now=1.0, cubes=[], line_front=False, pose=None, scoop_color="red"))  # searching
+    fsm.step(BehaviorInput(now=1.1, cubes=[], line_front=True, pose=None, scoop_color="red"))
+    assert fsm.state is State.EXPLORE
+    fsm.state = State.CARRY  # next transport, long after
+    cmd = fsm.step(BehaviorInput(now=100.0, cubes=[], line_front=False, pose=None, scoop_color="red"))
+    assert cmd[0] == 0.0 and cmd[2] != 0.0  # spins to look, no forward probe
+
+
+def test_an_obstacle_seen_right_after_a_border_turn_is_still_avoided():
+    fsm = exploring_fsm(turn_speed=0.5, line_backoff=0.14)
+    obstacle = Cube("blue", 0.1, 0.6, 800.0)
+    tick(fsm, 0.0, [obstacle])  # the avoid spin starts
+    tick(fsm, 0.2, [obstacle], line_front=True)  # reverse, then a long turn (cubes are not looked at meanwhile)
+    t = 0.3
+    cmd = tick(fsm, t, [obstacle])
+    while fsm._turn_until is not None and t < 30.0:
+        t += 0.1
+        cmd = tick(fsm, t, [obstacle])
+    assert t > 3.0 and cmd[0] == 0.0 and cmd[2] != 0.0  # the first look after the turn: avoid it, do not ignore it
+
+
+def test_clearing_the_mission_resets_the_dodge_state():
+    fsm = carrying_fsm()
+    carry(fsm, 1.0, [Cube("green", 0.1, 0.7, 800.0)])
+    assert fsm._dodging
+    fsm.set_mission((), ())
+    carry(fsm, 1.1, [])
+    assert fsm.state is State.IDLE and fsm._dodges == 0 and not fsm._dodging
+
+
+def test_a_border_during_capture_backs_off_before_turning():
+    fsm = approaching_fsm(line_backoff=0.14)
+    approach(fsm, 0.0, Cube("red", 0.0, 0.4, 900.0))
+    approach(fsm, 0.1, AT_MOUTH)
+    assert fsm.state is State.CAPTURE
+    cmd = approach(fsm, 0.2, AT_MOUTH, line_front=True)
+    assert fsm.state is State.EXPLORE and cmd[0] < 0.0
+
+
+def test_the_line_while_carrying_backs_off_before_turning():
+    fsm = carrying_fsm(line_backoff=0.14)
+    cmd = fsm.step(BehaviorInput(now=1.0, cubes=[], line_front=True, pose=None, scoop_color="red"))
+    assert "line while carrying" in fsm.note and cmd[0] < 0.0
+
+
+def test_giving_up_a_cube_after_repeated_failed_captures_backs_off_and_turns_away():
+    fsm = approaching_fsm()
+    left, t = None, 0.0
+    while t < 20.0:
+        cmd = approach(fsm, t, AT_MOUTH)
+        if fsm.state is State.EXPLORE and left is None:
+            left = t
+        if left is not None and t < left + 2.5:
+            assert cmd[0] <= 0.0  # it used to drive straight on into the cube it was leaving
+        t += 0.1
+    assert left is not None
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_a_non_finite_estimated_pose_is_ignored(bad):
+    fsm = exploring_fsm()
+    cmd = explore(fsm, 1.0, [], est=(0.0, 0.3, bad))
+    assert cmd == (fsm.params.explore_speed, 0.0, 0.0)

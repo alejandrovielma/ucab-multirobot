@@ -133,6 +133,9 @@ class BehaviorParams:
     assume_capture: bool = False
     assume_mouth_cy: float = 0.55
     assume_window: float = 1.5  # s since the last sighting at the mouth
+    # The cube must stay out of sight this long (like shed_confirm) before it is assumed captured: one
+    # dropped frame in CAPTURE is not a capture.
+    assume_confirm: float = 0.3  # s
     # The U is barely twice a cube wide: once the cube is close (cy above approach_strafe_cy) the last
     # centering is a sideways slide, not a spin (a spin swings the scoop's mouth). 0 = off.
     approach_strafe_cy: float = 0.0
@@ -340,6 +343,7 @@ class BehaviorFSM:
         self._spin_since = -1e9
         self._mouth: tuple[str, float] | None = None  # last target seen centered at the mouth: color, time
         self._assumed = ""  # color of the cube assumed inside the scoop (assume_capture)
+        self._absent_since: float | None = None  # CAPTURE (assume_capture): no target at the mouth since
         self._align_since: float | None = None  # APPROACH: spinning to center the target since
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
@@ -383,10 +387,18 @@ class BehaviorFSM:
                      and abs(c.cx_norm) <= p.approach_align * 2.0]
             if close:
                 self._mouth = (max(close, key=lambda c: c.cy_norm).color, inp.now)
-        if self.state is State.CAPTURE and not self._assumed and not inp.scoop_color and self._mouth is not None:
-            still_there = any(is_mine(c.color, self.targets) and c.cy_norm >= p.assume_mouth_cy for c in inp.cubes)
-            if inp.now - self._mouth[1] <= p.assume_window and not still_there:
-                self._assumed = self._mouth[0]
+        if self.state is State.CAPTURE and not inp.scoop_color and self._mouth is not None:
+            at_mouth = [c for c in inp.cubes if is_mine(c.color, self.targets) and c.cy_norm >= p.assume_mouth_cy]
+            if at_mouth:  # a dropped frame is not a capture: it is back (and the window restarts)
+                self._absent_since, self._assumed = None, ""
+                self._mouth = (max(at_mouth, key=lambda c: c.cy_norm).color, inp.now)
+            else:
+                self._absent_since = inp.now if self._absent_since is None else self._absent_since
+                if (not self._assumed and inp.now - self._absent_since >= p.assume_confirm
+                        and inp.now - self._mouth[1] <= p.assume_window):
+                    self._assumed = self._mouth[0]
+        else:
+            self._absent_since = None
         if self._assumed and not inp.scoop_color:
             return dataclasses.replace(inp, scoop_color=self._assumed)
         return inp
@@ -400,6 +412,7 @@ class BehaviorFSM:
                     if self.state in (State.CARRY, State.DELIVER):
                         self._give_up_cube(inp)
                         self._dropping = False
+                    self._reset_transport()
                     self.state = State.IDLE
                     self.note = "no mission"
                     self._last_request = inp.now
@@ -541,8 +554,10 @@ class BehaviorFSM:
         if self.state is State.CARRY:
             self._give_up_cube(inp)
         self.state = State.EXPLORE
+        self._reset_transport()
         self._turn_until = None
         self._line_backoff_until = 0.0
+        self._avoid_since = None
         x, y, theta = inp.pose
         cx, cy = self._track.centroid
         err = relative_bearing(x, y, theta, cx, cy)
@@ -555,14 +570,23 @@ class BehaviorFSM:
             self._scoop_seen = inp.now
         return inp.now - self._scoop_seen <= self.params.scoop_lost_timeout
 
-    def _abandon_transport(self, inp: BehaviorInput, why: str) -> Command:
-        self.note = why
+    def _reset_transport(self) -> None:
+        """Timers and latches of one transport must not leak into the next one."""
         self.plan = None
         self._on_axis = False
-        self._yield_since, self._dodges, self._dodging = None, 0, False
+        self._yield_since = self._search_since = self._plan_failing_since = None
+        self._dodges, self._dodging = 0, False
+        self._probe_until = 0.0
+
+    def _abandon_transport(self, inp: BehaviorInput, why: str, line: bool = False) -> Command:
+        self.note = why
+        self._reset_transport()
         self._give_up_cube(inp)
         self.state = State.EXPLORE
-        self._start_turn(inp.now, inp.pose)
+        if line:
+            self._start_line_turn(inp.now, inp.pose)  # the body is past the tape too: reverse first
+        else:
+            self._start_turn(inp.now, inp.pose)
         return self._explore(inp)
 
     def _give_up_cube(self, inp: BehaviorInput) -> None:
@@ -592,6 +616,7 @@ class BehaviorFSM:
 
     def _start_turn(self, now: float, pose) -> None:
         p = self.params
+        self._avoid_since = None  # an avoid episode never outlives the turn (else it counts as 3 s old after it)
         self._turn_dir = self._rng.choice((-1.0, 1.0))
         if pose is None:
             self._turn_goal = None
@@ -614,6 +639,7 @@ class BehaviorFSM:
     def _start_fixed_turn(self, now: float, pose, angle: float) -> None:
         """Spin `angle` rad either way (measured with the pose, timed without it)."""
         p = self.params
+        self._avoid_since = None
         self._turn_dir = self._rng.choice((-1.0, 1.0))
         self._turn_goal = angle if pose is not None else None
         self._turn_prev_theta = pose[2] if pose is not None else 0.0
@@ -711,7 +737,7 @@ class BehaviorFSM:
                 self.state = State.APPROACH
                 self._last_seen = inp.now
                 self._aligning = False
-                self._strafe_since = None
+                self._strafe_since = self._align_since = self._avoid_since = None
                 return self._approach(inp)
         if inp.now < self._line_backoff_until:
             return (-p.reverse_speed, 0.0, 0.0)  # body back inside the tape before spinning
@@ -737,7 +763,8 @@ class BehaviorFSM:
             # misread part of the robot), so dodging it never ends. Ignore it for a while.
             self._avoid_ignore_until = inp.now + p.skip_time
             self._avoid_since = None
-        if inp.est_pose is not None and inp.now >= self._guide_off_until:
+        if (inp.est_pose is not None and all(math.isfinite(v) for v in inp.est_pose)
+                and inp.now >= self._guide_off_until):
             guided = self._guided(inp)
             if guided is not None:
                 return guided
@@ -851,7 +878,7 @@ class BehaviorFSM:
         if inp.line_front:
             self.state = State.EXPLORE
             self.note = "border during capture"
-            self._start_turn(inp.now, inp.pose)
+            self._start_line_turn(inp.now, inp.pose)
             return self._explore(inp)
         if inp.now >= self._capture_until:
             if not is_mine(inp.scoop_color, self.targets):
@@ -865,12 +892,14 @@ class BehaviorFSM:
                     self._ignore_until = inp.now + p.skip_time
                     self.state = State.EXPLORE
                     self.note = "capture failed repeatedly: leave the cube"
+                    self._start_line_turn(inp.now, inp.pose, p.shed_distance)  # back off the cube, turn away
                     return self._explore(inp)
                 self.state = State.APPROACH
                 self.note = "capture failed: scoop empty"
                 self._last_seen = inp.now
                 return self._approach(inp)
             self.state = State.CARRY
+            self._reset_transport()
             self._carried_color = inp.scoop_color
             self._scoop_seen = inp.now
             self._last_request = None
@@ -905,7 +934,7 @@ class BehaviorFSM:
         z = self._zone
         if inp.line_front and not self.gate_closed:
             # The gate turns in place at the line and the turn drops the cube: stop carrying.
-            return self._abandon_transport(inp, "line while carrying")
+            return self._abandon_transport(inp, "line while carrying", line=True)
         if not self._still_holding(inp):
             return self._abandon_transport(inp, "cube lost from the scoop")
         if inp.now < self._gate_ready_at:
@@ -996,6 +1025,7 @@ class BehaviorFSM:
         obstacle = self._blocking(inp.cubes)
         if obstacle is not None:
             if not self._dodging:
+                self._on_axis = False  # the sidestep moves the robot off the axis
                 self._dodges += 1
                 self._dodge_since = inp.now
                 # Latched: with two cubes either side, the nearest one (and the sign) flipped every tick.
@@ -1049,12 +1079,12 @@ class BehaviorFSM:
 
     def _finish_delivery(self, inp: BehaviorInput) -> Command:
         # Counted only if the cube stayed in the square: it must have left the scoop.
-        left_behind = not is_mine(inp.scoop_color, self.targets)
+        # An assumed cube (assume_capture) is never seen in the scoop: it stays assumed until reversed out.
+        left_behind = bool(self._assumed) or not is_mine(inp.scoop_color, self.targets)
         self.delivered += left_behind
         self._zone_action(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
-        self._on_axis = False
-        self._yield_since, self._dodges, self._dodging = None, 0, False
+        self._reset_transport()
         self._carried_color = ""
         self.state = State.EXPLORE
         self.note = "delivered" if left_behind else "delivery failed: the cube is still in the scoop"
