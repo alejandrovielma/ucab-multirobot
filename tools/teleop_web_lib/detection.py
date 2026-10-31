@@ -22,13 +22,18 @@ from teleop_web_lib.config import (
     VISION_PACKAGE_DIR,
     read_node_params,
 )
+from teleop_web_lib.support import SupportParams, without_cubes_off_table
 
 log = logging.getLogger("teleop_web")
 
 # Section of hsv_ranges.yaml with the delivery area parameters.
 ZONE_SECTION = "zone"
+# Key of the camera section that overrides the camera geometry.
+MODEL_SECTION = "model"
 # Key of the camera section with the border filter settings.
 BORDER_SECTION = "border"
+# Key of the camera section with the cube-on-the-table filter settings.
+SUPPORT_SECTION = "support"
 # Key of the camera section with extra HSV ranges for the area paper.
 AREA_HSV_KEY = "area_hsv"
 
@@ -44,6 +49,7 @@ class DetectionPipeline:
         detector,
         zone_locator,
         border: BorderParams | None = None,
+        support: SupportParams | None = None,
     ):
         """
         Keep the cube detector, the area locator (vision/zone.py) and the
@@ -52,6 +58,7 @@ class DetectionPipeline:
         self._detector = detector
         self._zone_locator = zone_locator
         self._border = border or BorderParams()
+        self._support = support or SupportParams()
         self._lock = threading.Lock()
         self._det = None
         self._det_stamp_s = 0.0
@@ -94,6 +101,7 @@ class DetectionPipeline:
             self._zone_locator.params.ignore_margin_px,
         )
         detections = without_cubes_near_border(frame, detections, self._border)
+        detections = without_cubes_off_table(frame, detections, self._support)
         best = detections[0] if detections else None
         self._remember(best, zone)
 
@@ -157,12 +165,15 @@ def _build_pipeline(
     hsv_values = {**hsv_cfg["hsv"], **camera_cfg.get(AREA_HSV_KEY, {})}
     ranges = {c: parse_hsv_ranges(v) for c, v in hsv_values.items()}
 
+    # The tool's camera section overrides the shared geometry (its sensor
+    # mode is not the one the shared values were measured in).
+    geometry = {**hsv_cfg["camera"], **camera_cfg.get(MODEL_SECTION, {})}
     camera_model = CameraModel(
         width_px=camera_cfg["width_px"],
         height_px=camera_cfg["height_px"],
-        hfov_rad=hsv_cfg["camera"]["hfov_rad"],
-        height_m=hsv_cfg["camera"]["height_m"],
-        tilt_rad=hsv_cfg["camera"]["tilt_rad"],
+        hfov_rad=geometry["hfov_rad"],
+        height_m=geometry["height_m"],
+        tilt_rad=geometry["tilt_rad"],
     )
     filters = DetectionFilter(
         cube_size_m=hsv_cfg["filter"]["cube_size_m"],
@@ -182,4 +193,5 @@ def _build_pipeline(
         detector,
         ZoneLocator(ranges, camera_model, zone_params),
         BorderParams(**camera_cfg.get(BORDER_SECTION, {})),
+        SupportParams(**camera_cfg.get(SUPPORT_SECTION, {})),
     )
