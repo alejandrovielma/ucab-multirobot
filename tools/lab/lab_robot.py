@@ -25,7 +25,7 @@ import time
 import tty
 from pathlib import Path
 
-from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_gpio
+from hardware import LOG, VERIFIED_WIRING, Camera, LineSensor, Motors, WHEELS, load_config, open_gpio
 
 from mobile_base.core.kinematics import wheel_speeds  # noqa: E402
 from stream import FrameBuffer, serve
@@ -104,7 +104,31 @@ def open_motor_gpio(args, cfg):
     return open_gpio(args.chip, args.dry_run)
 
 
+def make_motors(args, cfg, gpio, max_speed, **kw):
+    """Motors, or a clear exit: a bad cap/battery, or a HAT that does not answer (outside --dry-run the
+    robot would look alive while every command is silently dropped)."""
+    try:
+        motors = Motors(cfg, gpio, max_speed, args.dry_run, **kw)
+    except ValueError as exc:
+        raise SystemExit(f"parametros invalidos (bateria, --max-speed o --max-turn): {exc}") from None
+    if not args.dry_run and motors.dry_run:
+        raise SystemExit("la Fusion HAT+ no responde: revisar la bateria, el driver (lsmod | grep fusion_hat) "
+                         "y la conexion")
+    return motors
+
+
+def require_verified_wiring(args) -> None:
+    """The autonomous modes only drive a robot whose wheel wiring was verified on the floor."""
+    if not args.dry_run and args.robot not in VERIFIED_WIRING:
+        raise SystemExit(f"el cableado de {args.robot} no esta verificado: correr `motors --only-wheels --robot "
+                         f"{args.robot}`, comprobar que cada rueda gira hacia delante, corregir fusion_reversed en "
+                         f"su YAML y anadirlo a VERIFIED_WIRING en tools/lab/hardware.py (o usar --dry-run)")
+
+
 # ------------------------------------------------------------------ modes
+
+
+STAR_MAX_SPIN = 2.0  # rad/s: the fastest spin the motors --star test may ask for
 
 
 def robot_steps(v: float, seconds: float, star: bool) -> list[tuple[str, tuple[float, float, float]]]:
@@ -115,6 +139,9 @@ def robot_steps(v: float, seconds: float, star: bool) -> list[tuple[str, tuple[f
                 ("girar antihorario", (0.0, 0.0, 10.0 * v))]  # 0.8 rad/s at 0.08 m/s, as before
     d = v * math.sqrt(0.5)
     w = (math.pi / 2.0) / seconds  # a quarter turn per step
+    if w > STAR_MAX_SPIN:
+        raise ValueError(f"--star gira un cuarto de vuelta por paso: con --seconds {seconds:g} serian {w:.1f} rad/s "
+                         f"(maximo {STAR_MAX_SPIN:g}); usar --seconds >= {math.pi / 2.0 / STAR_MAX_SPIN:.2f}")
     return [("adelante", (v, 0.0, 0.0)), ("atras", (-v, 0.0, 0.0)),
             ("izquierda", (0.0, v, 0.0)), ("derecha", (0.0, -v, 0.0)),
             ("diagonal adelante-izquierda", (d, d, 0.0)), ("diagonal atras-derecha", (-d, -d, 0.0)),
@@ -123,7 +150,11 @@ def robot_steps(v: float, seconds: float, star: bool) -> list[tuple[str, tuple[f
 
 
 def mode_motors(args, cfg):
-    motors = Motors(cfg, open_motor_gpio(args, cfg), max(args.max_speed, args.speed), args.dry_run)
+    try:
+        steps = [] if args.only_wheels else robot_steps(args.speed, args.seconds, args.star)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    motors = make_motors(args, cfg, open_motor_gpio(args, cfg), max(args.max_speed, args.speed))
     if args.delay > 0.0:
         # Time to unplug the Ethernet cable used for SSH: a dragging cable makes the robot drift.
         print(f"empieza en {args.delay:.0f} s", flush=True)
@@ -141,7 +172,7 @@ def mode_motors(args, cfg):
                 time.sleep(args.seconds)
                 motors.stop()
                 time.sleep(0.5)
-        for name, cmd in () if args.only_wheels else robot_steps(args.speed, args.seconds, args.star):
+        for name, cmd in steps:
             print(f"robot: {name} {args.seconds:.1f} s", flush=True)
             motors.drive(*cmd)
             time.sleep(args.seconds)
@@ -195,10 +226,10 @@ def mode_threshold(args, cfg):
     so it runs without anyone at the keyboard (unplug the SSH cable during --delay). It stops at once
     when it detects motion or the line sensor sees the tape, and logs the level of every step."""
     gpio = open_gpio(args.chip, args.dry_run)
-    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
+    motors = make_motors(args, cfg, gpio, args.max_speed)
     line = LineSensor(cfg, gpio)
     cam = Camera(args.camera)
-    if motors.bank is None:
+    if motors.bank is None:  # only --dry-run gets here: make_motors refused a HAT that does not answer
         print("sin la Fusion HAT+ no hay nada que medir", flush=True)
         return
     top = min(motors.cap * 100.0, args.max_power)
@@ -258,12 +289,13 @@ def mode_threshold(args, cfg):
 
 
 def mode_drive(args, cfg):
-    motors = Motors(cfg, open_motor_gpio(args, cfg), args.max_speed, args.dry_run)
+    require_verified_wiring(args)
+    motors = make_motors(args, cfg, open_motor_gpio(args, cfg), args.max_speed, max_turn=args.max_turn)
     # Star motion (team rule 2026-10-27): translations in 8 directions or a spin in place, never both.
     d = math.sqrt(0.5)
     keys = {"w": (1, 0, 0), "s": (-1, 0, 0), "a": (0, 1, 0), "d": (0, -1, 0), "q": (0, 0, 1), "e": (0, 0, -1),
             "u": (d, d, 0), "o": (d, -d, 0), "j": (-d, d, 0), "l": (-d, -d, 0)}
-    speed, turn = args.max_speed, 1.0
+    speed, turn = args.max_speed, args.max_turn
     print("w/s avanzar/retroceder, a/d lateral, u/o diagonal adelante izq/der, j/l diagonal atras izq/der, "
           "q/e girar en el sitio, espacio parar, +/- velocidad, x salir", flush=True)
     cmd = (0.0, 0.0, 0.0)
@@ -357,6 +389,9 @@ def mode_camera(args, cfg):
                 LOG.warn(f"no se pudo guardar la imagen en {args.save_dir}/ (disco lleno o sin permiso?)")
 
 
+MAX_INTEGRATION_DT = 0.3  # s: a command is never integrated for longer than a few ticks (outage, hung tick)
+
+
 class MapRunner:
     """The cartographer (particle filter + memory) in a lab loop. The command sent at one tick moved the
     robot until the next one: it is applied there, with the real elapsed time."""
@@ -370,7 +405,7 @@ class MapRunner:
             return {}
         if self._sent is not None:
             cmd, t = self._sent
-            self.carto.moved(cmd, max(0.0, now - t))
+            self.carto.moved(cmd, min(MAX_INTEGRATION_DT, max(0.0, now - t)))
         est = self.carto.observe(now, black, landmark_sightings(square, refs), cubes, fsm.targets,
                                  carrying=fsm.carrying)
         goal = self.carto.goal_for(now, fsm.targets)
@@ -379,7 +414,8 @@ class MapRunner:
         return dict(est_pose=(est.x, est.y, est.theta), explore_goal=goal, tape_ahead=self.carto.tape_ahead())
 
     def sent(self, cmd, now) -> None:
-        self._sent = (cmd, now)
+        """cmd None = the supervisor stopped the motors: the robot is not moving, integrate nothing."""
+        self._sent = None if cmd is None else (cmd, now)
 
     def text(self) -> str:
         if self.carto is None:
@@ -401,7 +437,8 @@ def lab_speed_caps(values: dict, args) -> dict:
                   # centering a cube spins at k_turn * |cx| (up to k_turn rad/s): cap the gain too
                   k_turn=min(values.get("k_turn", 1.5), args.max_turn),
                   capture_speed=min(values.get("capture_speed", 0.08), args.max_speed),
-                  carry_speed=min(values.get("carry_speed", 0.08), args.max_speed))
+                  carry_speed=min(values.get("carry_speed", 0.08), args.max_speed),
+                  carry_max_turn=min(values.get("carry_max_turn", 0.4), args.max_turn))
     return values
 
 
@@ -438,8 +475,9 @@ def mission_colors(args, bcfg):
 
 
 def mode_chase(args, cfg):
+    require_verified_wiring(args)
+    motors = make_motors(args, cfg, open_motor_gpio(args, cfg), args.max_speed, max_turn=args.max_turn)
     gpio = open_gpio(args.chip, args.dry_run)
-    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
     line = LineSensor(cfg, gpio)
     cam = Camera(args.camera)
     vparams = vision_params(cfg)
@@ -466,6 +504,11 @@ def mode_chase(args, cfg):
     print(f"objetivo {list(targets)}, prohibidos {list(avoid)}; video en http://<ip-del-robot>:{args.port}/ ; Ctrl+C para parar",
           flush=True)
     mapper = MapRunner(not args.no_map)
+
+    def stop_all():  # the supervisor's stop: the robot is not moving any more, so neither is the map's estimate
+        mapper.sent(None, 0.0)
+        return motors.stop()
+
     t0 = time.monotonic()
     previous = None
     park = Park(args.stop_at_capture)
@@ -516,18 +559,20 @@ def mode_chase(args, cfg):
                                  + (f" otro robot a {peer[1]:.2f} m" if peer else ""),
                                  f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
     try:
-        run_loop(cam.read, tick, motors.stop)
+        run_loop(cam.read, tick, stop_all)
     finally:
         motors.stop()
         motors.gpio.close()
+        gpio.close()
 
 
 def mode_dashboard(args, cfg):
     """Mission buttons, camera view and manual WASD in the browser; every command through the safety gate.
 
     Deliberative layer = the person (buttons), sequencer = BehaviorFSM, reactive layer = SafetyGate."""
+    require_verified_wiring(args)
+    motors = make_motors(args, cfg, open_motor_gpio(args, cfg), args.max_speed, max_turn=args.max_turn)
     gpio = open_gpio(args.chip, args.dry_run)
-    motors = Motors(cfg, gpio, args.max_speed, args.dry_run)
     line = LineSensor(cfg, gpio)
     cam = Camera(args.camera)
     vparams = vision_params(cfg)
@@ -541,7 +586,7 @@ def mode_dashboard(args, cfg):
     fsm = BehaviorFSM(BehaviorParams(my_colors=(), **values))  # no mission: IDLE until INICIAR
     teleop = Teleop(args.max_speed, args.max_turn)
     dash = Dashboard(teleop, DEFAULT_HUE_RANGES)
-    token = secrets.token_urlsafe(8)
+    token = secrets.token_urlsafe(32)
     page = (Path(__file__).parent / "dashboard.html").read_bytes()
     frames = FrameBuffer()
     serve(frames, args.port, page=page, api=dash.handle, token=token)
@@ -553,6 +598,11 @@ def mode_dashboard(args, cfg):
         ip = "<ip-del-robot>"
     print(f"control: http://{ip}:{args.port}/?t={token}   (Ctrl+C o pkill -INT para parar)", flush=True)
     mapper = MapRunner(not args.no_map)
+
+    def stop_all():  # the supervisor's stop: the robot is not moving any more, so neither is the map's estimate
+        mapper.sent(None, 0.0)
+        return motors.stop()
+
     t0 = time.monotonic()
     last = t0
 
@@ -596,13 +646,42 @@ def mode_dashboard(args, cfg):
             frames.put(annotate(frame, dets, vparams, [f"{'manual' if manual else fsm.state.value} linea={int(black)} pala={scoop or '-'}",
                                                        f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
     try:
-        run_loop(cam.read, tick, motors.stop)
+        run_loop(cam.read, tick, stop_all)
     finally:
         motors.stop()
         motors.gpio.close()
+        gpio.close()
 
 
-def main():
+def _number(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} no es un numero") from None
+    if not math.isfinite(value):
+        raise argparse.ArgumentTypeError(f"{text!r} no es finito")
+    return value
+
+
+def finite(text: str) -> float:
+    return _number(text)
+
+
+def positive(text: str) -> float:
+    value = _number(text)
+    if value <= 0.0:
+        raise argparse.ArgumentTypeError(f"debe ser > 0, no {text}")
+    return value
+
+
+def fraction(text: str) -> float:
+    value = positive(text)
+    if value > 1.0:
+        raise argparse.ArgumentTypeError(f"debe estar en (0, 1], no {text}")
+    return value
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("mode", choices=["motors", "threshold", "drive", "line", "camera", "chase", "dashboard"])
     parser.add_argument("--robot", default="phineas", choices=["phineas", "ferb"])
@@ -610,24 +689,24 @@ def main():
     parser.add_argument("--chip", type=int, default=None, help="gpiochip number (default: autodetect)")
     parser.add_argument("--camera", default="auto")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--max-speed", type=float, default=0.05, help="m/s, lab cap on translation")
-    parser.add_argument("--battery", type=float, default=None,
+    parser.add_argument("--max-speed", type=positive, default=0.05, help="m/s, lab cap on translation")
+    parser.add_argument("--battery", type=finite, default=None,
                         help="measured battery voltage (V): sets the PWM cap that keeps the TT motors <= 6 V")
-    parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
-    parser.add_argument("--seconds", type=float, default=1.0, help="motors mode: seconds per test")
-    parser.add_argument("--speed", type=float, default=0.08, help="motors mode: m/s of the forward and strafe steps")
+    parser.add_argument("--duty", type=fraction, default=0.5, help="motors mode: fraction of the duty cap")
+    parser.add_argument("--seconds", type=positive, default=1.0, help="motors mode: seconds per test")
+    parser.add_argument("--speed", type=positive, default=0.08, help="motors mode: m/s of the forward and strafe steps")
     parser.add_argument("--wheels", default=",".join(WHEELS), help="motors mode: order of the one-wheel steps")
     parser.add_argument("--only-wheels", action="store_true", help="motors mode: skip the whole-robot steps")
     parser.add_argument("--star", action="store_true",
                         help="motors mode: robot steps in the 8 translation directions and both spins, in return pairs")
     parser.add_argument("--only-robot", action="store_true", help="motors mode: skip the one-wheel steps")
     parser.add_argument("--delay", type=float, default=0.0, help="motors mode: seconds to wait before moving")
-    parser.add_argument("--step", type=float, default=2.0, help="threshold mode: power step (percent)")
+    parser.add_argument("--step", type=positive, default=2.0, help="threshold mode: power step (percent)")
     parser.add_argument("--step-time", type=float, default=0.6, help="threshold mode: seconds per step")
     parser.add_argument("--start-power", type=float, default=8.0, help="threshold mode: first power step (percent)")
     parser.add_argument("--max-power", type=float, default=45.0,
                         help="threshold mode: highest power tried (the 21-28 %% of the star test already moves)"),
-    parser.add_argument("--latch-timeout", type=float, default=3.0, help="drive mode: stop after N s with no key")
+    parser.add_argument("--latch-timeout", type=positive, default=3.0, help="drive mode: stop after N s with no key")
     parser.add_argument("--save-every", type=float, default=0.0,
                         help="camera mode: save the raw and the annotated frame every N seconds")
     parser.add_argument("--save-dir", default="capturas", help="camera mode: folder for --save-every")
@@ -635,12 +714,16 @@ def main():
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
     parser.add_argument("--target", default=None, help="chase: target colors, comma separated (the mission)")
     parser.add_argument("--avoid", default=None, help="chase: forbidden colors, comma separated")
-    parser.add_argument("--max-turn", type=float, default=0.5, help="rad/s, lab cap on spins (teleop, chase, dashboard)")
+    parser.add_argument("--max-turn", type=positive, default=0.5, help="rad/s, lab cap on spins (teleop, chase, dashboard)")
     parser.add_argument("--no-map", action="store_true",
                         help="chase/dashboard: no particle filter or memory (the old bump-and-turn exploration)")
     parser.add_argument("--stop-at-capture", action="store_true",
                         help="chase: stop when a cube reaches the scoop instead of carrying it to the square")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
     stop_on_signals()
     cfg = load_config(args.robot)
     if args.battery is not None:

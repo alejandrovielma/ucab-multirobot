@@ -20,6 +20,10 @@ from mobile_base.core.fusion_hat import DEFAULT_PORTS, load_motor_class, open_ba
 from mobile_base.core.kinematics import MecanumGeometry, duty_cap, hbridge_pwm, normalize, to_duty, wheel_speeds  # noqa: E402
 
 WHEELS = ("fl", "fr", "rl", "rr")
+# Robots whose wheel wiring (ports and fusion_reversed) was verified on the floor with `motors --only-wheels`.
+# Phineas needed fusion_reversed [F, T, F, T]; ferb.yaml says its wiring is NOT verified. chase, dashboard and
+# drive refuse to run a robot that is not listed here (except --dry-run): add it after verifying it.
+VERIFIED_WIRING = ("phineas",)
 
 
 class Log:

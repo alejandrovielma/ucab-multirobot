@@ -328,3 +328,129 @@ def test_a_battery_voltage_outside_6_to_9_v_is_refused(battery):
     cfg["hat_motor_driver"]["battery_voltage"] = battery
     with pytest.raises(ValueError):
         Motors(cfg, open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True)
+
+
+# ---- argument checks, HAT and wiring guards, mapper (audit 2026-10-31)
+
+LAB = pathlib.Path(__file__).resolve().parent
+
+
+def lab_args(*argv):
+    """Parse like main() does; returns the namespace or raises SystemExit (argparse error, code 2)."""
+    from lab_robot import build_parser
+
+    return build_parser().parse_args(list(argv))
+
+
+@pytest.mark.parametrize("flag", ["--max-speed", "--max-turn", "--speed", "--seconds", "--step", "--duty",
+                                  "--latch-timeout"])
+@pytest.mark.parametrize("bad", ["0", "-1", "nan", "inf", "abc"])
+def test_numeric_arguments_must_be_finite_and_positive(flag, bad):
+    with pytest.raises(SystemExit):
+        lab_args("chase", flag, bad)
+
+
+def test_duty_is_a_fraction_and_battery_must_be_finite():
+    assert lab_args("motors", "--duty", "1").duty == 1.0
+    for argv in (("--duty", "1.5"), ("--battery", "nan"), ("--battery", "inf")):
+        with pytest.raises(SystemExit):
+            lab_args("motors", *argv)
+    assert lab_args("motors", "--battery", "7.4").battery == 7.4
+
+
+def test_a_bad_battery_ends_as_a_clear_message_not_a_traceback():
+    from types import SimpleNamespace
+
+    from lab_robot import make_motors
+
+    cfg = load_config("phineas")
+    cfg["hat_motor_driver"]["battery_voltage"] = 5.0
+    args = SimpleNamespace(dry_run=True)
+    with pytest.raises(SystemExit, match="bateria"):
+        make_motors(args, cfg, open_gpio(None, dry_run=True), 0.05)
+
+
+def test_a_hat_that_does_not_answer_is_not_a_working_robot_unless_dry_run(monkeypatch):
+    import hardware
+    from types import SimpleNamespace
+
+    from lab_robot import make_motors
+
+    monkeypatch.setattr(hardware, "load_motor_class", lambda log: None)
+    monkeypatch.setattr(hardware, "open_bank", lambda *a, **k: None)  # the bank could not be created
+    cfg, gpio = load_config("phineas"), open_gpio(None, dry_run=True)
+    with pytest.raises(SystemExit, match="Fusion HAT.*no responde"):
+        make_motors(SimpleNamespace(dry_run=False), cfg, gpio, 0.05)
+    assert make_motors(SimpleNamespace(dry_run=True), cfg, gpio, 0.05).dry_run
+
+
+def test_only_a_robot_with_verified_wiring_runs_the_autonomous_modes_for_real():
+    from types import SimpleNamespace
+
+    from hardware import VERIFIED_WIRING
+    from lab_robot import require_verified_wiring
+
+    assert "phineas" in VERIFIED_WIRING and "ferb" not in VERIFIED_WIRING
+    require_verified_wiring(SimpleNamespace(robot="phineas", dry_run=False))
+    require_verified_wiring(SimpleNamespace(robot="ferb", dry_run=True))
+    with pytest.raises(SystemExit, match="ferb.*only-wheels.*VERIFIED_WIRING"):
+        require_verified_wiring(SimpleNamespace(robot="ferb", dry_run=False))
+
+
+def test_the_star_spin_is_refused_when_a_short_seconds_makes_it_too_fast():
+    from lab_robot import robot_steps
+
+    with pytest.raises(ValueError, match="seconds"):
+        robot_steps(0.08, 0.1, star=True)
+    assert robot_steps(0.08, 1.0, star=True)[-2][1][2] == pytest.approx(1.5707963)
+
+
+def test_the_dashboard_token_has_256_bits():
+    assert "token_urlsafe(32)" in (LAB / "lab_robot.py").read_text()
+
+
+class FakeCarto:
+    def __init__(self):
+        self.moved_calls = []
+
+    def moved(self, cmd, dt):
+        self.moved_calls.append((cmd, dt))
+
+    def observe(self, *a, **k):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(localized=False)
+
+    def goal_for(self, *a):
+        return None
+
+
+def mapper_inputs(mapper, now):
+    from types import SimpleNamespace
+
+    return mapper.inputs(now, False, None, None, [], SimpleNamespace(targets=(), carrying=False))
+
+
+def test_the_mapper_never_integrates_a_command_for_longer_than_a_tick_or_after_a_stop(monkeypatch):
+    import lab_robot
+
+    monkeypatch.setattr(lab_robot, "landmark_sightings", lambda *a: [])
+    mapper = lab_robot.MapRunner(True)
+    mapper.carto = FakeCarto()
+    mapper.sent((0.05, 0.0, 0.0), 0.0)
+    mapper_inputs(mapper, 20.0)  # a 20 s outage: the integration step is clamped
+    assert mapper.carto.moved_calls == [((0.05, 0.0, 0.0), 0.3)]
+    mapper.sent((0.05, 0.0, 0.0), 20.0)
+    mapper.sent(None, 20.1)  # the supervisor stopped the motors
+    mapper_inputs(mapper, 40.0)
+    assert len(mapper.carto.moved_calls) == 1  # nothing moved: nothing integrated
+
+
+def test_lab_speed_caps_also_cap_the_spin_that_carries_a_cube():
+    from types import SimpleNamespace
+
+    from lab_robot import lab_speed_caps
+
+    args = SimpleNamespace(max_speed=0.05, max_turn=0.3)
+    assert lab_speed_caps({"carry_max_turn": 0.4}, args)["carry_max_turn"] == 0.3
+    assert lab_speed_caps({}, SimpleNamespace(max_speed=0.05, max_turn=0.5))["carry_max_turn"] == 0.4
