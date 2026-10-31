@@ -240,3 +240,15 @@ def test_sigterm_and_sighup_unwind_the_modes_so_the_motors_stop():
     finally:
         for s, handler in old.items():
             signal.signal(s, handler)
+
+
+def test_park_is_sticky_once_the_robot_parks_at_the_capture():
+    from lab_robot import Park
+
+    park = Park(True)
+    assert not park.check(False)  # not parked before the first capture
+    assert park.check(True)
+    # A later tick (for example after an exception inside the parked tick) can see the FSM past CAPTURE:
+    # the robot must stay parked, never drive again.
+    assert park.check(False)
+    assert not Park(False).check(True)  # without --stop-at-capture nothing parks

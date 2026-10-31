@@ -405,6 +405,20 @@ def lab_speed_caps(values: dict, args) -> dict:
     return values
 
 
+class Park:
+    """--stop-at-capture: once the robot parks it stays parked until the process ends, whatever the next
+    ticks do or raise (the supervisor swallows an exception inside a tick and runs the next one: that
+    next tick must never let the FSM drive again)."""
+
+    def __init__(self, enabled: bool):
+        self.enabled, self.parked = enabled, False
+
+    def check(self, capturing: bool) -> bool:
+        if self.enabled and (self.parked or capturing):
+            self.parked = True
+        return self.parked
+
+
 def stop_on_signals() -> None:
     """kill and a dropped SSH session send SIGTERM/SIGHUP, which end Python without running `finally`
     and leave the motors at their last command. Turn them into SystemExit so every mode stops them.
@@ -454,9 +468,15 @@ def mode_chase(args, cfg):
     mapper = MapRunner(not args.no_map)
     t0 = time.monotonic()
     previous = None
+    park = Park(args.stop_at_capture)
 
     def tick(frame, now):
         nonlocal previous
+        if park.parked:  # parked: the FSM never runs again, only the video stays alive
+            motors.stop()
+            if frame is not None:
+                frames.put(annotate(frame, detect_cubes(frame, vparams), vparams, ["CAPTURE: parado"]))
+            return
         dets = detect_cubes(frame, vparams) if frame is not None else []
         cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
         # The line sensor reads the blue square as white: the camera keeps the body out of it.
@@ -482,14 +502,10 @@ def mode_chase(args, cfg):
             note = f" ({fsm.note})" if fsm.note else ""
             print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)
             previous = fsm.state
-        if fsm.state is State.CAPTURE and args.stop_at_capture:
+        if park.check(fsm.state is State.CAPTURE):
             motors.stop()
             print(f"[{now:6.1f}] cubo en la boca de la pala: parado (--stop-at-capture). Ctrl+C para salir.", flush=True)
-            while True:
-                f = cam.read()
-                if f is not None:
-                    frames.put(annotate(f, detect_cubes(f, vparams), vparams, ["CAPTURE: parado"]))
-                time.sleep(0.1)
+            return
         motors.drive(*cmd)
         mapper.sent(cmd, now)
         if frame is not None:
