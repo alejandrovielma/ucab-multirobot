@@ -403,8 +403,9 @@ class MapRunner:
     def inputs(self, now, black, square, refs, cubes, fsm) -> dict:
         if self.carto is None:
             return {}
-        if self._sent is not None:
-            cmd, t = self._sent
+        sent = self._sent  # one read: the watchdog thread may clear it meanwhile
+        if sent is not None:
+            cmd, t = sent
             self.carto.moved(cmd, min(MAX_INTEGRATION_DT, max(0.0, now - t)))
         est = self.carto.observe(now, black, landmark_sightings(square, refs), cubes, fsm.targets,
                                  carrying=fsm.carrying)

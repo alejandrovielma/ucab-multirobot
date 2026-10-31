@@ -1082,6 +1082,7 @@ class BehaviorFSM:
         # An assumed cube (assume_capture) is never seen in the scoop: it stays assumed until reversed out.
         left_behind = bool(self._assumed) or not is_mine(inp.scoop_color, self.targets)
         self.delivered += left_behind
+        self._assumed, self._absent_since = "", None  # the assumption ends with this transport
         self._zone_action(ZoneAction("release", delivered=left_behind, color=self._carried_color))
         self._dropping = False
         self._reset_transport()
