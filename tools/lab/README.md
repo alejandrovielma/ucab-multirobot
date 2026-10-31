@@ -222,7 +222,16 @@ llegar a la red local: apagarla un momento solo para buscar la IP.
 
 - Un tick que lanza una excepcion comun para los motores en ese tick, imprime un traceback corto (la primera vez por tipo de error y despues como maximo cada 10 s) y sigue con el siguiente tick.
 - Aborta (motores parados, mensaje claro, codigo de salida distinto de 0) tras 5 ticks fallidos seguidos o mas de 20 en un minuto: un fallo persistente no debe dejar al robot quieto o dando bandazos para siempre.
-- Vigilante de camara: un frame perdido suelto no hace nada; sin frames durante 1 s los motores se paran y se queda parado hasta que vuelvan (se imprime una linea al parar y otra al reanudar); tras 30 s sin frames aborta.
-- Ctrl+C, SIGTERM y SIGHUP siguen terminando la ejecucion, y el `finally` deja los motores parados en toda salida.
+- Vigilante de camara: un frame perdido suelto no hace nada; sin frames durante 1 s los motores se paran y se queda parado hasta que vuelvan (se imprime una linea al parar y otra al reanudar); tras 30 s sin frames aborta. Una lectura que lanza una excepcion (timeout transitorio de la camara) cuenta como frame perdido, no como tick fallido: se registra (la primera vez por tipo y despues como maximo cada 10 s) y no aborta antes de esos 30 s.
+- Vigilante de bloqueo (`hang_timeout`, 1 s): un hilo aparte llama a `stop()` una vez si la lectura de la camara o el tick no vuelven en ese tiempo (el hilo principal esta bloqueado y no puede hacerlo), imprime una linea y se rearma cuando el bucle progresa. Lo cubren los tests con timeouts reales cortos; en el robot no se ha probado una camara colgada de verdad.
+- Ctrl+C, SIGTERM y SIGHUP terminan la ejecucion y el `finally` intenta parar los motores; si el HAT rechaza la orden de parada se registra el error, pero no hay garantia de que las ruedas queden paradas.
 
 Limites: no protege contra SIGKILL, una Pi muerta o una caida de tension (brownout). Tampoco se ha verificado si el HAT detiene los motores por si solo cuando la Pi deja de hablarle: no se debe asumir que lo hace.
+
+## Comprobaciones al arrancar (`lab_robot.py`)
+
+- Los numeros `--max-speed`, `--max-turn`, `--speed`, `--seconds`, `--step`, `--latch-timeout` deben ser finitos y > 0; `--duty` en (0, 1]; `--battery` finito (y entre 6 y 9 V, lo comprueba `Motors`). Un valor malo termina con un mensaje, no desactiva el tope.
+- `motors --star` rechaza un `--seconds` menor que ~0.79 s: el giro de un cuarto de vuelta por paso pasaria de 2 rad/s.
+- Sin `--dry-run`, si la Fusion HAT+ no responde (no se pudo crear el banco de motores) `chase`, `dashboard`, `drive`, `motors` y `threshold` terminan con codigo distinto de 0 y un mensaje en vez de aparentar que el robot funciona.
+- `chase`, `dashboard` y `drive` solo mueven de verdad un robot de `VERIFIED_WIRING` (`hardware.py`; hoy solo phineas). Para otro robot: `motors --only-wheels --robot <robot>`, comprobar el sentido de cada rueda, corregir `fusion_reversed` y anadirlo a la lista. `motors` y `threshold` funcionan con cualquier robot (son la verificacion) y `--dry-run` no se bloquea.
+- `--max-turn` tambien limita el giro de `drive`, `chase` y `dashboard` (incluido `carry_max_turn`), y el token del dashboard tiene 256 bits.
