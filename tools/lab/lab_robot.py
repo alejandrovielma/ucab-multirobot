@@ -30,6 +30,7 @@ from hardware import LOG, Camera, LineSensor, Motors, WHEELS, load_config, open_
 from mobile_base.core.kinematics import wheel_speeds  # noqa: E402
 from stream import FrameBuffer, serve
 from dashboard import Dashboard
+from supervisor import run_loop
 from teleop import Teleop
 
 from mobile_base.core.cartographer import Cartographer  # noqa: E402
@@ -453,53 +454,53 @@ def mode_chase(args, cfg):
     mapper = MapRunner(not args.no_map)
     t0 = time.monotonic()
     previous = None
+
+    def tick(frame, now):
+        nonlocal previous
+        dets = detect_cubes(frame, vparams) if frame is not None else []
+        cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
+        # The line sensor reads the blue square as white: the camera keeps the body out of it.
+        square = detect_square(frame, vparams) if frame is not None else None
+        black = line.black()
+        scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
+        peer = detect_peer(frame, vparams) if frame is not None else None  # the other robot's marker
+        refs = detect_refs(frame, vparams) if frame is not None else None  # green and red rectangles
+        where = mapper.inputs(now, black, square, refs, cubes, fsm)
+        want = fsm.step(BehaviorInput(
+            **where, now=now, cubes=cubes, line_front=black, scoop_color=scoop,
+            refs_visible=refs is not None and refs.visible, peer_seen=peer,
+            refs_cx=refs.center_cx if refs is not None else 0.0,
+            refs_skew=refs.skew if refs is not None else 0.0,
+            square_visible=square is not None and square.visible,
+            square_cx=square.cx_norm if square is not None else 0.0,
+            square_cy=square.cy_norm if square is not None else 0.0,
+            square_area=square.area_px if square is not None else 0.0))
+        cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
+                                               heartbeat_age=None, carrying=fsm.carrying, peer_seen=peer,
+                                               delivering=fsm.state is State.DELIVER))
+        if fsm.state is not previous:
+            note = f" ({fsm.note})" if fsm.note else ""
+            print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)
+            previous = fsm.state
+        if fsm.state is State.CAPTURE and args.stop_at_capture:
+            motors.stop()
+            print(f"[{now:6.1f}] cubo en la boca de la pala: parado (--stop-at-capture). Ctrl+C para salir.", flush=True)
+            while True:
+                f = cam.read()
+                if f is not None:
+                    frames.put(annotate(f, detect_cubes(f, vparams), vparams, ["CAPTURE: parado"]))
+                time.sleep(0.1)
+        motors.drive(*cmd)
+        mapper.sent(cmd, now)
+        if frame is not None:
+            frames.put(annotate(frame, dets, vparams,
+                                [mapper.text(),
+                                 f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
+                                 f"prohibidos tocados={fsm.forbidden_touches} entregados={fsm.delivered}"
+                                 + (f" otro robot a {peer[1]:.2f} m" if peer else ""),
+                                 f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
     try:
-        while True:
-            now = time.monotonic() - t0
-            frame = cam.read()
-            dets = detect_cubes(frame, vparams) if frame is not None else []
-            cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
-            # The line sensor reads the blue square as white: the camera keeps the body out of it.
-            square = detect_square(frame, vparams) if frame is not None else None
-            black = line.black()
-            scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
-            peer = detect_peer(frame, vparams) if frame is not None else None  # the other robot's marker
-            refs = detect_refs(frame, vparams) if frame is not None else None  # green and red rectangles
-            where = mapper.inputs(now, black, square, refs, cubes, fsm)
-            want = fsm.step(BehaviorInput(
-                **where, now=now, cubes=cubes, line_front=black, scoop_color=scoop,
-                refs_visible=refs is not None and refs.visible, peer_seen=peer,
-                refs_cx=refs.center_cx if refs is not None else 0.0,
-                refs_skew=refs.skew if refs is not None else 0.0,
-                square_visible=square is not None and square.visible,
-                square_cx=square.cx_norm if square is not None else 0.0,
-                square_cy=square.cy_norm if square is not None else 0.0,
-                square_area=square.area_px if square is not None else 0.0))
-            cmd, reason = gate.filter(SafetyInput(cmd=want, line_front=black, own_pose=None, peer_pose=None, now=now,
-                                                   heartbeat_age=None, carrying=fsm.carrying, peer_seen=peer,
-                                                   delivering=fsm.state is State.DELIVER))
-            if fsm.state is not previous:
-                note = f" ({fsm.note})" if fsm.note else ""
-                print(f"[{now:6.1f}] {previous.value if previous else '-'} -> {fsm.state.value}{note}", flush=True)
-                previous = fsm.state
-            if fsm.state is State.CAPTURE and args.stop_at_capture:
-                motors.stop()
-                print(f"[{now:6.1f}] cubo en la boca de la pala: parado (--stop-at-capture). Ctrl+C para salir.", flush=True)
-                while True:
-                    f = cam.read()
-                    if f is not None:
-                        frames.put(annotate(f, detect_cubes(f, vparams), vparams, ["CAPTURE: parado"]))
-                    time.sleep(0.1)
-            motors.drive(*cmd)
-            mapper.sent(cmd, now)
-            if frame is not None:
-                frames.put(annotate(frame, dets, vparams,
-                                    [mapper.text(),
-                                     f"{fsm.state.value} linea={int(black)} pala={scoop or '-'} "
-                                     f"prohibidos tocados={fsm.forbidden_touches} entregados={fsm.delivered}"
-                                     + (f" otro robot a {peer[1]:.2f} m" if peer else ""),
-                                     f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
-            time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
+        run_loop(cam.read, tick, motors.stop)
     finally:
         motors.stop()
         motors.gpio.close()
@@ -538,48 +539,48 @@ def mode_dashboard(args, cfg):
     mapper = MapRunner(not args.no_map)
     t0 = time.monotonic()
     last = t0
+
+    def tick(frame, now):
+        nonlocal last
+        dets = detect_cubes(frame, vparams) if frame is not None else []
+        square = detect_square(frame, vparams) if frame is not None else None
+        black = line.black()
+        scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
+        peer = detect_peer(frame, vparams) if frame is not None else None
+        refs = detect_refs(frame, vparams) if frame is not None else None
+        cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
+        where = mapper.inputs(now, black, square, refs, cubes, fsm)  # also while driving by hand
+        auto = fsm.step(BehaviorInput(
+            **where, now=now, cubes=cubes, line_front=black,
+            scoop_color=scoop, square_visible=square is not None and square.visible,
+            square_cx=square.cx_norm if square is not None else 0.0,
+            square_cy=square.cy_norm if square is not None else 0.0,
+            square_area=square.area_px if square is not None else 0.0,
+            refs_visible=refs is not None and refs.visible, peer_seen=peer,
+            refs_cx=refs.center_cx if refs is not None else 0.0,
+            refs_skew=refs.skew if refs is not None else 0.0))
+        change = dash.take_change()
+        if change is not None:
+            fsm.set_mission(*change)  # already validated by the dashboard
+        manual = dash.manual
+        cmd, reason = gate.filter(SafetyInput(
+            cmd=teleop.current() if manual else auto, line_front=black, own_pose=None, peer_pose=None, now=now,
+            heartbeat_age=None, carrying=fsm.carrying and not manual, peer_seen=peer, estop=teleop.estop,
+            delivering=fsm.state is State.DELIVER and not manual))
+        motors.drive(*cmd)
+        mapper.sent(cmd, now)
+        t = time.monotonic()
+        dash.update_status(fsm=fsm.state.value, delivered=fsm.delivered, forbidden=fsm.forbidden_touches,
+                           est=mapper.text(),
+                           reason=reason, line=bool(black), scoop=scoop or "",
+                             peer=peer[1] if peer else None, cubes=[d.color for d in dets],
+                             square=square is not None and square.visible, fps=1.0 / max(t - last, 1e-3))
+        last = t
+        if frame is not None:
+            frames.put(annotate(frame, dets, vparams, [f"{'manual' if manual else fsm.state.value} linea={int(black)} pala={scoop or '-'}",
+                                                       f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
     try:
-        while True:
-            now = time.monotonic() - t0
-            frame = cam.read()
-            dets = detect_cubes(frame, vparams) if frame is not None else []
-            square = detect_square(frame, vparams) if frame is not None else None
-            black = line.black()
-            scoop = scoop_content(frame, vparams)[0] if frame is not None else ""
-            peer = detect_peer(frame, vparams) if frame is not None else None
-            refs = detect_refs(frame, vparams) if frame is not None else None
-            cubes = [Cube(d.color, d.cx_norm, d.cy_norm, d.area_px) for d in dets]
-            where = mapper.inputs(now, black, square, refs, cubes, fsm)  # also while driving by hand
-            auto = fsm.step(BehaviorInput(
-                **where, now=now, cubes=cubes, line_front=black,
-                scoop_color=scoop, square_visible=square is not None and square.visible,
-                square_cx=square.cx_norm if square is not None else 0.0,
-                square_cy=square.cy_norm if square is not None else 0.0,
-                square_area=square.area_px if square is not None else 0.0,
-                refs_visible=refs is not None and refs.visible, peer_seen=peer,
-                refs_cx=refs.center_cx if refs is not None else 0.0,
-                refs_skew=refs.skew if refs is not None else 0.0))
-            change = dash.take_change()
-            if change is not None:
-                fsm.set_mission(*change)  # already validated by the dashboard
-            manual = dash.manual
-            cmd, reason = gate.filter(SafetyInput(
-                cmd=teleop.current() if manual else auto, line_front=black, own_pose=None, peer_pose=None, now=now,
-                heartbeat_age=None, carrying=fsm.carrying and not manual, peer_seen=peer, estop=teleop.estop,
-                delivering=fsm.state is State.DELIVER and not manual))
-            motors.drive(*cmd)
-            mapper.sent(cmd, now)
-            t = time.monotonic()
-            dash.update_status(fsm=fsm.state.value, delivered=fsm.delivered, forbidden=fsm.forbidden_touches,
-                               est=mapper.text(),
-                               reason=reason, line=bool(black), scoop=scoop or "",
-                                 peer=peer[1] if peer else None, cubes=[d.color for d in dets],
-                                 square=square is not None and square.visible, fps=1.0 / max(t - last, 1e-3))
-            last = t
-            if frame is not None:
-                frames.put(annotate(frame, dets, vparams, [f"{'manual' if manual else fsm.state.value} linea={int(black)} pala={scoop or '-'}",
-                                                           f"cmd vx={cmd[0]:+.2f} vy={cmd[1]:+.2f} wz={cmd[2]:+.2f} ({reason})"]))
-            time.sleep(max(0.0, 0.1 - (time.monotonic() - t0 - now)))
+        run_loop(cam.read, tick, motors.stop)
     finally:
         motors.stop()
         motors.gpio.close()

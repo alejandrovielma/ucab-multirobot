@@ -215,3 +215,14 @@ Raspberry Pi. **No inicia sesión ni usa contraseñas**: después se entra a man
 Si no sale nada: esperar ~30 s tras conectar el cable, comprobar que la Pi está encendida y probar
 `--linklocal`. Si el PC enruta el tráfico por una VPN o un proxy (Throne, sing-box...), el barrido puede no
 llegar a la red local: apagarla un momento solo para buscar la IP.
+
+## Bucle supervisado (`supervisor.py`)
+
+`chase` y `dashboard` corren su tick dentro de `run_loop`, para que nada interrumpa la mision a medias:
+
+- Un tick que lanza una excepcion comun para los motores en ese tick, imprime un traceback corto (la primera vez por tipo de error y despues como maximo cada 10 s) y sigue con el siguiente tick.
+- Aborta (motores parados, mensaje claro, codigo de salida distinto de 0) tras 5 ticks fallidos seguidos o mas de 20 en un minuto: un fallo persistente no debe dejar al robot quieto o dando bandazos para siempre.
+- Vigilante de camara: un frame perdido suelto no hace nada; sin frames durante 1 s los motores se paran y se queda parado hasta que vuelvan (se imprime una linea al parar y otra al reanudar); tras 30 s sin frames aborta.
+- Ctrl+C, SIGTERM y SIGHUP siguen terminando la ejecucion, y el `finally` deja los motores parados en toda salida.
+
+Limites: no protege contra SIGKILL, una Pi muerta o una caida de tension (brownout). Tampoco se ha verificado si el HAT detiene los motores por si solo cuando la Pi deja de hablarle: no se debe asumir que lo hace.
