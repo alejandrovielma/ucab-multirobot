@@ -341,7 +341,7 @@ cómo quedó montada la cámara).
 1. Bajar el robot al piso o a la pista, con espacio libre alrededor.
 2. Correr:
    ```bash
-   python3 tools/lab/lab_robot.py drive --battery 8.1 --max-speed 0.08
+   python3 tools/lab/lab_robot.py drive --battery 8.1 --max-speed 0.05
    ```
 3. Teclas: `w`/`s` avanzar y retroceder, `a`/`d` lateral izquierda y derecha, `q`/`e` girar a la
    izquierda y a la derecha, **espacio para parar**, `+`/`-` velocidad, `x` salir. Si no se pulsa
@@ -354,7 +354,7 @@ cómo quedó montada la cámara).
    verde, azul o morado).
 2. Correr (Phineas):
    ```bash
-   python3 tools/lab/lab_robot.py chase --battery 8.1 --max-speed 0.08
+   python3 tools/lab/lab_robot.py chase --battery 8.1 --max-speed 0.05
    ```
    Para Ferb, agregar `--robot ferb`. Con el valor de `cy` del paso 4 se puede ajustar la parada:
    `--capture-cy 0.60` (por ejemplo).

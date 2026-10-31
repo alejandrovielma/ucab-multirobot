@@ -161,7 +161,7 @@ calibro los umbrales de tamaño (`min_area`, `square_min_area`).
 simulación (placa frontal ancha con los extremos en ángulo, sin bolsillo en U), así que hay que medirlo
 antes de confiarle la autonomía.
 
-Con `drive` en el piso (`--max-speed 0.08`) y un cubo de 2 cm delante de la pala:
+Con `drive` en el piso (`--max-speed 0.05`) y un cubo de 2 cm delante de la pala:
 
 | Prueba | Teclas | Qué anotar |
 |---|---|---|
@@ -180,7 +180,7 @@ Con esto ajusto `capture_cy` y la ventana de la pala en el YAML.
 ## Fase 6. Manejo en la pista
 
 ```bash
-python3 tools/lab/lab_robot.py drive --battery 8.1 --max-speed 0.08
+python3 tools/lab/lab_robot.py drive --battery 8.1 --max-speed 0.05
 ```
 
 | Prueba | Aprobada si |
@@ -194,7 +194,7 @@ La desviación y el tiempo de giro sirven para ajustar la cinemática si hace fa
 ## Fase 7. Persecución autónoma
 
 ```bash
-python3 tools/lab/lab_robot.py chase --battery 8.1 --max-speed 0.08 --capture-cy <valor de la fase 5>
+python3 tools/lab/lab_robot.py chase --battery 8.1 --max-speed 0.05 --capture-cy <valor de la fase 5>
 ```
 
 El robot explora, gira al ver la línea, se acerca a un cubo de su color y se detiene al llegarle a la

@@ -110,7 +110,7 @@ disco falla, lo avisa en la consola).
 
 ### E. La pala (necesita B)
 
-Con `drive --battery <V> --max-speed 0.08`, en el piso y con un cubo de 2 cm delante de la pala:
+Con `drive --battery <V> --max-speed 0.05`, en el piso y con un cubo de 2 cm delante de la pala:
 
 - [ ] `w` 50 cm: ¿el cubo se queda frente a la pala?
 - [ ] `u` / `o` (arcos): ¿lo conserva?
@@ -123,7 +123,7 @@ Con `drive --battery <V> --max-speed 0.08`, en el piso y con un cubo de 2 cm del
 
 - [ ] F: cada tecla de `drive` hace lo que dice; desviación al avanzar 1 m: ____ cm; vuelta completa con
       `q`: ____ s.
-- [ ] G: `chase --battery <V> --max-speed 0.08 --capture-cy <valor de E>`, 5 intentos: llega al cubo y se
+- [ ] G: `chase --battery <V> --max-speed 0.05 --capture-cy <valor de E>`, 5 intentos: llega al cubo y se
       detiene ____ de 5.
 
 ## 3. Antes de irse

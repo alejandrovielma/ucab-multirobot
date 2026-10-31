@@ -5,7 +5,7 @@
 # the state is at http://<robot-ip>:8080/ when the robot is on the network.
 #
 #   bash tools/lab/prueba_mision.sh <target colors> [forbidden colors] [seconds] [delay s] [max speed m/s]
-#   bash tools/lab/prueba_mision.sh blue red 60 15 0.08
+#   bash tools/lab/prueba_mision.sh blue red 60 15 0.05
 # Colors are comma separated: red, orange, yellow, green, blue, purple. Without the overhead camera
 # there is no pose: the robot stops at the scoop mouth (CAPTURE), it does not carry the cube yet.
 set -euo pipefail
@@ -15,7 +15,7 @@ target=${1:?"falta el color objetivo, por ejemplo: bash tools/lab/prueba_mision.
 avoid=${2:-}
 duration=${3:-60}
 delay=${4:-15}
-speed=${5:-0.08}
+speed=${5:-0.05}
 for value in "$speed" "$delay" "$duration"; do
     [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "numero invalido: '$value'" >&2; exit 1; }
 done

@@ -202,3 +202,34 @@ def test_mission_colors_come_from_the_arguments_and_a_bad_name_exits_with_a_mess
     assert mission_colors(SimpleNamespace(target=None, avoid=None), {"my_colors": "", "avoid_colors": ""}) == ((), ())
     with pytest.raises(SystemExit, match="mision invalida.*rosa"):
         mission_colors(SimpleNamespace(target="rosa", avoid=None), {})
+
+
+def test_lab_speed_caps_limit_the_spins_too_not_only_the_translation():
+    from types import SimpleNamespace
+
+    from lab_robot import lab_speed_caps
+
+    behavior = {"explore_speed": 0.12, "approach_speed": 0.10, "turn_speed": 1.2, "approach_turn_min": 0.4}
+    slow = lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=0.05, max_turn=0.5))
+    assert (slow["explore_speed"], slow["approach_speed"], slow["turn_speed"]) == (0.05, 0.05, 0.5)
+    assert slow["approach_turn_min"] == 0.4 and slow["has_gate"] is False
+    assert lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=0.05, max_turn=0.3))["approach_turn_min"] == 0.3
+    fast = lab_speed_caps(dict(behavior), SimpleNamespace(max_speed=1.0, max_turn=5.0))
+    assert (fast["explore_speed"], fast["turn_speed"]) == (0.12, 1.2)  # a cap never speeds the robot up
+
+
+def test_sigterm_and_sighup_unwind_the_modes_so_the_motors_stop():
+    import signal
+
+    from lab_robot import stop_on_signals
+
+    signals = [s for s in (signal.SIGTERM, getattr(signal, "SIGHUP", None)) if s is not None]
+    old = {s: signal.getsignal(s) for s in signals}
+    try:
+        stop_on_signals()
+        for s in signals:
+            with pytest.raises(SystemExit):
+                signal.getsignal(s)(s, None)
+    finally:
+        for s, handler in old.items():
+            signal.signal(s, handler)

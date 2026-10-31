@@ -17,6 +17,7 @@ import math
 import os
 import secrets
 import select
+import signal
 import socket
 import sys
 import termios
@@ -387,6 +388,27 @@ class MapRunner:
         return ("en " if e.localized else "buscando, cerca de ") + where + f", ruedas {e.scale:.2f}"
 
 
+def lab_speed_caps(values: dict, args) -> dict:
+    """Cap the behavior's speeds for the lab: translation by --max-speed and spins by --max-turn.
+    The HAT's start power maps even a small command to 25-43 % power, so an uncapped 1.2 rad/s spin
+    was the fastest thing the robot did."""
+    values.update(has_gate=False,
+                  explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
+                  approach_speed=min(values.get("approach_speed", 0.10), args.max_speed),
+                  turn_speed=min(values.get("turn_speed", 1.2), args.max_turn),
+                  approach_turn_min=min(values.get("approach_turn_min", 0.4), args.max_turn))
+    return values
+
+
+def stop_on_signals() -> None:
+    """kill and a dropped SSH session send SIGTERM/SIGHUP, which end Python without running `finally`
+    and leave the motors at their last command. Turn them into SystemExit so every mode stops them.
+    (SIGKILL cannot be caught.)"""
+    for sig in (signal.SIGTERM, getattr(signal, "SIGHUP", None)):  # no SIGHUP on Windows
+        if sig is not None:
+            signal.signal(sig, lambda signum, _frame: sys.exit(128 + signum))
+
+
 def mission_colors(args, bcfg):
     """(targets, avoid) from --target/--avoid or the YAML; a bad color name exits with a message, not a traceback."""
     try:
@@ -408,8 +430,7 @@ def mode_chase(args, cfg):
     targets, avoid = mission_colors(args, bcfg)
     if not targets:
         raise SystemExit("sin mision: pasar --target (por ejemplo --target blue --avoid red)")
-    values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
-                  approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))
+    lab_speed_caps(values, args)
     if args.capture_cy is not None:
         values["capture_cy"] = args.capture_cy
     fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values))
@@ -495,8 +516,7 @@ def mode_dashboard(args, cfg):
                                       "require_pose": False, "require_heartbeat": False}))
     bcfg = cfg["behavior"]
     values = {k: v for k, v in bcfg.items() if k in BehaviorParams.__dataclass_fields__ and k != "my_colors"}
-    values.update(has_gate=False, explore_speed=min(values.get("explore_speed", 0.12), args.max_speed),
-                  approach_speed=min(values.get("approach_speed", 0.10), args.max_speed))
+    lab_speed_caps(values, args)
     fsm = BehaviorFSM(BehaviorParams(my_colors=(), **values))  # no mission: IDLE until INICIAR
     teleop = Teleop(args.max_speed, args.max_turn)
     dash = Dashboard(teleop, DEFAULT_HUE_RANGES)
@@ -569,7 +589,7 @@ def main():
     parser.add_argument("--chip", type=int, default=None, help="gpiochip number (default: autodetect)")
     parser.add_argument("--camera", default="auto")
     parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--max-speed", type=float, default=0.10, help="m/s, lab cap")
+    parser.add_argument("--max-speed", type=float, default=0.05, help="m/s, lab cap on translation")
     parser.add_argument("--battery", type=float, default=None,
                         help="measured battery voltage (V): sets the PWM cap that keeps the TT motors <= 6 V")
     parser.add_argument("--duty", type=float, default=0.5, help="motors mode: fraction of the duty cap")
@@ -594,12 +614,13 @@ def main():
     parser.add_argument("--capture-cy", type=float, default=None, help="chase: override capture_cy")
     parser.add_argument("--target", default=None, help="chase: target colors, comma separated (the mission)")
     parser.add_argument("--avoid", default=None, help="chase: forbidden colors, comma separated")
-    parser.add_argument("--max-turn", type=float, default=1.0, help="teleop: rad/s cap of the spin")
+    parser.add_argument("--max-turn", type=float, default=0.5, help="rad/s, lab cap on spins (teleop, chase, dashboard)")
     parser.add_argument("--no-map", action="store_true",
                         help="chase/dashboard: no particle filter or memory (the old bump-and-turn exploration)")
     parser.add_argument("--stop-at-capture", action="store_true",
                         help="chase: stop when a cube reaches the scoop instead of carrying it to the square")
     args = parser.parse_args()
+    stop_on_signals()
     cfg = load_config(args.robot)
     if args.battery is not None:
         cfg["hat_motor_driver"]["battery_voltage"] = args.battery

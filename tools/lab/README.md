@@ -131,7 +131,7 @@ gris donde se mirará el cubo dentro de la pala. La consola imprime lo mismo una
 ### 4. Manejo con el teclado (en el piso)
 
 ```bash
-python3 tools/lab/lab_robot.py drive --max-speed 0.08
+python3 tools/lab/lab_robot.py drive --max-speed 0.05
 ```
 
 `w`/`s` avanzar/retroceder, `a`/`d` lateral, `q`/`e` girar, espacio parar, `+`/`-` velocidad, `x` salir.
@@ -140,7 +140,7 @@ Funciona por SSH. Comprobar que las direcciones coinciden con las teclas.
 ### 5. Persecución autónoma de cubos
 
 ```bash
-python3 tools/lab/lab_robot.py chase --max-speed 0.08
+python3 tools/lab/lab_robot.py chase --max-speed 0.05
 ```
 
 Con el video en el navegador se ve el estado (`EXPLORE`, `APPROACH`, `CAPTURE`) y la orden a los

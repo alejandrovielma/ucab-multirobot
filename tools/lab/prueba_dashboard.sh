@@ -4,13 +4,13 @@
 # The URL (with a random token) is written to the log; open it from a phone or laptop on the same network.
 #
 #   bash tools/lab/prueba_dashboard.sh [seconds] [delay s] [max speed m/s]
-#   bash tools/lab/prueba_dashboard.sh 600 15 0.10
+#   bash tools/lab/prueba_dashboard.sh 600 15 0.05
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 duration=${1:-600}
 delay=${2:-15}
-speed=${3:-0.10}
+speed=${3:-0.05}
 for value in "$speed" "$delay" "$duration"; do
     [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "numero invalido: '$value'" >&2; exit 1; }
 done

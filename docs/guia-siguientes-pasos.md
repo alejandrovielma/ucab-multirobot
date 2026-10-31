@@ -51,9 +51,9 @@ Con `tools/lab/lab_robot.py`, como el 2026-10-20. Lista completa en [lab-hoy.md]
 | Cámara (bloque D) | `python3 tools/lab/lab_robot.py camera --save-every 5 2>&1 \| tee camara.log` | Cada color a 20/40/60 cm: nombre, `cy` y área; rojo y morado juntos; tablero vacío |
 | Cuadro azul con la cámara | Mismo comando, robot frente al cuadro a 30 y 10 cm | ¿Dice `cuadro azul (...)`? |
 | Sensor sobre el cuadro azul | `python3 tools/lab/lab_robot.py line` | ¿`blanco` o `NEGRO`? |
-| Pala (bloque E) | `python3 tools/lab/lab_robot.py drive --battery <V> --max-speed 0.08` | Con un cubo: `w` recto, `u`/`o` arcos, `q`/`e` giro, `s` atrás: ¿lo conserva? |
+| Pala (bloque E) | `python3 tools/lab/lab_robot.py drive --battery <V> --max-speed 0.05` | Con un cubo: `w` recto, `u`/`o` arcos, `q`/`e` giro, `s` atrás: ¿lo conserva? |
 | Manejo (bloque F) | El mismo `drive` | Desviación al avanzar 1 m; tiempo de una vuelta con `q` |
-| Persecución (bloque G) | `python3 tools/lab/lab_robot.py chase --battery <V> --max-speed 0.08 2>&1 \| tee chase.log` | 5 intentos: ¿llega al cubo y se detiene? ¿Retrocede al ver la cinta? |
+| Persecución (bloque G) | `python3 tools/lab/lab_robot.py chase --battery <V> --max-speed 0.05 2>&1 \| tee chase.log` | 5 intentos: ¿llega al cubo y se detiene? ¿Retrocede al ver la cinta? |
 
 **Terminada si:** la tabla está llena y se trajeron `capturas/` y los `.log`.
 
