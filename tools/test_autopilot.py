@@ -92,7 +92,7 @@ def test_the_delivery_push_crosses_the_black_line():
     pilot, vision = make_pilot()
     pilot.carrying = True
     pilot.state = "CARRY"
-    vision.zone = Seen("floor", 0.25)
+    vision.zone = Seen("floor", 0.18)
     pilot.step(0.0)
     assert pilot.state == "DROP"
     # The area's own tape under the sensor: keep pushing.
@@ -260,13 +260,14 @@ def test_delivery_faces_the_paper_centre_then_pushes_just_far_enough():
     pilot.state = "CARRY"
     cfg = pilot.cfg
     # The paper's centre to the left (a diagonal approach): turn to it.
-    vision.zone = Seen("floor", 0.25, bearing_rad=0.3)
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.3)
     command = pilot.step(0.0)
     assert pilot.state == "CARRY (align)" and command.wz > 0
     # Facing it: push straight in, long enough to bring the cube there.
-    vision.zone = Seen("floor", 0.25)
+    vision.zone = Seen("floor", 0.18)
     assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
-    push_s = (0.25 - cfg.cube_ahead_m) / cfg.forward_speed_mps
+    push_m = 0.18 + cfg.deliver_insert_m - cfg.cube_ahead_m
+    push_s = push_m / cfg.forward_speed_mps
     assert pilot.step(0.1 + push_s - 0.01).vy == 1.0
     assert pilot.step(0.1 + push_s + 0.01).vy == -1.0
 
@@ -294,7 +295,8 @@ def test_a_close_paper_gets_a_short_push_and_backup():
     pilot.carrying = True
     pilot.state = "CARRY"
     assert pilot.step(0.0).vy == 1.0 and pilot.state == "DROP"
-    push_s = (0.12 - config.cube_ahead_m) / config.forward_speed_mps
+    push_m = 0.12 + config.deliver_insert_m - config.cube_ahead_m
+    push_s = push_m / config.forward_speed_mps
     assert pilot.step(push_s + 0.05).vy == -1.0  # already backing up
     assert pilot.delivered_count == 1
     assert pilot.step(push_s + 0.35).vy == 0.0 and pilot.state == "DROP (turn)"
