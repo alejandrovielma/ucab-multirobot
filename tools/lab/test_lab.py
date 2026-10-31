@@ -252,3 +252,79 @@ def test_park_is_sticky_once_the_robot_parks_at_the_capture():
     # the robot must stay parked, never drive again.
     assert park.check(False)
     assert not Park(False).check(True)  # without --stop-at-capture nothing parks
+
+
+class FakeBank:
+    """Stands in for FusionMotorBank: records calls, can be told to fail."""
+
+    def __init__(self, apply_ok=True, stop_results=(True,)):
+        self.apply_ok, self.stop_results, self.applied, self.stops = apply_ok, list(stop_results), [], 0
+
+    def apply(self, duties, cap):
+        self.applied.append(duties)
+        return self.apply_ok
+
+    def stop(self):
+        self.stops += 1
+        return self.stop_results.pop(0) if len(self.stop_results) > 1 else self.stop_results[0]
+
+
+def banked_motors(bank, **kw):
+    motors = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True, **kw)
+    motors.bank = bank
+    return motors
+
+
+def test_drive_raises_when_the_hat_rejects_the_command_so_the_supervisor_counts_a_failing_tick():
+    motors = banked_motors(FakeBank(apply_ok=False))
+    with pytest.raises(RuntimeError, match="motor command failed"):
+        motors.drive(0.05, 0.0, 0.0)
+
+
+def test_stop_retries_once_and_returns_whether_it_worked():
+    bank = FakeBank(stop_results=(False, True))
+    assert banked_motors(bank).stop() is True and bank.stops == 2
+    bank = FakeBank(stop_results=(False,))
+    assert banked_motors(bank).stop() is False and bank.stops == 2  # never raises
+
+
+def test_stop_does_not_raise_when_the_bank_does():
+    class Boom(FakeBank):
+        def apply(self, duties, cap):
+            raise OSError("i2c")
+
+    assert banked_motors(Boom()).stop() is False
+
+
+def test_a_diagonal_is_capped_by_its_length_not_by_its_larger_component():
+    motors = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True)
+    diagonal, straight = motors.drive(0.10, 0.10, 0.0), motors.drive(0.10 / 2 ** 0.5, 0.10 / 2 ** 0.5, 0.0)
+    assert diagonal == pytest.approx(straight)
+
+
+def test_max_turn_caps_the_spin_and_is_off_by_default():
+    free = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True)
+    capped = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True, max_turn=0.5)
+    assert capped.drive(0.0, 0.0, 5.0) == pytest.approx(free.drive(0.0, 0.0, 0.5))
+    assert capped.drive(0.0, 0.0, -5.0) == pytest.approx(free.drive(0.0, 0.0, -0.5))
+    assert free.drive(0.0, 0.0, 1.0) != pytest.approx(free.drive(0.0, 0.0, 0.5))
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, float("nan"), float("inf")])
+def test_motors_refuse_a_speed_cap_that_does_not_cap(bad):
+    with pytest.raises(ValueError):
+        Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=bad, dry_run=True)
+
+
+def test_non_finite_commands_drive_nothing():
+    motors = Motors(load_config("phineas"), open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True, max_turn=0.5)
+    for cmd in ((float("nan"), 0.0, 0.0), (0.0, float("inf"), 0.0), (0.0, 0.0, float("nan"))):
+        assert motors.drive(*cmd) == (0.0, 0.0, 0.0, 0.0)
+
+
+@pytest.mark.parametrize("battery", [5.0, float("nan"), 12.0])
+def test_a_battery_voltage_outside_6_to_9_v_is_refused(battery):
+    cfg = load_config("phineas")
+    cfg["hat_motor_driver"]["battery_voltage"] = battery
+    with pytest.raises(ValueError):
+        Motors(cfg, open_gpio(None, dry_run=True), max_speed=0.10, dry_run=True)

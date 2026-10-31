@@ -5,6 +5,7 @@ so what is tested here is what the ROS nodes run. Every class has a dry-run mode
 checked on a laptop before touching the robot.
 """
 
+import math
 import os
 import pathlib
 import sys
@@ -82,7 +83,12 @@ class Motors:
     (hat_motor_driver.motor_backend): fusion_hat (SunFounder Fusion HAT+, default) drives ports
     M0-M3 through the fusion_hat library; cokoino_drv8833 drives the old HAT's pins through lgpio."""
 
-    def __init__(self, cfg: dict, gpio, max_speed: float, dry_run: bool = False):
+    def __init__(self, cfg: dict, gpio, max_speed: float, dry_run: bool = False,
+                 max_turn: float | None = None):
+        if not (math.isfinite(max_speed) and max_speed > 0.0):
+            raise ValueError(f"max_speed must be finite and > 0, got {max_speed}")
+        if max_turn is not None and not (math.isfinite(max_turn) and max_turn > 0.0):
+            raise ValueError(f"max_turn must be finite and > 0, got {max_turn}")
         hat = cfg["hat_motor_driver"]
         self.gpio = gpio
         self.backend = hat.get("motor_backend", "fusion_hat")
@@ -91,6 +97,7 @@ class Motors:
         self.cap = duty_cap(hat["battery_voltage"], hat["motor_max_voltage"])
         self.signs = hat["wheel_signs"]
         self.max_speed = max_speed  # m/s, lab safety cap on top of the duty cap
+        self.max_turn = max_turn  # rad/s cap on |wz| in drive(); None = uncapped (explicit test speeds)
         self.bank = None
         if self.backend == "fusion_hat":
             self.wiring = wiring_from(hat.get("fusion_ports", DEFAULT_PORTS),
@@ -121,34 +128,44 @@ class Motors:
         return f"pines IN {self.pins[wheel]}"
 
     def drive(self, vx: float, vy: float, wz: float) -> tuple[float, ...]:
-        scale = max(abs(vx), abs(vy)) / self.max_speed if self.max_speed > 0 else 0.0
+        vx, vy, wz = (c if math.isfinite(c) else 0.0 for c in (vx, vy, wz))
+        scale = math.hypot(vx, vy) / self.max_speed
         if scale > 1.0:
             vx, vy = vx / scale, vy / scale
+        if self.max_turn is not None:
+            wz = max(-self.max_turn, min(self.max_turn, wz))
         speeds = normalize(wheel_speeds(vx, vy, wz, self.geom), self.max_wheel_speed)
         duties = to_duty(tuple(s * k for s, k in zip(speeds, self.signs)), self.max_wheel_speed, self.cap)
-        self.set_duties(duties)
+        if not self.set_duties(duties):
+            raise RuntimeError("motor command failed")  # the bank already stopped the other wheels
         return duties
 
-    def set_duties(self, duties) -> None:
+    def set_duties(self, duties) -> bool:
+        """False when the HAT rejected the command."""
         if self.backend == "fusion_hat":
-            if self.bank is not None:
-                self.bank.apply(duties, self.cap)
-            return
+            return self.bank is None or self.bank.apply(duties, self.cap)
         for wheel, duty in zip(WHEELS, duties):
             in1, in2 = self.pins[wheel]
             pwm1, pwm2 = hbridge_pwm(duty)
             self.gpio.pwm(in1, self.frequency, pwm1)
             self.gpio.pwm(in2, self.frequency, pwm2)
+        return True
 
     def wheel(self, wheel: str, duty: float) -> None:
         """One wheel alone, duty in [-1, 1] before the cap (for wiring checks)."""
         duty = max(-1.0, min(1.0, duty)) * self.cap
         self.set_duties(tuple(duty if w == wheel else 0.0 for w in WHEELS))
 
-    def stop(self) -> None:
-        self.set_duties((0.0, 0.0, 0.0, 0.0))
-        if self.bank is not None:
-            self.bank.stop()
+    def stop(self) -> bool:
+        """Stop all wheels, retrying once. Never raises (it runs in `finally`): False when it still fails."""
+        for _ in range(2):
+            try:
+                if self.set_duties((0.0, 0.0, 0.0, 0.0)) and (self.bank is None or self.bank.stop()):
+                    return True
+            except Exception as exc:  # noqa: BLE001 - I2C/GPIO error
+                LOG.error(f"motor stop raised: {exc}")
+        LOG.error("MOTOR STOP FAILED twice: the wheels may still be powered")
+        return False
 
 
 class LineSensor:

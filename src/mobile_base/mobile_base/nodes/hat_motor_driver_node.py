@@ -103,9 +103,10 @@ class HatMotorDriverNode(Node):
 
     def stop(self):
         self._apply((0.0, 0.0, 0.0, 0.0))
-        if self.bank is not None:
-            self.bank.stop()
-        self._stopped = True
+        stopped = self.bank.stop() if self.bank is not None else True
+        if not stopped:
+            self.get_logger().error("motor stop failed: the watchdog will retry")
+        self._stopped = stopped  # False keeps the watchdog retrying instead of believing the wheels are off
 
     def destroy_node(self):
         self.stop()
