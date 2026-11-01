@@ -10,7 +10,7 @@ Route: inline (mechanical imports, no new design).
 - [x] T3 Phineas launch files imported as phineas_*.launch.py; executables mapped to phineas_*; launch test passes
 - [x] T4 Cube detections on recolector_interfaces CubeDetectionArray (topic cubes) plus new Scene (cubes/scene); core.adapters converts (commit 46417f4)
 - [x] T5 Line sensor on recolector_interfaces LineSensors (topic line) (commit d0cc3a6)
-- [ ] T6 Port geofence, planner, stall fixes, delivery into Ferb's FSM (collector/approach) with tests
+- [x] T6 Stall fixes ported into Ferb's FSM (missed-catch ignore-list, stuck-line watchdog) with tests. Deferred: geofence, planner/cartographer (need a pose source). Skipped: carry-delivery (Ferb's zone/WAIT_ZONE/blind push covers it). Optional: camera capture verification (Ferb has FC-51 and TCS34725). Commit: 8ae148f (A and B together)
 - [ ] T7 Adopt Ferb's hardware path (AO analog sensor, motor_hardware) in tools/lab
 
 ## Not verified here (Windows)
