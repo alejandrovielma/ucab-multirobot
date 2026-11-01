@@ -28,3 +28,9 @@ Ferb's CI runs `ruff check` and `ruff format --check` on src/tools/scripts (0 er
 - import smoke test: 82 modules ok. Launch smoke: phineas_robot.launch.py robot:=phineas and robot:=ferb, 6 processes stayed alive each.
 - tools tests: 202 passed, 1 failed: tools/test_teleop_web.py::test_each_black_edge_of_the_line_sensor_is_logged_with_its_analog_value. It also fails on an untouched ferb/develop (checked), so it predates the integration; owner: Ferb.
 - Not covered: Webots simulation run, real robot (Pi).
+
+## Simulation (2026-11-01, Docker recolector:sim)
+- Our `phineas_sim.launch.py` cannot run here: it needs `webots_ros2_driver`, which has no apt package for Lyrical (only webots-ros2-importer and -msgs exist).
+- Ferb's `simulation.launch.py webots:=headless` (own bridge, no webots_ros2) runs in the integrated tree once `libsndio7.0` is installed: Webots starts, `cubes` at ~6.6 Hz, behavior_fsm in SEARCH. Without that library `webots-bin` exits 127 (image gap on Ubuntu 26.04; not fixed in docker/Dockerfile yet).
+- Ferb's bridge does not simulate the line sensor, so `line` is never published there.
+- Not covered: our adapters, `phineas_*` nodes and Scene in a simulated run.
