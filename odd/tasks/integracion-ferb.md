@@ -21,3 +21,10 @@ rclpy/colcon missing on Windows: nodes only py_compile'd; Scene.msg not built. r
 
 ## CI lint (ruff)
 Ferb's CI runs `ruff check` and `ruff format --check` on src/tools/scripts (0 errors on their base; 2977 errors and 79 files to reformat once our code was imported). Our legacy code is listed in `extend-exclude` in pyproject.toml with a comment; clean it module by module and delete its line. Files of Ferb that we modified (collector.py, behavior_fsm.py, setup.py, test_collector.py) comply with ruff. Check: `ruff check src tools scripts simulation/webots/controllers` and `ruff format --check ...` both pass.
+
+## Docker verification (2026-11-01, recolector:sim, ROS Lyrical)
+- colcon build: 10 packages ok (Scene.msg and merged setup.py files build).
+- colcon test: 529 tests, 0 failures.
+- import smoke test: 82 modules ok. Launch smoke: phineas_robot.launch.py robot:=phineas and robot:=ferb, 6 processes stayed alive each.
+- tools tests: 202 passed, 1 failed: tools/test_teleop_web.py::test_each_black_edge_of_the_line_sensor_is_logged_with_its_analog_value. It also fails on an untouched ferb/develop (checked), so it predates the integration; owner: Ferb.
+- Not covered: Webots simulation run, real robot (Pi).

@@ -39,9 +39,6 @@ set +u
 source install/setup.bash
 set -u
 
-echo "== tools tests (not ROS packages, so colcon does not run them; same step as CI)"
-(cd "${REPO_DIR}" && python3 -m pytest -q tools)
-
 echo "== import smoke test"
 python3 - "${COMPILE_ONLY_PACKAGES[@]}" <<'PY'
 import importlib
@@ -110,5 +107,8 @@ for robot in phineas ferb; do
   started=$(grep -c "process started" "${log_file}" || true)
   echo "ok   ${started} processes started and stayed alive"
 done
+
+echo "== tools tests (not ROS packages, so colcon does not run them; same step as CI)"
+(cd "${REPO_DIR}" && python3 -m pytest -q tools)
 
 echo "== all checks passed"
