@@ -354,6 +354,7 @@ class BehaviorFsmNode(Node):
             "target": target_info,
             "carrying": self._fsm.carrying_color,
             "count": self._fsm.count,
+            "line_stuck": self._fsm.line_stuck,
             "cmd": {
                 "vx": round(twist.linear.x, REPORT_DECIMALS),
                 "vy": round(twist.linear.y, REPORT_DECIMALS),

@@ -150,3 +150,69 @@ def test_paused_keeps_the_cube_and_resumes_carrying():
     f.approach.enabled = True
     f.step(now + 0.05, Inputs(zone=FAR_GATE))
     assert f.state == State.CARRY
+
+
+# --- rebound counter + ignore-list ---------------------------------------------
+def miss(f, now):
+    """
+    One missed catch (FC-51 required, scoop empty); returns the time after it.
+    """
+    f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))
+    assert f.state == State.CATCH
+    _, now = run(f, now + 0.05, now + 3.0, Inputs(has_cube=False))
+    assert f.state == State.SEARCH
+    return now
+
+
+def test_repeated_misses_ignore_the_cube_for_skip_time():
+    f = fsm(require_has_cube=True, capture_fails=2, skip_time_s=3.0)
+    now = miss(f, 0.0)
+    f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))  # one miss: still approached
+    assert f.state == State.CATCH
+    run(f, now + 0.05, now + 3.0, Inputs(has_cube=False))
+    now += 3.0
+    out = f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))
+    assert f.state == State.SEARCH and out.cmd.vx == 0.0 and out.cmd.wz != 0.0
+    f.step(now + 3.5, Inputs(cubes=[CUBE_AT_SCOOP]))  # skip_time over
+    assert f.state == State.CATCH
+
+
+def test_misses_outside_the_window_do_not_count():
+    f = fsm(require_has_cube=True, capture_fails=2, capture_fail_window_s=5.0)
+    now = miss(f, 0.0) + 10.0
+    now = miss(f, now)
+    f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))
+    assert f.state == State.CATCH
+
+
+def test_a_verified_catch_resets_the_miss_counter():
+    f = fsm(require_has_cube=True, capture_fails=2)
+    now = miss(f, 0.0)
+    f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))
+    run(f, now + 0.05, now + 1.0, Inputs(has_cube=True))
+    assert f.state == State.CARRY
+    f.state = State.SEARCH
+    f.carrying_color = None
+    now = miss(f, now + 2.0)
+    f.step(now, Inputs(cubes=[CUBE_AT_SCOOP]))
+    assert f.state == State.CATCH
+
+
+# --- stuck-line watchdog ---------------------------------------------------------
+def test_stuck_line_stops_the_robot_then_recovers_on_white():
+    f = fsm(line_stuck_escapes=2, line_stuck_window_s=30.0, line_stuck_clear_s=1.0)
+    black = Inputs(line_black=True)
+    now = 0.0
+    for _ in range(2):  # two escapes are allowed
+        f.step(now, black)
+        _, now = run(f, now, now + 4.0, Inputs())
+    assert not f.line_stuck
+    f.step(now, black)  # the third trips the watchdog
+    assert f.line_stuck
+    out = f.step(now, black)
+    assert out.cmd.vx == 0.0 and out.cmd.wz == 0.0
+    run(f, now, now + 5.0, black)
+    assert f.line_stuck  # still black: stays stopped
+    _, now = run(f, now + 5.0, now + 6.0, Inputs())
+    f.step(now + 0.1, Inputs())
+    assert not f.line_stuck and f.state == State.SEARCH

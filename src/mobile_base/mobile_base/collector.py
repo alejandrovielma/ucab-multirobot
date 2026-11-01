@@ -64,6 +64,15 @@ DEFAULT_LINE_BACKUP_S = 0.5
 DEFAULT_LINE_BACKUP_MAX_S = 1.5
 DEFAULT_LINE_TURN_S = 1.2
 DEFAULT_ESCAPE_TURN_RAD_S = 0.6
+# Missed-catch memory (core/behavior.py: capture_fails 3 -> 2 here because
+# Ferb's blind push is slower to repeat, capture_fail_window 20 s, skip_time 3 s).
+DEFAULT_CAPTURE_FAILS = 2
+DEFAULT_CAPTURE_FAIL_WINDOW_S = 20.0
+DEFAULT_SKIP_TIME_S = 3.0
+# Stuck-line watchdog: more than this many escapes within the window.
+DEFAULT_LINE_STUCK_ESCAPES = 4
+DEFAULT_LINE_STUCK_WINDOW_S = 30.0
+DEFAULT_LINE_STUCK_CLEAR_S = 1.0
 
 # Name of the area estimate made from the area paper (vision/zone.py).
 ZONE_SOURCE_FLOOR = "floor"
@@ -110,6 +119,12 @@ class CollectorParams:
     line_backup_max_s: float = DEFAULT_LINE_BACKUP_MAX_S
     line_turn_s: float = DEFAULT_LINE_TURN_S
     escape_turn_rad_s: float = DEFAULT_ESCAPE_TURN_RAD_S
+    capture_fails: int = DEFAULT_CAPTURE_FAILS
+    capture_fail_window_s: float = DEFAULT_CAPTURE_FAIL_WINDOW_S
+    skip_time_s: float = DEFAULT_SKIP_TIME_S
+    line_stuck_escapes: int = DEFAULT_LINE_STUCK_ESCAPES
+    line_stuck_window_s: float = DEFAULT_LINE_STUCK_WINDOW_S
+    line_stuck_clear_s: float = DEFAULT_LINE_STUCK_CLEAR_S
 
 
 @dataclass(frozen=True)
@@ -176,6 +191,16 @@ class CollectorFsm:
         self._line_last_black_s = 0.0
         self._resume = State.SEARCH
         self._search_dir = SEARCH_DIR_LEFT
+        # Missed-catch memory: times of recent misses, and colour -> expiry.
+        # shortcut: a cube has no identity or pose, so the whole colour is
+        # ignored for skip_time_s; upgrade to bearing/distance once a pose exists.
+        self._miss_times: list[float] = []
+        self._ignored_until: dict[str, float] = {}
+        # Stuck-line watchdog: escape start times; set while the robot is
+        # stopped because the sensor will not leave black.
+        self._escape_times: list[float] = []
+        self.line_stuck = False
+        self._white_since_s: float | None = None
 
     @property
     def needs_vision(self) -> bool:
@@ -194,8 +219,12 @@ class CollectorFsm:
             return self._out(Command())
         if self.state == State.PAUSED:
             self._go(self._idle_state(), now)
+        if self.line_stuck:
+            return self._stuck(now, inp)
         if inp.line_black and self.state != State.LINE_ESCAPE:
             self._start_line_escape(now)
+            if self.line_stuck:
+                return self._out(Command())
         handlers = {
             State.CATCH: self._catch,
             State.CARRY: self._carry,
@@ -251,7 +280,10 @@ class CollectorFsm:
         if not inp.vision_ok:
             self.approach.target = None
             return self._out(Command())
-        cmd = self.approach.update(inp.cubes, now)
+        cubes = [
+            c for c in inp.cubes if self._ignored_until.get(c.color, 0.0) <= now
+        ]
+        cmd = self.approach.update(cubes, now)
         self.state = self.approach.state
         target = self.approach.target
         if self.state != State.ARRIVED or target is None:
@@ -275,13 +307,29 @@ class CollectorFsm:
         verdict = self._catch_verdict(now, inp)
         if verdict == VERDICT_CARRY:
             self.carrying_color = self._confirmed_color(inp)
+            self._miss_times.clear()
             self._go(State.CARRY, now)
         elif verdict == VERDICT_REJECT:
             # Not our colour: leave it where it is.
             self._go(State.RELEASE, now)
         elif verdict == VERDICT_MISSED:
+            self._on_missed(now)
             self._go(State.SEARCH, now)
         return self._out(Command())
+
+    def _on_missed(self, now: float) -> None:
+        """
+        Count a missed catch; `capture_fails` of them inside the window put
+        the target's colour on the ignore list for `skip_time_s`.
+        """
+        p = self.params
+        self._miss_times = [
+            t for t in self._miss_times if now - t <= p.capture_fail_window_s
+        ]
+        self._miss_times.append(now)
+        if len(self._miss_times) >= p.capture_fails:
+            self._miss_times.clear()
+            self._ignored_until[self._catch_color] = now + p.skip_time_s
 
     def _catch_verdict(self, now: float, inp: Inputs) -> str:
         """
@@ -417,6 +465,16 @@ class CollectorFsm:
         """
         Remember what to resume and start backing away from the tape.
         """
+        p = self.params
+        self._escape_times = [
+            t for t in self._escape_times if now - t <= p.line_stuck_window_s
+        ]
+        self._escape_times.append(now)
+        if len(self._escape_times) > p.line_stuck_escapes:
+            # Escapes are not getting off the tape: stop instead of looping.
+            self.line_stuck = True
+            self._white_since_s = None
+            return
         if self.carrying_color is None:
             # A cube left in the area (RELEASE) frees the zone too.
             self._want = False
@@ -438,4 +496,19 @@ class CollectorFsm:
             spin = self._search_dir * p.escape_turn_rad_s
             return self._out(Command(0.0, spin))
         self._go(self._resume, now)
+        return self._out(Command())
+
+    def _stuck(self, now: float, inp: Inputs) -> Output:
+        """
+        Stopped by the watchdog; resume once the sensor has read white for
+        `line_stuck_clear_s` without a break (any black read restarts it).
+        """
+        if inp.line_black:
+            self._white_since_s = None
+        elif self._white_since_s is None:
+            self._white_since_s = now
+        elif now - self._white_since_s >= self.params.line_stuck_clear_s:
+            self.line_stuck = False
+            self._escape_times.clear()
+            self._go(self._idle_state(), now)
         return self._out(Command())

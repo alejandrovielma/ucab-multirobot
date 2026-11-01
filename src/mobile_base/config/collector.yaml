@@ -49,6 +49,13 @@
     line_backup_max_s: 1.5
     line_turn_s: 1.2
     escape_turn_rad_s: 0.6
+    line_stuck_escapes: 4        # more escapes than this inside the window: stop (sensor stuck on black)
+    line_stuck_window_s: 30.0
+    line_stuck_clear_s: 1.0      # resume after this long reading white without a break
+    # --- missed catches (copied from core/behavior.py capture_fails / skip_time) ---
+    capture_fails: 2             # misses inside the window: ignore that colour for skip_time_s
+    capture_fail_window_s: 20.0
+    skip_time_s: 3.0
 
 /**/obstacle_guard:
   ros__parameters:

@@ -91,3 +91,18 @@ the table: brake, move away from it, turn inward, then resume.
   arena's axis.
 - A false "paper" on the arena's border tape (it reads blue at some angles)
   can still draw the robot there.
+
+## Ferb's FSM (`mobile_base/collector.py`): stall fixes
+
+Two local robustness features ported as ideas (not code) from `core/behavior.py`:
+
+- **Missed-catch memory.** `capture_fails` (2) misses inside `capture_fail_window_s`
+  (20 s) put the target's colour on an ignore list for `skip_time_s` (3 s);
+  `_search` filters those cubes out. It is per colour because a cube has only
+  bearing and distance (no pose), so it has no identity. A verified catch
+  clears the miss count.
+- **Stuck-line watchdog.** More than `line_stuck_escapes` (4) LINE_ESCAPE starts
+  inside `line_stuck_window_s` (30 s) stops the robot (zero command, no new
+  escape) and sets `CollectorFsm.line_stuck`, reported as `line_stuck` on
+  `behavior/state`. It resumes (`_idle_state`) after the sensor reads white
+  for `line_stuck_clear_s` (1 s) without a black read in between.
