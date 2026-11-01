@@ -19,10 +19,10 @@ Both publish `cubes`. Only ours publishes `cubes/scene`, which `phineas_behavior
 - The robot moves: camera frames saved at t=10 s and t=40 s show the table edge approaching and then only floor; `cmd_vel` stays 0.12 m/s forward. **It drives off the table in about 30 s.**
 - No target cube was ever seen, nothing approached or captured. The only detections are two orange boxes at fixed pixels: they are the robot's own scoop walls (visible in every frame), reported as cubes by our detector. They would be chased if `targets` contained orange.
 
-## Safety finding (important)
-Ferb's bridge publishes no `line`. Neither `behavior` nor `safety_gate` checks that `line` is alive: both default to `line_front = False` ("no tape") forever, silently. With a real robot a dead line sensor node would give exactly this behavior: the robot drives over the border. Here the border is the table edge, so the chain cannot be run for more than ~30 s without a line source. Not changed (outside this task's surfaces); proposal: a staleness check on `line` in the gate (stop if no reading within a timeout once a publisher was expected), and in the sim a line signal (bridge ground sensor) or a pose from a Webots supervisor so the geofence (`track.yaml`) works.
+## Safety finding (resolved)
+The gate used to default to `line_front = False` ("no tape") when `line` was silent, so a dead line sensor node let the robot drive over the border (in the sim, off the table in ~30 s). Now the gate fails closed: it records the arrival time of the last `LineSensors` message and, if none arrived within `line_timeout_s` (default 0.5 s, 25 periods of the 50 Hz sensor; never heard = stale), it treats the line as tape under the sensor and logs `safety: line_stale: line ahead`. Forward and other translations toward the assumed tape are blocked; spinning in place is still allowed. `require_line: false` opts out (explicit, WARN at startup); `phineas_on_ferb_sim.yaml` sets it because Ferb's bridge publishes no `line`. `behavior` is unchanged: the gate is the safety layer.
 
 ## Limits
-- No line, pose, zone arbiter or peer: tape backoff, geofence and delivery by pose are not exercised.
+- No line (the gate runs with `require_line: false`), pose, zone arbiter or peer: tape backoff, geofence and delivery by pose are not exercised.
 - Cubes/scene/line adapters (`core/adapters.py`) run for real for `cubes` and `cubes/scene`; `line` is untested in a loop.
 - Hue ranges are ours (real cubes), not Ferb's sim-calibrated `hsv_ranges.yaml`; whether yellow/other cubes are detected in the sim is not verified (none in view).

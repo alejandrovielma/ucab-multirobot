@@ -65,6 +65,10 @@ class SafetyParams:
     heartbeat_timeout: float = 2.0
     require_pose: bool = True
     pose_timeout: float = 0.5
+    # The line node publishes at 50 Hz, so 0.5 s is 25 missed readings (same as cmd/pose timeouts); the robot
+    # moves at most ~0.1 m in that time, about the 8-9.5 cm the center sensor already lags behind the tape.
+    line_timeout_s: float = 0.5
+    require_line: bool = True  # False only for simulators without a line sensor
     front_cone_deg: float = 60.0
     # Center-to-center distances. Scoop tips touch at ~0.38 m when facing each other.
     stop_distance: float = 0.40
@@ -124,6 +128,8 @@ class SafetyInput:
     estop: bool = False  # emergency stop requested (latched by the node until cleared)
     # Without overhead poses: the peer's marker seen by this robot's camera, (bearing rad, distance m).
     peer_seen: tuple[float, float] | None = None
+    # False = the line sensor went silent (or never spoke): treated as tape under the sensor (fail closed).
+    line_fresh: bool = True
 
 
 class SafetyGate:
@@ -221,15 +227,16 @@ class SafetyGate:
         if vy != 0.0 or vx < 0.0:
             vx, vy = self._cap(vx, vy, p.max_side_speed, "slow: not straight ahead", reasons)
         returning, off_track = self._outside_track(inp, own_fresh, vx, vy, reasons)
-        if inp.line_front and not self._line_seen and inp.now - self._line_clear_since >= p.line_clear_time:
+        front = inp.line_front or not inp.line_fresh  # a silent sensor counts as tape
+        if front and not self._line_seen and inp.now - self._line_clear_since >= p.line_clear_time:
             self._line_dir = self._travel_dir  # a new tape: it lies where the robot was heading for
-        if self._line_seen and not inp.line_front:
+        if self._line_seen and not front:
             self._line_clear_since = inp.now
-        self._line_seen = inp.line_front
-        line_blocks = inp.line_front and not delivering and not returning
+        self._line_seen = front
+        line_blocks = front and not delivering and not returning
         if (line_blocks and _toward(vx, vy, self._line_dir)) or (off_track and (vx or vy)):
             vx = vy = 0.0
-            reasons.append("line ahead" if line_blocks else "no translation away from the track")
+            reasons.append(("line_stale: line ahead" if not inp.line_front else "line ahead") if line_blocks else "no translation away from the track")
 
         own, peer = inp.own_pose, (inp.peer_pose if self._is_fresh(inp.peer_pose, inp.now) else None)
         peer_seen = inp.peer_seen
@@ -261,7 +268,7 @@ class SafetyGate:
         vx, vy, wz = self._star(vx, vy, wz, reasons)  # the peer rule may have added a spin
         if on_track:
             vx, vy, wz = self._body_geofence(inp.own_pose, vx, vy, wz, reasons)
-        if (vx or vy) and not inp.line_front:
+        if (vx or vy) and not front:
             norm = math.hypot(vx, vy)
             self._travel_dir = (vx / norm, vy / norm)
         return (vx, vy, wz), ", ".join(reasons) or "ok"
@@ -377,6 +384,13 @@ class SafetyGate:
     def _peer_faces_us(self, own: Pose2D, peer: Pose2D) -> bool:
         bearing = relative_bearing(peer.x, peer.y, peer.theta, own.x, own.y)
         return abs(bearing) < math.radians(self.params.front_cone_deg)
+
+
+def line_is_fresh(now: float, last: float | None, timeout: float, required: bool) -> bool:
+    """Is the line sensor alive? Never heard or a clock that went backwards is NOT fresh (fail closed)."""
+    if not required:
+        return True
+    return last is not None and 0.0 <= now - last <= timeout
 
 
 def _toward(vx: float, vy: float, direction: tuple[float, float]) -> bool:

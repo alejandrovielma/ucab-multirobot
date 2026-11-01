@@ -15,6 +15,7 @@ Route: inline (mechanical imports, no new design).
 
 - [x] T8 Phineas behavior chain on Ferb's simulator: `phineas_on_ferb_sim.launch.py` (see docs/phineas/integracion-simulacion.md). Result: chain runs and moves, but without a `line` source the robot drives off the table in ~30 s; no cube approached
 
+- [x] T9 Gate fails closed when `line` is silent: `line_timeout_s` (0.5 s) + `require_line` (true; false in the Ferb sim yaml), reason `line_stale: line ahead`, `line_is_fresh` helper with tests. Verified in Docker sim in both modes (see docs/phineas/integracion-simulacion.md). `behavior_node` unchanged.
 ## Not verified here (Windows)
 tools/lab tests need termios (Linux); tools/sim needs rclpy. Run scripts/test_in_docker.sh.
 
