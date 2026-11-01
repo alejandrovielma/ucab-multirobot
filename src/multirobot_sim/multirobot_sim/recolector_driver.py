@@ -3,7 +3,7 @@
 Loaded by WebotsController from resource/<robot>.urdf. It is the simulated hardware layer
 and exposes exactly the same topics as the real robot nodes (namespace /<robot>):
   sub  cmd_vel            -> mecanum kinematics -> motor_fl/fr/rl/rr velocities
-  pub  line_front         <- DistanceSensor "linea_frente" below line_threshold
+  pub  line               <- DistanceSensor "linea_frente" below line_threshold
   pub  camera/image_raw   <- Camera "camara" (bgra8)
   pub  pose               <- GPS "gps" + InertialUnit "imu_sim" (emulates the overhead camera)
 The scoop servo is held at 0 (the real scoop is fixed). The gate servo at the mouth of the U follows
@@ -27,6 +27,7 @@ from std_msgs.msg import Bool
 
 from mobile_base.core.kinematics import MecanumGeometry, normalize, wheel_speeds
 from multirobot_interfaces.msg import RobotPose
+from recolector_interfaces.msg import LineSensors
 from multirobot_sim.sim_utils import is_black, noisy_pose, parse_wheel_signs, read_camera_image
 
 MOTORS = ("motor_fl", "motor_fr", "motor_rl", "motor_rr")
@@ -80,7 +81,7 @@ class RecolectorDriver:
         ns = f"/{self._name}"
         self._node.create_subscription(Twist, f"{ns}/cmd_vel", self._on_cmd_vel, 1)
         self._node.create_subscription(Bool, f"{ns}/gate_cmd", self._on_gate, 1)
-        self._line_pub = self._node.create_publisher(Bool, f"{ns}/line_front", 10)
+        self._line_pub = self._node.create_publisher(LineSensors, f"{ns}/line", 10)
         self._image_pub = self._node.create_publisher(Image, f"{ns}/camera/image_raw", 1)
         self._pose_pub = self._node.create_publisher(RobotPose, f"{ns}/pose", 10)
 
@@ -101,7 +102,9 @@ class RecolectorDriver:
         rclpy.spin_once(self._node, timeout_sec=0)
         now = self._robot.getTime()
         self._drive(now)
-        self._line_pub.publish(Bool(data=is_black(self._line.getValue(), self._line_threshold)))
+        msg = LineSensors(black=is_black(self._line.getValue(), self._line_threshold))
+        msg.header.stamp = self._node.get_clock().now().to_msg()
+        self._line_pub.publish(msg)
         if now - self._last_image >= CAMERA_PERIOD_MS / 1000.0:
             self._last_image = now
             self._publish_image(now)

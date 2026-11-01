@@ -1,0 +1,80 @@
+# Tool configuration for the whole repo. Each ROS package has its own setup.py.
+[tool.ruff]
+# 80 columns so the code stays readable on small screens and side by side.
+line-length = 80
+target-version = "py312"
+extend-exclude = [
+    "build",
+    "install",
+    "log",
+    # Phineas code merged from ucab-multirobot (Ferb integration). It predates
+    # this ruff configuration: clean it module by module and delete its line.
+    "src/coordinator",
+    "src/overhead_localization",
+    "src/multirobot_sim",
+    "hardware",
+    "src/mobile_base/mobile_base/core",
+    "src/mobile_base/mobile_base/nodes",
+    "src/mobile_base/mobile_base/gpio.py",
+    "src/mobile_base/mobile_base/vision.py",
+    "src/bringup/launch/phineas_*.py",
+    "src/bringup/test",
+    "tools/lab",
+    "tools/sim",
+    "tools/sim_monitor.py",
+    "src/mobile_base/test/test_adapters.py",
+    "src/mobile_base/test/test_behavior.py",
+    "src/mobile_base/test/test_body_geofence.py",
+    "src/mobile_base/test/test_colors.py",
+    "src/mobile_base/test/test_config.py",
+    "src/mobile_base/test/test_core_kinematics.py",
+    "src/mobile_base/test/test_delivery.py",
+    "src/mobile_base/test/test_fusion_hat.py",
+    "src/mobile_base/test/test_gate.py",
+    "src/mobile_base/test/test_geometry.py",
+    "src/mobile_base/test/test_localization.py",
+    "src/mobile_base/test/test_motor_safety.py",
+    "src/mobile_base/test/test_planner.py",
+    "src/mobile_base/test/test_safety.py",
+    "src/mobile_base/test/test_scoop.py",
+    "src/mobile_base/test/test_stall_fixes.py",
+    "src/mobile_base/test/test_track.py",
+    "src/mobile_base/test/test_vision.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "B", "UP", "N",
+    # Mccabe complexity: keep functions small and single-purpose.
+    "C90",
+    # Magic values in comparisons: use a named constant (or the YAML).
+    "PLR2004",
+    # Docstrings: required on everything public (D100-D107), with the quotes
+    # on their own lines and the text at the same indentation (D207-D210,
+    # D213). Do NOT enable D200: it asks one-line docstrings to fit on one
+    # line, which is the opposite of our format.
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",
+    "D207", "D208", "D209", "D210", "D213",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Tests compare against literal expected values on purpose, and their names
+# already say what they check, so they do not need docstrings.
+"**/test/**" = ["PLR2004", "D100", "D101", "D102", "D103", "D104", "D107"]
+"tools/test_*.py" = ["PLR2004", "D100", "D101", "D102", "D103", "D104", "D107"]
+# Build metadata, not code.
+"**/setup.py" = ["D100"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "mobile_base",
+    "vision",
+    "recolector_common",
+    "recolector_interfaces",
+    "multirobot_interfaces",
+    "recolector_sim",
+    "teleop_web_lib",
+]

@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collector · control</title>
+<style>
+  body { margin: 0; font: 15px system-ui, sans-serif; background: #111; color: #eee;
+         display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px; }
+  img { width: min(100%, 640px); aspect-ratio: 4 / 3; background: #222; border-radius: 8px; }
+  .keys { display: grid; grid-template-columns: repeat(3, 56px); gap: 6px; }
+  .k { height: 56px; border-radius: 8px; background: #2a2a2a; display: grid;
+       place-items: center; font-weight: 700; user-select: none; touch-action: none; }
+  .k.on { background: #2f7d32; }
+  .btn { padding: 10px 16px; border-radius: 8px; border: none; font: inherit; font-weight: 700;
+         cursor: pointer; background: #2a2a2a; color: #eee; }
+  .btn.on { background: #2f7d32; color: #fff; }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  #st { font-family: ui-monospace, monospace; color: #aaa; }
+  #st.off { color: #e57373; }
+  .line-box { width: min(100%, 640px); box-sizing: border-box; padding: 12px 16px;
+              border-radius: 8px; font-weight: 700; text-align: center;
+              font-family: ui-monospace, monospace; font-size: 16px;
+              border: 2px solid #444; background: #222; color: #ccc; transition: 0.1s; }
+  .line-box.white { background: #1b3a20; border-color: #4caf50; color: #a5d6a7; }
+  .line-box.black { background: #b71c1c; border-color: #ff5252; color: #fff;
+                    box-shadow: 0 0 14px rgba(255, 82, 82, 0.7); }
+  .hint { color: #888; }
+  .tune { width: min(100%, 640px); display: flex; flex-direction: column; gap: 6px;
+          align-items: center; font-family: ui-monospace, monospace; }
+  #strip { width: 100%; height: 28px; background: #222; border-radius: 6px; }
+  #tuneInfo { color: #ccc; }
+  #tuneInfo.changing { color: #ffd54f; font-weight: 700; }
+  #aoChart { width: 100%; height: 90px; background: #222; border-radius: 6px; }
+  #aoInfo { color: #90caf9; }
+</style></head><body>
+<h2 style="margin:0">Collector</h2>
+<img id="cam" src="/stream.mjpg" alt="camera">
+<div id="lineBox" class="line-box">Sensor de línea (GPIO 17): conectando…</div>
+<div class="tune">
+  <canvas id="strip" width="600" height="28"></canvas>
+  <div id="tuneInfo">sensor output history (red = dark, green = light)</div>
+  <canvas id="aoChart" width="600" height="90"></canvas>
+  <div id="aoInfo">AO (analog): not wired</div>
+  <div class="row">
+    <label><input id="beep" type="checkbox"> beep when the reading changes</label>
+    <button id="tuneReset" class="btn">Reset counters</button>
+  </div>
+</div>
+<div class="row">
+  <div class="keys">
+    <div class="k" data-k="q">Q</div><div class="k" data-k="w">W</div>
+    <div class="k" data-k="e">E</div><div class="k" data-k="a">A</div>
+    <div class="k" data-k="s">S</div><div class="k" data-k="d">D</div>
+  </div>
+  <label>Speed <input id="spd" type="range" min="10" max="100" value="50">
+    <span id="spdv">50</span>%</label>
+  <button id="autoBtn" class="btn">Auto (P): OFF</button>
+  <button id="nextBtn" class="btn">Reset (R)</button>
+</div>
+<div id="st">connecting…</div>
+<div class="hint">
+  W/S adelante·atrás · A/D izquierda·derecha · Q/E girar · P auto · R reset · space frenar · Shift rápido
+</div>
+<script>
+// Tunable values of the page, in one place.
+const CONFIG = {
+  pollIntervalMs: 100,   // how often the page sends its command
+  percentScale: 100,     // slider percent -> 0..1 speed
+  shiftSpeed: 1,         // speed while Shift is held
+  keys: "wasdqe",        // keys that drive the robot
+};
+
+// Line sensor tuning view: shows whether the reading flips while the
+// potentiometer is turned.
+const TUNE = {
+  historySamples: 100,   // samples in the strip (about 10 s at the poll rate)
+  changingMs: 2000,      // "changing" while the last flip is this recent
+  beepHz: 880,
+  beepMs: 80,
+  msPerSecond: 1000,
+  percentScale: 100,
+  adcMaxCounts: 4095,    // 12-bit ADC of the Fusion HAT+
+  millivoltsPerVolt: 1000,
+};
+
+const down = new Set();
+const spd = document.getElementById("spd"), st = document.getElementById("st");
+const lineBox = document.getElementById("lineBox");
+const autoBtn = document.getElementById("autoBtn"), nextBtn = document.getElementById("nextBtn");
+let autoCmd = null, resetCmd = false;
+spd.oninput = () => document.getElementById("spdv").textContent = spd.value;
+autoBtn.onclick = () => { autoCmd = !autoBtn.classList.contains("on"); };
+nextBtn.onclick = () => { autoCmd = true; resetCmd = true; };
+function paint() {
+  document.querySelectorAll(".k").forEach(el => el.classList.toggle("on", down.has(el.dataset.k)));
+}
+addEventListener("keydown", ev => {
+  const k = ev.key.toLowerCase();
+  if (k === " ") { down.clear(); autoCmd = false; ev.preventDefault(); }
+  else if (k === "p" && !ev.repeat) { autoCmd = !autoBtn.classList.contains("on"); }
+  else if (k === "r" && !ev.repeat) { autoCmd = true; resetCmd = true; }
+  else if (CONFIG.keys.includes(k)) down.add(k);
+  if (ev.shiftKey) down.add("shift");
+  paint();
+});
+addEventListener("keyup", ev => {
+  down.delete(ev.key.toLowerCase());
+  if (!ev.shiftKey) down.delete("shift");
+  paint();
+});
+addEventListener("blur", () => { down.clear(); paint(); });
+document.querySelectorAll(".k").forEach(el => {
+  el.onpointerdown = () => { down.add(el.dataset.k); paint(); };
+  el.onpointerup = el.onpointerleave = () => { down.delete(el.dataset.k); paint(); };
+});
+const strip = document.getElementById("strip"), tuneInfo = document.getElementById("tuneInfo");
+const beepBox = document.getElementById("beep");
+let rawHistory = [], flips = 0, lastRaw = null, lastFlipMs = null, audio = null;
+document.getElementById("tuneReset").onclick = () => {
+  rawHistory = []; aoHistory = []; flips = 0; lastFlipMs = null;
+};
+function beep() {
+  audio = audio || new AudioContext();
+  const osc = audio.createOscillator();
+  osc.frequency.value = TUNE.beepHz;
+  osc.connect(audio.destination);
+  osc.start();
+  osc.stop(audio.currentTime + TUNE.beepMs / TUNE.msPerSecond);
+}
+function drawStrip() {
+  const ctx = strip.getContext("2d");
+  const barW = strip.width / TUNE.historySamples;
+  ctx.clearRect(0, 0, strip.width, strip.height);
+  rawHistory.forEach((v, i) => {
+    ctx.fillStyle = v ? "#ff5252" : "#4caf50";
+    ctx.fillRect(i * barW, 0, Math.ceil(barW), strip.height);
+  });
+}
+const aoChart = document.getElementById("aoChart"), aoInfo = document.getElementById("aoInfo");
+let aoHistory = [];
+function drawAo() {
+  const ctx = aoChart.getContext("2d");
+  const stepX = aoChart.width / (TUNE.historySamples - 1);
+  ctx.clearRect(0, 0, aoChart.width, aoChart.height);
+  ctx.strokeStyle = "#90caf9";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  aoHistory.forEach((c, i) => {
+    const y = aoChart.height * (1 - c / TUNE.adcMaxCounts);
+    if (i === 0) ctx.moveTo(0, y); else ctx.lineTo(i * stepX, y);
+  });
+  ctx.stroke();
+}
+function tuneAnalog(counts, mv) {
+  if (counts === null || counts === undefined) return;
+  aoHistory.push(counts);
+  if (aoHistory.length > TUNE.historySamples) aoHistory.shift();
+  drawAo();
+  aoInfo.textContent = `AO ${counts} / ${TUNE.adcMaxCounts} · ` +
+    `${(mv / TUNE.millivoltsPerVolt).toFixed(2)} V · ` +
+    `last samples min ${Math.min(...aoHistory)} max ${Math.max(...aoHistory)} ` +
+    `(graph: 0 at the bottom, ${TUNE.adcMaxCounts} at the top)`;
+}
+function tune(raw) {
+  if (raw === null || raw === undefined) return;
+  const now = performance.now();
+  if (lastRaw !== null && raw !== lastRaw) {
+    flips++; lastFlipMs = now;
+    if (beepBox.checked) beep();
+  }
+  lastRaw = raw;
+  rawHistory.push(raw);
+  if (rawHistory.length > TUNE.historySamples) rawHistory.shift();
+  drawStrip();
+  const dark = Math.round(TUNE.percentScale * rawHistory.filter(v => v).length / rawHistory.length);
+  const ago = lastFlipMs === null ? null : (now - lastFlipMs) / TUNE.msPerSecond;
+  const changing = lastFlipMs !== null && now - lastFlipMs < TUNE.changingMs;
+  tuneInfo.className = changing ? "changing" : "";
+  tuneInfo.textContent = `DO=${raw} · ${changing ? "CHANGING" : "stable"} · flips ${flips}` +
+    ` · last flip ${ago === null ? "never" : ago.toFixed(1) + " s ago"} · dark ${dark}% of last samples`;
+}
+async function tick() {
+  // What the keys ask for on the robot:
+  // W/S forward/back (vy), A/D strafe left/right (vx), Q/E spin CCW/CW (wz).
+  const fwd = (down.has("w") ? 1 : 0) - (down.has("s") ? 1 : 0);
+  const strafe = (down.has("a") ? 1 : 0) - (down.has("d") ? 1 : 0);
+  const spin = (down.has("q") ? 1 : 0) - (down.has("e") ? 1 : 0);
+  const vx = -strafe, vy = fwd, wz = spin;
+  const speed = down.has("shift") ? CONFIG.shiftSpeed : spd.value / CONFIG.percentScale;
+  const payload = { vx, vy, wz, speed };
+  if (autoCmd !== null) { payload.auto = autoCmd; autoCmd = null; }
+  if (resetCmd) { payload.reset_auto = true; resetCmd = false; }
+  try {
+    const r = await fetch("/cmd", { method: "POST", body: JSON.stringify(payload) });
+    const s = await r.json();
+    autoBtn.classList.toggle("on", !!s.auto);
+    autoBtn.textContent = `Auto (P): ${s.auto ? "ON" : "OFF"}`;
+    tune(s.line_raw);
+    tuneAnalog(s.line_counts, s.line_mv);
+    const rawInfo = s.line_raw !== null && s.line_raw !== undefined ? ` (DO=${s.line_raw})` : "";
+    if (s.line === "BLACK" || s.line_black) {
+      lineBox.className = "line-box black";
+      lineBox.textContent = `⬛ LÍNEA NEGRA DETECTADA${rawInfo} — ¡Ve negro!`;
+    } else if (s.line === "white") {
+      lineBox.className = "line-box white";
+      lineBox.textContent = `⬜ PISO CLARO / BLANCO${rawInfo} — No ve negro`;
+    } else {
+      lineBox.className = "line-box";
+      lineBox.textContent = `⚠️ Sensor de línea: ${s.line}`;
+    }
+    st.className = "";
+    const tgt = s.target ? ` (${s.target})` : "";
+    st.textContent = `state: ${s.state}${tgt} · delivered ${s.delivered} ` +
+      `(picked ${s.collected}) · line ${s.line} · ` +
+      `speed=${Math.round(speed * CONFIG.percentScale)}% · ` +
+      `motors ${s.motors} · camera ${s.camera ? "yes" : "no"}`;
+  } catch (e) {
+    st.className = "off"; st.textContent = "no connection to the robot";
+    lineBox.className = "line-box"; lineBox.textContent = "Sin conexión con el robot";
+  }
+}
+setInterval(tick, CONFIG.pollIntervalMs);
+</script></body></html>

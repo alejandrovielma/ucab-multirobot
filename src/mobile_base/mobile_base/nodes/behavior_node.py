@@ -11,13 +11,16 @@ empty = the robot stays still) and avoid_colors (forbidden). Unknown color names
 from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool, String
 
+from mobile_base.core.adapters import cube_from_ferb, line_front_from_sensors
 from mobile_base.core.behavior import BehaviorFSM, BehaviorInput, BehaviorParams, Cube, ZoneAction
 from mobile_base.core.colors import parse_colors
 from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
-from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
+from multirobot_interfaces.msg import RobotPose, RobotState
 from multirobot_interfaces.srv import ReleaseZone, RequestZone
+from recolector_interfaces.msg import CubeDetectionArray, LineSensors, Scene
 
 
 class BehaviorNode(Node):
@@ -28,6 +31,8 @@ class BehaviorNode(Node):
         avoid = parse_colors(self.declare_parameter("avoid_colors", "").value)
         rate_hz = self.declare_parameter("rate_hz", 10.0).value
         cube_timeout = self.declare_parameter("cube_timeout", 0.5).value
+        self._image_width = self.declare_parameter("image_width", 640).value  # for the pixel -> normalized adapters
+        self._image_height = self.declare_parameter("image_height", 480).value
         self.declare_parameter("peer_pose_topic", "/ferb/pose")  # still in the YAML; avoidance lives in the gate
         values = declare_dataclass(self, BehaviorParams, skip=("my_colors",))
         self.fsm = BehaviorFSM(BehaviorParams(my_colors=targets, **values), track=declare_track(self))
@@ -45,7 +50,8 @@ class BehaviorNode(Node):
         self._delivered = 0
 
         self.create_subscription(CubeDetectionArray, "cubes", self._on_cubes, 10)
-        self.create_subscription(Bool, "line_front", self._on_line, 10)
+        self.create_subscription(Scene, "cubes/scene", self._on_scene, 10)
+        self.create_subscription(LineSensors, "line", self._on_line, qos_profile_sensor_data)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
         self.create_subscription(String, "/zone/occupant", self._on_zone, ZONE_OCCUPANT_QOS)
         self._cmd_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
@@ -73,13 +79,15 @@ class BehaviorNode(Node):
         return SetParametersResult(successful=True)
 
     def _on_cubes(self, msg: CubeDetectionArray):
-        self._cubes = [Cube(c.color, c.cx_norm, c.cy_norm, c.area_px) for c in msg.cubes]
-        self._scoop_color = msg.scoop_color
-        self._square = (msg.square_visible, msg.square_cx, msg.square_cy, msg.square_area)
+        self._cubes = [cube_from_ferb(c, self._image_width, self._image_height) for c in msg.cubes]
         self._cubes_time = now_sec(self)
 
-    def _on_line(self, msg: Bool):
-        self._line_front = msg.data
+    def _on_scene(self, msg: Scene):
+        self._scoop_color = msg.scoop_color
+        self._square = (msg.square_visible, msg.square_cx, msg.square_cy, msg.square_area)
+
+    def _on_line(self, msg: LineSensors):
+        self._line_front = line_front_from_sensors(msg)
 
     def _on_pose(self, msg: RobotPose):
         self._pose = pose_from_msg(msg)

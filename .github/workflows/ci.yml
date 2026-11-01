@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check src tools scripts simulation/webots/controllers
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check src tools scripts simulation/webots/controllers
+
+  build-test:
+    runs-on: ubuntu-26.04
+    container: ros:lyrical
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependencies
+        run: |
+          apt-get update
+          rosdep update
+          rosdep install --from-paths src --ignore-src -y
+      - name: Build
+        shell: bash
+        run: |
+          source /opt/ros/lyrical/setup.bash
+          colcon build --event-handlers console_cohesion+
+      - name: Test
+        shell: bash
+        run: |
+          source /opt/ros/lyrical/setup.bash
+          source install/setup.bash
+          colcon test --event-handlers console_cohesion+
+          colcon test-result --verbose
+      - name: Tools tests (not a ROS package, so colcon does not run them)
+        shell: bash
+        run: |
+          source /opt/ros/lyrical/setup.bash
+          python3 -m pytest tools

@@ -1,0 +1,16 @@
+# Replace @rolN with each owner's GitHub username (see docs/team.md).
+*                                @rol4
+/src/mobile_base/                @rol1
+/src/mobile_base/mobile_base/behavior_fsm.py   @rol3
+/src/mobile_base/mobile_base/obstacle_guard.py @rol3
+/src/mobile_base/mobile_base/color_sensor.py   @rol2
+/src/vision/                     @rol2
+/tools/                          @rol2
+/src/recolector_interfaces/      @rol3
+/docs/architecture.md            @rol3
+/docs/external-interface.md      @rol3
+/scripts/                        @rol1
+/docs/hardware.md                @rol1
+/simulation/                     @rol4
+/src/bringup/                    @rol4
+/.github/                        @rol4

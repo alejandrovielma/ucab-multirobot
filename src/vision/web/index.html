@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collector camera</title>
+<style>
+  :root { --bg:#f4f5f7; --card:#fff; --ink:#1d2330; --muted:#6b7280; --line:#e3e6ea; --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:12px 16px; background:#1d2330; color:#fff; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:600; }
+  #state { padding:3px 10px; border-radius:999px; font-weight:600; font-size:13px; background:#4b5563; }
+  #state.SEARCH { background:#2563eb; } #state.APPROACH { background:var(--warn); }
+  #state.ARRIVED { background:var(--ok); } #state.PAUSED, #state.NO_CAMERA { background:var(--bad); }
+  #state.MANUAL { background:#7c3aed; }
+  .keys { display:grid; grid-template-columns:repeat(3, 48px); gap:6px; }
+  .key { height:48px; border:1px solid var(--line); border-radius:8px; display:grid; place-items:center;
+         font-weight:700; user-select:none; touch-action:none; cursor:pointer; background:#fff; }
+  .key.on { background:#7c3aed; color:#fff; border-color:#7c3aed; }
+  main { display:grid; grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); gap:16px; padding:16px; max-width:1300px; margin:0 auto; }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  #video { width:100%; border-radius:6px; background:#000; display:block; aspect-ratio: 4 / 3; object-fit:contain; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--line); border-radius:999px; cursor:pointer; user-select:none; }
+  .chip input { margin:0; }
+  .dot { width:12px; height:12px; border-radius:50%; display:inline-block; border:1px solid rgba(0,0,0,.2); }
+  button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.primary { background:var(--ok); color:#fff; border-color:var(--ok); }
+  button.danger { background:var(--bad); color:#fff; border-color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:5px 4px; border-bottom:1px solid var(--line); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .muted { color:var(--muted); font-size:13px; }
+  #msg { min-height:1.2em; font-size:13px; }
+  #msg.err { color:var(--bad); }
+  input[type=number] { width:80px; font:inherit; padding:4px 6px; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:14px; }
+  dt { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Collector · camera</h1>
+  <span id="state">…</span>
+  <span class="muted" id="fps" style="color:#cbd5e1"></span>
+</header>
+<main>
+  <section class="card">
+    <h2>What the robot sees</h2>
+    <img id="video" src="/stream.mjpg" alt="camera video">
+    <p class="muted">Each box is a detected cube: colour, distance to the camera and angle (+ = left).</p>
+  </section>
+  <aside style="display:flex; flex-direction:column; gap:16px;">
+    <section class="card">
+      <h2>Target colours</h2>
+      <div class="row" id="colors"></div>
+      <div class="row">
+        <label>Stop at <input type="number" id="stop" min="0.05" max="1" step="0.01"> m</label>
+        <button id="apply">Apply</button>
+      </div>
+      <div class="row">
+        <button class="primary" id="start">Start</button>
+        <button class="danger" id="pause">Pause</button>
+      </div>
+      <div id="msg"></div>
+    </section>
+    <section class="card">
+      <h2>Manual control</h2>
+      <div class="row">
+        <div class="keys">
+          <div class="key" data-k="q">Q</div><div class="key" data-k="w">W</div>
+          <div class="key" data-k="e">E</div><div class="key" data-k="a">A</div>
+          <div class="key" data-k="s">S</div><div class="key" data-k="d">D</div>
+        </div>
+        <label>Speed <input type="range" id="tspeed" min="10" max="100" value="50">
+          <span id="tspeedv">50</span>%</label>
+      </div>
+      <p class="muted">W/S forward·back · A/D strafe · Q/E turn · Shift = 100 % · space = release.
+        While you drive, the robot is in MANUAL (even when paused) and goes through obstacle_guard.</p>
+    </section>
+    <section class="card">
+      <h2>Behaviour</h2>
+      <dl>
+        <dt>Target</dt><dd id="target">—</dd>
+        <dt>Command</dt><dd id="cmd">—</dd>
+      </dl>
+    </section>
+    <section class="card">
+      <h2>Detected cubes</h2>
+      <table>
+        <thead><tr><th>Color</th><th>Distance</th><th>Angle</th></tr></thead>
+        <tbody id="cubes"><tr><td colspan="3" class="muted">—</td></tr></tbody>
+      </table>
+    </section>
+  </aside>
+</main>
+<script>
+// Tunable values of the page, in one place.
+const CONFIG = {
+  statePollMs: 300,        // how often the page asks for cubes and state
+  teleopPollMs: 100,       // how often a held key is sent
+  videoRetryMs: 1000,      // wait before requesting the video again
+  percentScale: 100,       // slider percent -> 0..1 speed, metres -> cm
+  fullSpeed: 1,            // speed while Shift is held
+  driveKeys: "wasdqe",     // keys that drive the robot
+  unknownSwatch: "#999",   // colour dot for a colour with no swatch
+};
+const SWATCH = { red:"#d42a24", orange:"#f57314", yellow:"#f2cc1a", green:"#14a050", blue:"#1f45b8", purple:"#6b1a4d" };
+const $ = (id) => document.getElementById(id);
+let colorsBuilt = false, stopTouched = false, colorsTouched = false;
+
+function msg(text, err) { const m = $("msg"); m.textContent = text; m.className = err ? "err" : ""; }
+
+async function setParams(values) {
+  try {
+    const r = await fetch("/api/params", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(values) });
+    const j = await r.json();
+    msg(j.ok ? "Done." : ("Failed: " + j.message), !j.ok);
+    if (j.ok) { stopTouched = false; colorsTouched = false; }
+  } catch (e) { msg("No connection to the robot.", true); }
+}
+
+function buildColors(names) {
+  const box = $("colors"); box.innerHTML = "";
+  for (const n of names) {
+    const lab = document.createElement("label"); lab.className = "chip";
+    lab.innerHTML = `<input type="checkbox" value="${n}"><span class="dot" style="background:${SWATCH[n] || CONFIG.unknownSwatch}"></span>${n}`;
+    lab.querySelector("input").addEventListener("change", () => { colorsTouched = true; });
+    box.appendChild(lab);
+  }
+  colorsBuilt = true;
+}
+
+function selectedColors() { return [...document.querySelectorAll("#colors input:checked")].map(i => i.value); }
+
+$("apply").onclick = () => {
+  const values = { target_colors: selectedColors() };
+  const s = parseFloat($("stop").value); if (!isNaN(s)) values.stop_distance_m = s;
+  setParams(values);
+};
+$("start").onclick = () => setParams({ enabled: true });
+$("pause").onclick = () => setParams({ enabled: false });
+$("stop").addEventListener("input", () => { stopTouched = true; });
+
+const deg = (r) => (r * 180 / Math.PI).toFixed(0) + "°";
+const cm = (m) => (m * CONFIG.percentScale).toFixed(0) + " cm";
+
+async function poll() {
+  try {
+    const s = await (await fetch("/api/state")).json();
+    if (!colorsBuilt) buildColors(s.color_names);
+    $("fps").textContent = s.fps ? s.fps + " fps" : "no video";
+    const b = s.behavior;
+    const st = $("state");
+    if (b) {
+      const shown = (b.enabled || b.state === "MANUAL") ? b.state : "PAUSED";
+      st.textContent = shown; st.className = shown;
+      if (!colorsTouched) for (const i of document.querySelectorAll("#colors input")) i.checked = b.target_colors.includes(i.value);
+      if (!stopTouched) $("stop").value = b.stop_distance_m.toFixed(2);
+      $("target").textContent = b.target ? `${b.target.color} at ${cm(b.target.distance_m)}, ${deg(b.target.bearing_rad)}` : "—";
+      $("cmd").textContent = `forward ${b.cmd.vx.toFixed(2)} m/s · strafe ${(b.cmd.vy || 0).toFixed(2)} m/s · turn ${b.cmd.wz.toFixed(2)} rad/s`;
+    } else {
+      st.textContent = "no behavior_fsm"; st.className = "";
+    }
+    const rows = s.cubes.map(c => `<tr><td><span class="dot" style="background:${SWATCH[c.color] || CONFIG.unknownSwatch}"></span> ${c.color}</td><td class="num">${cm(c.distance_m)}</td><td class="num">${deg(c.bearing_rad)}</td></tr>`);
+    $("cubes").innerHTML = rows.join("") || '<tr><td colspan="3" class="muted">none</td></tr>';
+  } catch (e) {
+    $("state").textContent = "no connection"; $("state").className = "";
+  }
+}
+setInterval(poll, CONFIG.statePollMs); poll();
+
+// ---------- manual control (WASD) ----------
+// Only sent while a key is held (plus one final "stop" on release), so that an open
+// page does not take control away from automatic mode.
+const held = new Set();
+let shift = false, wasMoving = false;
+$("tspeed").oninput = () => { $("tspeedv").textContent = $("tspeed").value; };
+const typing = () => ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)
+  && document.activeElement.type !== "range" && document.activeElement.type !== "checkbox";
+function paintKeys() {
+  for (const el of document.querySelectorAll(".key")) el.classList.toggle("on", held.has(el.dataset.k));
+}
+addEventListener("keydown", (ev) => {
+  if (typing()) return;
+  const k = ev.key.toLowerCase();
+  shift = ev.shiftKey;
+  if (k === " ") { held.clear(); ev.preventDefault(); }
+  else if (CONFIG.driveKeys.includes(k) && k.length === 1) held.add(k);
+  paintKeys();
+});
+addEventListener("keyup", (ev) => { held.delete(ev.key.toLowerCase()); shift = ev.shiftKey; paintKeys(); });
+addEventListener("blur", () => { held.clear(); paintKeys(); });
+for (const el of document.querySelectorAll(".key")) {
+  el.onpointerdown = () => { held.add(el.dataset.k); paintKeys(); };
+  el.onpointerup = el.onpointerleave = el.onpointercancel = () => { held.delete(el.dataset.k); paintKeys(); };
+}
+async function teleopTick() {
+  const moving = held.size > 0;
+  if (!moving && !wasMoving) return;
+  wasMoving = moving;
+  const axis = (pos, neg) => (held.has(pos) ? 1 : 0) - (held.has(neg) ? 1 : 0);
+  const body = { vx: axis("w", "s"), vy: axis("a", "d"), wz: axis("q", "e"),
+                 speed: shift ? CONFIG.fullSpeed : $("tspeed").value / CONFIG.percentScale };
+  try {
+    await fetch("/api/teleop", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+  } catch (e) { msg("No connection to the robot.", true); }
+}
+setInterval(teleopTick, CONFIG.teleopPollMs);
+// if the video drops (e.g. the node restarted), request it again
+$("video").onerror = () => setTimeout(() => { $("video").src = "/stream.mjpg?" + Date.now(); }, CONFIG.videoRetryMs);
+</script>
+</body>
+</html>

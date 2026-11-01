@@ -111,6 +111,9 @@ Pasar el sensor sobre el tablero blanco y sobre la cinta negra. Debe decir `blan
 Si está al revés, cambiar `active_level` en `line_sensor` del YAML (1 a 0). Si no cambia nunca,
 ajustar el potenciómetro del módulo o revisar que esté en GPIO5.
 
+Opcional en `line_sensor` (de Ferb, `tools/teleop_web.yaml`): `adc_channel: 0` (0-3) lee tambien la salida AO por el ADC de la Fusion HAT+ y `line` imprime cuentas y mV;
+`confirm_reads: N` exige N lecturas negras seguidas antes de dar `black()` (por defecto 1, sin filtro). Sin esas claves el comportamiento no cambia. Detalle: `docs/phineas/integracion-hardware.md`.
+
 ### 3. Cámara y detección de cubos
 
 ```bash

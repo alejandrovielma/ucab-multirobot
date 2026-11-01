@@ -93,10 +93,10 @@ PY
 # Start each real-robot stack for a few seconds without hardware (lgpio absent -> GPIO dry run,
 # no camera -> logged error). Any node crash fails the check.
 for robot in phineas ferb; do
-  echo "== launch smoke test: robot.launch.py robot:=${robot}"
+  echo "== launch smoke test: phineas_robot.launch.py robot:=${robot}"
   log_file="/tmp/launch_${robot}.log"
   set +e
-  timeout --foreground -s INT 6 ros2 launch bringup robot.launch.py "robot:=${robot}" >"${log_file}" 2>&1
+  timeout --foreground -s INT 6 ros2 launch bringup phineas_robot.launch.py "robot:=${robot}" >"${log_file}" 2>&1
   set -e
   # Only the window before the Ctrl-C is judged: a crash there is a real startup failure.
   if sed '/user interrupted/q' "${log_file}" | grep -qE "process has died|Traceback"; then
@@ -107,5 +107,8 @@ for robot in phineas ferb; do
   started=$(grep -c "process started" "${log_file}" || true)
   echo "ok   ${started} processes started and stayed alive"
 done
+
+echo "== tools tests (not ROS packages, so colcon does not run them; same step as CI)"
+(cd "${REPO_DIR}" && python3 -m pytest -q tools)
 
 echo "== all checks passed"

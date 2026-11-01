@@ -2,11 +2,14 @@
 
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool, String
 
-from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams
+from mobile_base.core.adapters import line_front_from_sensors
+from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams, line_is_fresh
 from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import RobotPose, RobotState
+from recolector_interfaces.msg import LineSensors
 
 
 class SafetyGateNode(Node):
@@ -21,6 +24,7 @@ class SafetyGateNode(Node):
         self._cmd = (0.0, 0.0, 0.0)
         self._cmd_time: float | None = None
         self._line_front = False
+        self._line_time: float | None = None
         self._pose = None
         self._peer_pose = None
         self._heartbeat_time: float | None = None
@@ -31,7 +35,7 @@ class SafetyGateNode(Node):
         self._last_reason = ""
 
         self.create_subscription(Twist, "cmd_vel_nav", self._on_cmd, 10)
-        self.create_subscription(Bool, "line_front", self._on_line, 10)
+        self.create_subscription(LineSensors, "line", self._on_line, qos_profile_sensor_data)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
         self.create_subscription(RobotPose, peer_topic, self._on_peer_pose, 10)
         self.create_subscription(RobotState, "state", self._on_state, 10)
@@ -40,14 +44,17 @@ class SafetyGateNode(Node):
         # ros2 topic pub --once --qos-durability transient_local estop std_msgs/msg/Bool "{data: true}"
         self.create_subscription(Bool, "estop", self._on_estop, ZONE_OCCUPANT_QOS)
         self._pub = self.create_publisher(Twist, "cmd_vel", 10)
+        if not self.gate.params.require_line:
+            self.get_logger().warning("require_line is false: a silent line sensor will NOT stop the robot")
         self.create_timer(1.0 / rate_hz, self._tick)
 
     def _on_cmd(self, msg: Twist):
         self._cmd = (msg.linear.x, msg.linear.y, msg.angular.z)
         self._cmd_time = now_sec(self)
 
-    def _on_line(self, msg: Bool):
-        self._line_front = msg.data
+    def _on_line(self, msg: LineSensors):
+        self._line_front = line_front_from_sensors(msg)
+        self._line_time = now_sec(self)
 
     def _on_pose(self, msg: RobotPose):
         self._pose = pose_from_msg(msg)
@@ -68,12 +75,14 @@ class SafetyGateNode(Node):
 
     def _tick(self):
         now = now_sec(self)
+        params = self.gate.params
         fresh_cmd = self._cmd_time is not None and now - self._cmd_time <= self._cmd_timeout
         heartbeat_age = None if self._heartbeat_time is None else now - self._heartbeat_time
         cmd, reason = self.gate.filter(
             SafetyInput(
                 cmd=self._cmd if fresh_cmd else (0.0, 0.0, 0.0),
                 line_front=self._line_front,
+                line_fresh=line_is_fresh(now, self._line_time, params.line_timeout_s, params.require_line),
                 own_pose=self._pose,
                 peer_pose=self._peer_pose,
                 now=now,

@@ -1,0 +1,65 @@
+# Vision parameters: HSV ranges per colour and camera geometry.
+#
+# Ranges: OpenCV uses H 0–179, S and V 0–255. Each group of 6 numbers is one range
+# [h_min, s_min, v_min, h_max, s_max, v_max]; a colour can have several ranges in a row
+# (red uses two because the hue wraps around).
+#
+# TODO (role 2): green, blue, orange and purple are still calibrated on the SIMULATION (Webots).
+# Recalibrate them with the real cubes/line and the lab lighting (tools/hsv_tuner.py).
+
+/**/cube_detector:
+  ros__parameters:
+    color_names: [yellow]
+    hsv:
+      red:    [0, 110, 80, 8, 255, 255, 165, 110, 80, 179, 255, 255]
+      orange: [8, 120, 100, 18, 255, 255]
+      yellow: [20, 80, 100, 36, 255, 255]
+      green:  [45, 80, 50, 92, 255, 255]
+      blue:   [103, 120, 70, 128, 255, 255]
+      purple: [145, 60, 40, 171, 255, 255]
+
+    # Camera geometry calibrated on the real robot (the bottom row v=479 is at ~16.5 cm,
+    # right where the scoop's blind spot starts).
+    camera:
+      hfov_rad: 0.94
+      height_m: 0.10
+      tilt_rad: 0.20
+
+    filter:
+      min_area_px: 80
+      cube_size_m: 0.030
+      min_size_ratio: 0.50       # seen width & height / expected 3x3 cm cube size at that distance
+      max_size_ratio: 2.10
+      ignore_touching_bottom: true   # the scoop shows at the bottom edge of the image
+      ignore_touching_sides: true    # cut by an edge: unknown size (a corner of the area is not a cube)
+      max_distance_m: 1.6
+
+    # Delivery area (vision/zone.py): blue + green paper in a gap of the black line,
+    # flanked by a green (left) and a red (right) upright traffic-light landmark.
+    zone:
+      landmark_colors: [green, red]      # [left, right] seen from the arena
+      floor_colors: [blue, green]
+      landmark_min_area_px: 200
+      landmark_min_height_ratio: 1.2     # upright: taller than wide
+      floor_min_area_px: 1500            # TODO measure on the track
+      floor_min_flatness: 1.5            # paper on the floor looks wider than tall
+      ignore_margin_px: 80               # cubes this near the landmarks' bases are delivered
+
+    publish_debug_image: true
+
+/**/web_viewer:
+  ros__parameters:
+    port: 8080
+    max_fps_hz: 15.0
+    jpeg_quality: 75
+    color_names: [red, orange, yellow, green, blue, purple]
+    # manual control (WASD) limits at 100 % speed; the robot's maximum is ~0.24 m/s
+    teleop_max_linear_m_s: 0.15
+    teleop_max_angular_rad_s: 1.0
+
+/**/camera_node:
+  ros__parameters:
+    device: "0"        # /dev/video0, or a GStreamer pipeline
+    width_px: 640
+    height_px: 480
+    fps_hz: 15.0

@@ -2,18 +2,19 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>mobile_base</name>
-  <version>0.1.0</version>
-  <description>Shared behavior, safety, vision and hardware nodes for the Phineas and Ferb collector robots.</description>
-  <maintainer email="team@example.com">UCAB Robotica team</maintainer>
+  <version>0.0.0</version>
+  <description>Collector mecanum base: motors, sensors, scoop and behaviour.</description>
+  <maintainer email="TODO@ucab.edu.ve">TODO</maintainer>
   <license>MIT</license>
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>recolector_interfaces</exec_depend>
   <exec_depend>multirobot_interfaces</exec_depend>
-  <exec_depend>python3-numpy</exec_depend>
-  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>recolector_common</exec_depend>
+  <exec_depend>vision</exec_depend>
 
   <test_depend>python3-pytest</test_depend>
 

@@ -1,13 +1,29 @@
+# colcon
 build/
 install/
 log/
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
-~$*
-# Webots per-user GUI layout
-*.wbproj
-.atl/
-# Webots world thumbnails
-src/multirobot_sim/worlds/.*.jpg
+.venv/
+
+# Webots
+simulation/webots/**/.*.wbproj
+simulation/webots/**/*.wbt~
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local data: calibration photos, rosbags, credentials
+data/
+*.db3
+*.mcap
+.env

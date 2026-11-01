@@ -1,0 +1,157 @@
+# Collector parameters (pins, speeds, thresholds).
+# Keys are /**/<node> so the parameters apply with and without a namespace (/ferb/...).
+# A bare node name does NOT match a node launched with namespace=robot.
+# Values marked TODO measure must be confirmed on the robot (docs/hardware.md).
+
+/**/behavior_fsm:
+  ros__parameters:
+    enabled: true
+    # colours the robot looks for (changed at runtime from web_viewer)
+    # only yellow cubes (task of 2026-10-29); must also be in cube_detector's color_names
+    target_colors: [yellow]
+    # stops when the cube is this far from the camera. With the PROTO geometry,
+    # 0.17 m leaves the cube about 5 cm in front of the scoop tip. TODO measure.
+    stop_distance_m: 0.17
+    resume_margin_m: 0.04
+    slow_down_distance_m: 0.45
+    max_forward_m_s: 0.12        # the robot's maximum is ~0.24 m/s
+    min_forward_m_s: 0.03
+    turn_gain: 1.5               # rad/s per rad of angle error
+    max_turn_rad_s: 0.8
+    align_tolerance_rad: 0.35    # with more error, turn without moving forward
+    search_turn_rad_s: 0.5
+    lost_timeout_s: 1.0
+    control_rate_hz: 20.0
+    cubes_timeout_s: 1.0         # without recent detections, stay still
+    teleop_timeout_s: 0.3        # without recent WASD, automatic mode resumes
+    sensor_timeout_s: 0.5        # line / scoop / zone-turn readings older than this are unknown
+    # --- catch (collector.py) ---
+    catch_align_tolerance_rad: 0.2   # the scoop is one cube wide
+    catch_push_s: 0.65           # blind push into the scoop (teleop_web: scoop_push_s). TODO measure
+    catch_speed_m_s: 0.08
+    confirm_timeout_s: 1.0       # wait for the scoop sensors after the push
+    require_has_cube: false      # true once the FC-51 is wired
+    confirm_color: false         # true once the TCS34725 is calibrated
+    # --- delivery area (zone/seen from cube_detector) ---
+    zone_request_margin_m: 0.45  # ask for the turn this far before arriving
+    zone_wait_margin_m: 0.30     # without the turn, wait this far before arriving (>30 cm rule)
+    floor_stop_distance_m: 0.19  # area paper in view: arrived at its near edge (~blind spot)
+    zone_arrive_v_px: 445        # ... or when its near edge reaches this image row
+    gate_stop_distance_m: 0.42   # only landmarks in view: arrived this far from them (teleop_web)
+    require_zone_grant: true     # false without Perry's zone_arbiter (simulation)
+    deliver_push_s: 1.4          # blind push into the area. TODO measure
+    deliver_speed_m_s: 0.08
+    release_backup_s: 1.6
+    release_turn_s: 2.0
+    backup_speed_m_s: 0.08
+    # --- black line ---
+    line_backup_s: 0.5           # keep backing up this long after the sensor sees white
+    line_backup_max_s: 1.5
+    line_turn_s: 1.2
+    escape_turn_rad_s: 0.6
+    line_stuck_escapes: 4        # more escapes than this inside the window: stop (sensor stuck on black)
+    line_stuck_window_s: 30.0
+    line_stuck_clear_s: 1.0      # resume after this long reading white without a break
+    # --- missed catches (copied from core/behavior.py capture_fails / skip_time) ---
+    capture_fails: 2             # misses inside the window: ignore that colour for skip_time_s
+    capture_fail_window_s: 20.0
+    skip_time_s: 3.0
+
+/**/obstacle_guard:
+  ros__parameters:
+    slow_distance_m: 0.30
+    stop_distance_m: 0.15
+    slow_factor: 0.5
+    range_timeout_s: 0.5
+    cmd_timeout_s: 0.5
+    rate_hz: 20.0
+    require_heartbeat: true
+    require_pose: false
+    peer_pose_topic: /phineas/pose
+    pose_max_age_s: 0.5
+    front_cone_deg: 60.0
+    peer_slow_distance_m: 0.60
+    peer_stop_distance_m: 0.40
+    avoid_turn_rad_s: 0.6
+    deadlock_time_s: 3.0
+    escape_turn_rad_s: 0.8
+
+/**/fleet_link:
+  ros__parameters:
+    robot_name: ferb
+    heartbeat_timeout_s: 2.0
+    state_rate_hz: 2.0
+    renew_period_s: 20.0
+
+/**/motor_driver:
+  ros__parameters:
+    # "fusion_hat" (SunFounder Fusion HAT+, I2C 0x17), "gpio" (Cokoino HAT) or "fake".
+    driver: fusion_hat
+    # Fusion HAT+ PWM channels (a, b): same mapping as tools/teleop_web.yaml. TODO confirm.
+    fl_channels: [11, 10]
+    fr_channels: [9, 8]
+    rl_channels: [4, 5]
+    rr_channels: [6, 7]
+    # Cokoino HAT GPIO (BCM) IN1 / IN2 and nSLEEP (docs/hardware.md).
+    fl_pins: [24, 25]
+    fr_pins: [26, 16]
+    rl_pins: [17, 27]
+    rr_pins: [22, 23]
+    nsleep_pins: [12, 13]
+    # true if that wheel spins backwards (inverted here, not in the wiring)
+    fl_inverted: true
+    fr_inverted: false
+    rl_inverted: true
+    rr_inverted: false
+    pwm_frequency_hz: 200
+    max_duty_ratio: 0.9          # start low with the wheels off the ground
+    cmd_timeout_s: 0.5           # brakes without cmd_vel for this long
+    rate_hz: 20.0
+    wheel_radius_m: 0.0325       # 65 mm wheels
+    half_wheelbase_m: 0.0605     # PROTO value. TODO measure
+    half_track_m: 0.0655         # PROTO value. TODO measure
+    max_wheel_speed_m_s: 0.24    # rim speed at full duty (robot max ~0.24 m/s). TODO measure
+
+/**/line_sensors:
+  ros__parameters:
+    pin: 5                       # GPIO5 (pin 29), TCRT5000 DO at 3.3 V; -1 = not wired
+    black_value: 1               # DO over the black tape
+    rate_hz: 50.0
+
+/**/ultrasonic:
+  ros__parameters:
+    trigger_pin: -1              # TODO measure (-1 = not wired: forward motion blocked)
+    echo_pin: -1                 # TODO measure (5 V echo -> divider to 3.3 V)
+    rate_hz: 15.0
+    min_range_m: 0.02
+    max_range_m: 2.0
+    field_of_view_rad: 0.26
+    queue_len: 3
+    fake: false                  # true on the laptop: always "nothing ahead"
+
+/**/scoop_driver:
+  ros__parameters:
+    servo_pin: -1                # TODO measure (-1 = fixed scoop)
+    down_angle_deg: 0.0          # TODO measure
+    up_angle_deg: 40.0           # TODO measure
+    min_pulse_width_s: 0.0005    # SG90 datasheet. TODO measure
+    max_pulse_width_s: 0.0024
+    max_angle_deg: 180.0
+    presence_pin: -1             # FC-51 OUT. TODO measure (-1 = no scoop/has_cube)
+    presence_active_value: 1     # docs/hardware.md: 1 = cube present
+    rate_hz: 20.0
+
+/**/color_sensor:
+  ros__parameters:
+    i2c_bus: 1
+    integration_time_ms: 24.0
+    gain: 4                      # 1, 4, 16 or 60
+    rate_hz: 10.0
+    fake: false
+    # Calibration (scoop_color.py). TODO measure with the real cubes and white paper.
+    color_names: [red, orange, yellow, green, blue, purple]
+    reference_hues_deg: [0.0, 25.0, 55.0, 120.0, 220.0, 290.0]
+    white_balance: [1.0, 1.0, 1.0]
+    min_clear: 200
+    min_saturation: 0.15
+    max_hue_error_deg: 30.0

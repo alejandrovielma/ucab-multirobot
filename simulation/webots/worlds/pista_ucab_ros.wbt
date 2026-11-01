@@ -1,0 +1,217 @@
+#VRML_SIM R2025a utf8
+# ROS 2 variant: Ferb (our robot) uses the <extern> controller (driven by the webots_bridge node)
+# and Phineas, the other collector, stays still. Generated from pista_ucab.wbt by tools/generate_ros_world.py.
+# UCAB Robotics field: white board with a black tape border and a delivery square.
+# Measurements estimated from the (rectified) photos: board ~1.93 x 1.22 m, 19 mm tape,
+# delivery square ~24 x 24 cm, 14 cubes of ~2.5 cm in 6 colours. Measure the real field and adjust.
+
+EXTERNPROTO "../protos/RecolectorUCAB.proto"
+EXTERNPROTO "../protos/CuboMadera.proto"
+
+WorldInfo {
+  info [
+    "UCAB field - collectors Phineas and Ferb"
+    "Phineas: red, orange, yellow. Ferb: green, blue, purple (plan proposal)."
+  ]
+  title "UCAB field"
+  basicTimeStep 16
+  contactProperties [
+    ContactProperties {
+      material1 "InteriorWheelMat"
+      coulombFriction [ 0, 2, 0 ]
+      frictionRotation -0.785398 0
+      bounce 0
+      forceDependentSlip [ 10, 0 ]
+    }
+    ContactProperties {
+      material1 "ExteriorWheelMat"
+      coulombFriction [ 0, 2, 0 ]
+      frictionRotation 0.785398 0
+      bounce 0
+      forceDependentSlip [ 10, 0 ]
+    }
+  ]
+}
+Viewpoint {
+  orientation -0.3236 0.3236 0.8891 1.688
+  position 0 -1.75 1.45
+  follow ""
+}
+Background {
+  skyColor [ 0.86 0.84 0.82 ]
+  luminosity 0.8
+}
+DirectionalLight {
+  direction 0.2 0.3 -1
+  intensity 1.6
+  castShadows TRUE
+}
+PointLight {
+  location 0 0 2.2
+  intensity 1.2
+  radius 6
+}
+DEF PISO Solid {
+  translation 0 0 -0.778
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.55 0.55 0.53 roughness 1 metalness 0 }
+      geometry Plane { size 8 8 }
+    }
+  ]
+  name "piso"
+  boundingObject Plane { size 8 8 }
+}
+DEF MESA Solid {
+  translation 0 0 -0.398
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.35 0.22 0.14 roughness 0.8 metalness 0 }
+      geometry Box { size 1.8 1.1 0.76 }
+    }
+  ]
+  name "mesa"
+  boundingObject Box { size 1.8 1.1 0.76 }
+}
+DEF PISTA Solid {
+  translation 0 0 -0.009
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.93 0.94 0.95 roughness 0.9 metalness 0 }
+      geometry Box { size 1.93 1.22 0.018 }
+    }
+    Pose {
+      translation 0 0 0.0091
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColorMap ImageTexture { url [ "textures/pista_ucab.png" ] }
+            roughness 0.9
+            metalness 0
+          }
+          geometry Plane { size 1.93 1.22 }
+        }
+      ]
+    }
+  ]
+  name "pista"
+  model "pista"
+  boundingObject Box { size 1.93 1.22 0.018 }
+}
+DEF MARCADOR_CUADRADO Solid {
+  translation -0.129 -0.5 0
+  children [
+    Pose {
+      translation 0 0 0.003
+      children [ Shape { appearance PBRAppearance { baseColor 0.2 0.2 0.2 roughness 1 metalness 0 } geometry Box { size 0.12 0.03 0.006 } } ]
+    }
+    Pose {
+      translation 0 0.0 0.065
+      rotation 0.577 0.577 0.577 2.094
+      children [ Shape { appearance PBRAppearance { baseColorMap ImageTexture { url [ "textures/aruco_cuadrado_id10.png" ] filtering 0 } roughness 1 metalness 0 } geometry Plane { size 0.1 0.1 } } ]
+    }
+  ]
+  name "marcador_cuadrado"
+  boundingObject Pose { translation 0 0 0.04 children [ Box { size 0.12 0.03 0.08 } ] }
+}
+DEF PHINEAS RecolectorUCAB {
+  translation -0.45 0.0 0
+  name "Phineas"
+  controller "<none>"
+  controllerArgs [ "--colors=red,orange,yellow" ]
+  marcadorUrl [ "textures/aruco_phineas_id1.png" ]
+}
+DEF FERB RecolectorUCAB {
+  translation 0.5 -0.25 0
+  rotation 0 0 1 3.14159
+  name "Ferb"
+  controller "<extern>"
+  controllerArgs [ "--colors=green,blue,purple" ]
+  marcadorUrl [ "textures/aruco_ferb_id2.png" ]
+  colorChasis 0.1 0.12 0.25
+}
+CuboMadera {
+  translation -0.476 0.294 0.0125
+  rotation 0 0 1 1.088
+  name "cubo_verde_1"
+  color 0.08 0.55 0.30
+}
+CuboMadera {
+  translation 0.081 -0.112 0.0125
+  rotation 0 0 1 0.737
+  name "cubo_azul_1"
+  color 0.10 0.25 0.70
+}
+CuboMadera {
+  translation 0.247 -0.188 0.0125
+  rotation 0 0 1 0.788
+  name "cubo_morado_1"
+  color 0.40 0.10 0.30
+}
+CuboMadera {
+  translation 0.087 0.129 0.0125
+  rotation 0 0 1 0.486
+  name "cubo_naranja_1"
+  color 0.95 0.45 0.08
+}
+CuboMadera {
+  translation 0.003 0.225 0.0125
+  rotation 0 0 1 1.189
+  name "cubo_naranja_2"
+  color 0.95 0.45 0.08
+}
+CuboMadera {
+  translation 0.495 0.234 0.0125
+  rotation 0 0 1 0.389
+  name "cubo_amarillo_1"
+  color 0.95 0.80 0.10
+}
+CuboMadera {
+  translation 0.257 -0.026 0.0125
+  rotation 0 0 1 0.429
+  name "cubo_verde_2"
+  color 0.08 0.55 0.30
+}
+CuboMadera {
+  translation 0.385 0.15 0.0125
+  rotation 0 0 1 1.513
+  name "cubo_rojo_1"
+  color 0.78 0.12 0.10
+}
+CuboMadera {
+  translation -0.675 0.249 0.0125
+  rotation 0 0 1 0.488
+  name "cubo_morado_2"
+  color 0.40 0.10 0.30
+}
+CuboMadera {
+  translation -0.584 -0.295 0.0125
+  rotation 0 0 1 1.358
+  name "cubo_rojo_2"
+  color 0.78 0.12 0.10
+}
+CuboMadera {
+  translation -0.038 0.101 0.0125
+  rotation 0 0 1 0.274
+  name "cubo_amarillo_2"
+  color 0.95 0.80 0.10
+}
+CuboMadera {
+  translation 0.221 0.151 0.0125
+  rotation 0 0 1 0.19
+  name "cubo_naranja_3"
+  color 0.95 0.45 0.08
+}
+CuboMadera {
+  translation -0.097 -0.032 0.0125
+  rotation 0 0 1 0.556
+  name "cubo_azul_2"
+  color 0.10 0.25 0.70
+}
+CuboMadera {
+  translation 0.354 0.296 0.0125
+  rotation 0 0 1 0.018
+  name "cubo_rojo_3"
+  color 0.78 0.12 0.10
+}
+

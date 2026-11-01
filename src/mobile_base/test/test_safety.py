@@ -3,7 +3,7 @@ import math
 import pytest
 
 from mobile_base.core.delivery import DeliveryZone
-from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams
+from mobile_base.core.safety import Pose2D, SafetyGate, SafetyInput, SafetyParams, line_is_fresh
 
 FORWARD = (0.2, 0.0, 0.0)
 
@@ -513,3 +513,44 @@ def test_a_long_gap_between_ticks_does_not_spin_the_line_memory_by_many_radians(
     gate.filter(make_input(now=20.0, cmd=(0.0, 0.0, 0.0), own_pose=None))  # motors were stopped for 20 s
     # 0.4 rad/s for the clamped 0.5 s, not for 20 s (8 rad)
     assert abs(math.atan2(gate._line_dir[1], gate._line_dir[0])) == pytest.approx(0.2)
+
+
+# ---- line sensor liveness: a silent `line` topic must not read as "no tape"
+
+
+def test_stale_line_blocks_forward_motion_with_its_own_reason():
+    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(line_fresh=False))
+    assert cmd == (0.0, 0.0, 0.0)
+    assert "line_stale" in reason
+
+
+def test_stale_line_still_allows_spinning_in_place():
+    cmd, _ = SafetyGate(SafetyParams()).filter(make_input(cmd=(0.0, 0.0, 0.5), line_fresh=False))
+    assert cmd[2] == pytest.approx(0.5)
+
+
+def test_fresh_line_is_the_default_and_changes_nothing():
+    cmd, reason = SafetyGate(SafetyParams()).filter(make_input(line_fresh=True))
+    assert cmd == pytest.approx(FORWARD)
+    assert reason == "ok"
+
+
+def test_real_tape_keeps_the_line_ahead_reason_when_the_line_is_fresh():
+    _, reason = SafetyGate(SafetyParams()).filter(make_input(line_front=True))
+    assert "line ahead" in reason and "line_stale" not in reason
+
+
+@pytest.mark.parametrize(
+    "now, last, timeout, required, fresh",
+    [
+        (10.0, None, 0.5, True, False),  # before the first message
+        (10.0, 9.8, 0.5, True, True),
+        (10.5, 10.0, 0.5, True, True),  # exactly at the timeout
+        (10.51, 10.0, 0.5, True, False),
+        (9.0, 10.0, 0.5, True, False),  # clock went backwards: fail closed
+        (10.0, None, 0.5, False, True),  # opted out
+        (99.0, 1.0, 0.5, False, True),
+    ],
+)
+def test_line_is_fresh(now, last, timeout, required, fresh):
+    assert line_is_fresh(now, last, timeout, required) is fresh

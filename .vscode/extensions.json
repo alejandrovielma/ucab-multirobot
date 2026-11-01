@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "charliermarsh.ruff",
+    "ms-iot.vscode-ros",
+    "redhat.vscode-yaml",
+    "ms-vscode-remote.remote-wsl",
+    "ms-vscode-remote.remote-ssh"
+  ]
+}

@@ -1,85 +1,76 @@
-import math
+"""
+Tests: mecanum kinematics (forward, strafe, turn).
+"""
+
 import pytest
 
-from mobile_base.core.kinematics import (
+from mobile_base.kinematics import (
     MecanumGeometry,
-    duty_cap,
-    normalize,
-    to_duty,
+    scale_to_limit,
+    wheel_ratios,
     wheel_speeds,
 )
+from mobile_base.motor_hardware import (
+    FakeMotors,
+    MotorHardwareParams,
+    to_duty,
+)
 
-GEOM = MecanumGeometry()
-
-
-def test_default_geometry_matches_webots_model():
-    assert GEOM.wheel_radius == pytest.approx(0.0325)
-    assert GEOM.lx == pytest.approx(0.0605)
-    assert GEOM.ly == pytest.approx(0.0655)
-
-
-def test_pure_forward_gives_equal_speeds():
-    fl, fr, rl, rr = wheel_speeds(0.1, 0.0, 0.0, GEOM)
-    assert fl == pytest.approx(0.1 / GEOM.wheel_radius)
-    assert fl == pytest.approx(fr) == pytest.approx(rl) == pytest.approx(rr)
+GEO = MecanumGeometry(
+    wheel_radius_m=0.0325, half_wheelbase_m=0.0605, half_track_m=0.0655
+)
 
 
-def test_pure_left_strafe_pattern():
-    fl, fr, rl, rr = wheel_speeds(0.0, 0.1, 0.0, GEOM)
-    assert fl < 0 and rr < 0
-    assert fr > 0 and rl > 0
-    assert abs(fl) == pytest.approx(abs(fr))
+def test_forward_all_wheels_same():
+    s = wheel_speeds(0.1, 0.0, 0.0, GEO)
+    assert all(v == pytest.approx(0.1 / 0.0325) for v in s.values())
 
 
-def test_pure_ccw_rotation_left_back_right_forward():
-    fl, fr, rl, rr = wheel_speeds(0.0, 0.0, 1.0, GEOM)
-    assert fl < 0 and rl < 0
-    assert fr > 0 and rr > 0
-    assert fr == pytest.approx((GEOM.lx + GEOM.ly) / GEOM.wheel_radius)
+def test_strafe_left_diagonal_pairs():
+    s = wheel_speeds(0.0, 0.1, 0.0, GEO)
+    assert s["fl"] < 0 and s["rr"] < 0
+    assert s["fr"] > 0 and s["rl"] > 0
+    assert s["fl"] == pytest.approx(-s["fr"])
 
 
-def test_normalize_keeps_speeds_under_limit_untouched():
-    assert normalize((1.0, -2.0, 3.0, 4.0), 10.0) == (1.0, -2.0, 3.0, 4.0)
+def test_turn_left_right_side_forward():
+    s = wheel_speeds(0.0, 0.0, 1.0, GEO)
+    assert s["fr"] > 0 and s["rr"] > 0
+    assert s["fl"] < 0 and s["rl"] < 0
+    assert s["fr"] == pytest.approx((0.0605 + 0.0655) / 0.0325)
 
 
-def test_normalize_preserves_ratios():
-    speeds = (5.0, -10.0, 20.0, 2.0)
-    scaled = normalize(speeds, 10.0)
-    assert max(abs(s) for s in scaled) == pytest.approx(10.0)
-    for original, new in zip(speeds, scaled):
-        assert new / original == pytest.approx(0.5)
+def test_scale_keeps_ratios():
+    s = scale_to_limit({"fl": 10.0, "fr": -5.0, "rl": 2.0, "rr": 0.0}, 5.0)
+    assert s == pytest.approx({"fl": 5.0, "fr": -2.5, "rl": 1.0, "rr": 0.0})
 
 
-def test_duty_cap():
-    assert duty_cap(8.4) == pytest.approx(6.0 / 8.4)
-    assert duty_cap(6.0) == pytest.approx(1.0)
-    assert duty_cap(9.0, v_motor_max=3.0) == pytest.approx(1.0 / 3.0)
-    for battery in (0.0, 5.0, 12.0, math.nan, math.inf):
-        with pytest.raises(ValueError):
-            duty_cap(battery)
-    for motor in (0.0, -6.0, math.nan):
-        with pytest.raises(ValueError):
-            duty_cap(8.4, v_motor_max=motor)
+def test_scale_does_nothing_below_limit():
+    s = {"fl": 1.0, "fr": -1.0, "rl": 0.5, "rr": 0.0}
+    assert scale_to_limit(s, 5.0) == s
 
 
-@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
-def test_non_finite_wheel_speed_gives_zero_duty_not_the_cap(bad):
-    assert to_duty((bad, 5.0, -bad, 0.0), 10.5, 0.7) == pytest.approx((0.0, 0.7 * 5.0 / 10.5, 0.0, 0.0))
-    assert normalize((bad, 5.0, 0.0, 0.0), 10.5) == (0.0, 5.0, 0.0, 0.0)
+def test_wheel_ratios_are_speed_over_max():
+    r = wheel_ratios(0.1, 0.0, 0.0, GEO, max_wheel_rad_s=10.0)
+    assert all(v == pytest.approx(0.1 / 0.0325 / 10.0) for v in r.values())
 
 
-def test_to_duty_maps_and_clamps():
-    duties = to_duty((10.5, -5.25, 0.0, 30.0), max_wheel_speed=10.5, duty_cap=0.7)
-    assert duties[0] == pytest.approx(0.7)
-    assert duties[1] == pytest.approx(-0.35)
-    assert duties[2] == pytest.approx(0.0)
-    assert duties[3] == pytest.approx(0.7)
+def test_wheel_ratios_saturate_together():
+    r = wheel_ratios(1.0, 0.5, 0.0, GEO, max_wheel_rad_s=1.0)
+    assert max(abs(v) for v in r.values()) == pytest.approx(1.0)
+    assert r["fl"] == pytest.approx(r["rr"])
 
 
-def test_hbridge_pwm_fast_decay_mapping():
-    from mobile_base.core.kinematics import hbridge_pwm
+def test_duty_is_capped_and_inverted():
+    assert to_duty(1.0, inverted=False, max_duty_ratio=0.9) == 0.9
+    assert to_duty(0.5, inverted=True, max_duty_ratio=0.9) == -0.45
+    assert to_duty(-3.0, inverted=False, max_duty_ratio=0.9) == -0.9
 
-    assert hbridge_pwm(0.5) == pytest.approx((50.0, 0.0))  # forward: PWM on IN1, IN2 low
-    assert hbridge_pwm(-0.25) == pytest.approx((0.0, 25.0))  # reverse: IN1 low, PWM on IN2
-    assert hbridge_pwm(0.0) == (0.0, 0.0)
-    assert hbridge_pwm(2.0) == pytest.approx((100.0, 0.0))
+
+def test_fake_motors_apply_inversion_per_wheel():
+    motors = FakeMotors(MotorHardwareParams(max_duty_ratio=1.0))
+    motors.set({"fl": 0.5, "fr": 0.5, "rl": 0.5, "rr": 0.5})
+    # fl and rl are inverted by default.
+    assert motors.duties == {"fl": -0.5, "fr": 0.5, "rl": -0.5, "rr": 0.5}
+    motors.stop()
+    assert all(d == 0.0 for d in motors.duties.values())
