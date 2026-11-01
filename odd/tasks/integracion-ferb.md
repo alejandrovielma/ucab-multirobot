@@ -18,3 +18,6 @@ tools/lab tests need termios (Linux); tools/sim needs rclpy. Run scripts/test_in
 
 ## Not verified (T4/T5)
 rclpy/colcon missing on Windows: nodes only py_compile'd; Scene.msg not built. recolector_driver.py (Webots) now publishes LineSensors on `line` (untested: needs Webots).
+
+## CI lint (ruff)
+Ferb's CI runs `ruff check` and `ruff format --check` on src/tools/scripts (0 errors on their base; 2977 errors and 79 files to reformat once our code was imported). Our legacy code is listed in `extend-exclude` in pyproject.toml with a comment; clean it module by module and delete its line. Files of Ferb that we modified (collector.py, behavior_fsm.py, setup.py, test_collector.py) comply with ruff. Check: `ruff check src tools scripts simulation/webots/controllers` and `ruff format --check ...` both pass.

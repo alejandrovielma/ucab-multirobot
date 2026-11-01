@@ -65,7 +65,7 @@ DEFAULT_LINE_BACKUP_MAX_S = 1.5
 DEFAULT_LINE_TURN_S = 1.2
 DEFAULT_ESCAPE_TURN_RAD_S = 0.6
 # Missed-catch memory (core/behavior.py: capture_fails 3 -> 2 here because
-# Ferb's blind push is slower to repeat, capture_fail_window 20 s, skip_time 3 s).
+# Ferb's blind push is slower to repeat; window 20 s, skip 3 s).
 DEFAULT_CAPTURE_FAILS = 2
 DEFAULT_CAPTURE_FAIL_WINDOW_S = 20.0
 DEFAULT_SKIP_TIME_S = 3.0
@@ -193,7 +193,7 @@ class CollectorFsm:
         self._search_dir = SEARCH_DIR_LEFT
         # Missed-catch memory: times of recent misses, and colour -> expiry.
         # shortcut: a cube has no identity or pose, so the whole colour is
-        # ignored for skip_time_s; upgrade to bearing/distance once a pose exists.
+        # ignored for skip_time_s; upgrade to bearing once a pose exists.
         self._miss_times: list[float] = []
         self._ignored_until: dict[str, float] = {}
         # Stuck-line watchdog: escape start times; set while the robot is

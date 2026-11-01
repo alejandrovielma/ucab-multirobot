@@ -152,7 +152,7 @@ def test_paused_keeps_the_cube_and_resumes_carrying():
     assert f.state == State.CARRY
 
 
-# --- rebound counter + ignore-list ---------------------------------------------
+# --- rebound counter + ignore-list ---------------------------------
 def miss(f, now):
     """
     One missed catch (FC-51 required, scoop empty); returns the time after it.
@@ -198,9 +198,11 @@ def test_a_verified_catch_resets_the_miss_counter():
     assert f.state == State.CATCH
 
 
-# --- stuck-line watchdog ---------------------------------------------------------
+# --- stuck-line watchdog -------------------------------------------
 def test_stuck_line_stops_the_robot_then_recovers_on_white():
-    f = fsm(line_stuck_escapes=2, line_stuck_window_s=30.0, line_stuck_clear_s=1.0)
+    f = fsm(
+        line_stuck_escapes=2, line_stuck_window_s=30.0, line_stuck_clear_s=1.0
+    )
     black = Inputs(line_black=True)
     now = 0.0
     for _ in range(2):  # two escapes are allowed
