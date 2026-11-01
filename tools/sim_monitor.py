@@ -25,8 +25,11 @@ from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 
-from multirobot_interfaces.msg import CubeDetectionArray, RobotPose, RobotState
+from mobile_base.core.adapters import cube_from_ferb, line_front_from_sensors
+from multirobot_interfaces.msg import RobotPose, RobotState
+from recolector_interfaces.msg import CubeDetectionArray, LineSensors, Scene
 
+IMAGE_W, IMAGE_H = 640, 480  # camera size assumed to convert pixels to normalized coordinates
 ROBOTS = {"phineas": {"red", "orange", "yellow"}, "ferb": {"green", "blue", "purple"}}
 
 
@@ -47,8 +50,9 @@ class SimMonitor(Node):
             self.create_subscription(RobotState, f"/{robot}/state", self._state_cb(robot), 10)
             self.create_subscription(RobotPose, f"/{robot}/pose", self._setter(robot, "pose", lambda m: (m.x, m.y, m.theta)), 10)
             self.create_subscription(Twist, f"/{robot}/cmd_vel", self._setter(robot, "cmd", lambda m: (m.linear.x, m.linear.y, m.angular.z)), 10)
-            self.create_subscription(Bool, f"/{robot}/line_front", self._setter(robot, "line", lambda m: m.data), 10)
+            self.create_subscription(LineSensors, f"/{robot}/line", self._setter(robot, "line", line_front_from_sensors), 10)
             self.create_subscription(CubeDetectionArray, f"/{robot}/cubes", self._cubes_cb(robot), 10)
+            self.create_subscription(Scene, f"/{robot}/cubes/scene", self._setter(robot, "scoop", lambda m: m.scoop_color), 10)
         if on_delivery:
             frames_robots = list(ROBOTS)
             self.last_frame = {robot: 0.0 for robot in ROBOTS}
@@ -78,10 +82,9 @@ class SimMonitor(Node):
 
     def _cubes_cb(self, robot):
         def cb(msg: CubeDetectionArray):
-            mine = [c for c in msg.cubes if c.color in ROBOTS[robot]]
+            mine = [cube_from_ferb(c, IMAGE_W, IMAGE_H) for c in msg.cubes if c.color in ROBOTS[robot]]
             best = max(mine, key=lambda c: c.area_px, default=None)
             self.data[robot]["cube"] = None if best is None else (best.color, best.cx_norm, best.cy_norm)
-            self.data[robot]["scoop"] = msg.scoop_color
         return cb
 
     def _image_cb(self, robot):

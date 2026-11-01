@@ -4,9 +4,11 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
+from mobile_base.core.adapters import line_front_from_sensors
 from mobile_base.core.safety import SafetyGate, SafetyInput, SafetyParams
 from mobile_base.nodes.common import ZONE_OCCUPANT_QOS, declare_dataclass, declare_track, now_sec, pose_from_msg, spin_node, twist
 from multirobot_interfaces.msg import RobotPose, RobotState
+from recolector_interfaces.msg import LineSensors
 
 
 class SafetyGateNode(Node):
@@ -31,7 +33,7 @@ class SafetyGateNode(Node):
         self._last_reason = ""
 
         self.create_subscription(Twist, "cmd_vel_nav", self._on_cmd, 10)
-        self.create_subscription(Bool, "line_front", self._on_line, 10)
+        self.create_subscription(LineSensors, "line", self._on_line, 10)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
         self.create_subscription(RobotPose, peer_topic, self._on_peer_pose, 10)
         self.create_subscription(RobotState, "state", self._on_state, 10)
@@ -46,8 +48,8 @@ class SafetyGateNode(Node):
         self._cmd = (msg.linear.x, msg.linear.y, msg.angular.z)
         self._cmd_time = now_sec(self)
 
-    def _on_line(self, msg: Bool):
-        self._line_front = msg.data
+    def _on_line(self, msg: LineSensors):
+        self._line_front = line_front_from_sensors(msg)
 
     def _on_pose(self, msg: RobotPose):
         self._pose = pose_from_msg(msg)
