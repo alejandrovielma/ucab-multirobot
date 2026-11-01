@@ -1,0 +1,382 @@
+#VRML_SIM R2025a utf8
+# Recolector de cubos UCAB (Phineas / Ferb).
+# Chasis LewanSoul / Hiwonder mecanum: 186 x 161 x 91 mm, ruedas de 65 mm, motores TT 1:120 de 3-6 V SIN encoder.
+# Electronica: Raspberry Pi 5 + HAT Cokoino 4WD (DRV8833), bateria 2S 18650.
+# Sensores del plan: camara OV5647 (~54 grados), 4 TCRT5000 abajo, HC-SR04 al frente, FC-51 y TCS34725 en la pala,
+# MPU6050 (acelerometro + giroscopio, sin brujula).
+# Pala de un cubo con hueco en U de 40 mm de ancho y 48 mm de fondo (validada con cubos de 30 mm;
+# los cubos reales ahora son de 2 x 2 cm: revalidar, ver tarea 13 de docs/team-todo.md), fija, con una
+# compuerta con servo (SG90) en la boca de la U que retiene el cubo mientras lo transporta.
+# Todas las medidas que no vienen del fabricante son estimadas: medir y ajustar.
+# template language: javascript
+
+PROTO RecolectorUCAB [
+  field SFVec3f    translation     0 0 0
+  field SFRotation rotation        0 0 1 0
+  field SFString   name            "Phineas"
+  field SFString   controller      "recolector_teleop"
+  field MFString   controllerArgs  []
+  field SFString   window          "<none>"
+  field MFString   marcadorUrl     "textures/aruco_phineas_id1.png"
+  field SFColor    colorChasis     0.15 0.15 0.17
+  field SFFloat    masaCuerpo      0.66      # kg (chasis 0.59 kg + electronica, sin ruedas ni pala)
+  field SFFloat    velMaxMotor     10.5      # rad/s (~100 rpm: TT 1:120 a ~6 V)
+  field SFFloat    torqueMaxMotor  0.15      # N*m (estimado TT 1:120)
+  field MFNode     extensiones     []        # para agregar sensores sin tocar el PROTO
+  field SFFloat    palaBoca        0.040     # m, ancho interior de la U en la boca
+  field SFFloat    palaFondoAncho  0.040     # m, ancho interior de la U junto a la pared del fondo
+  field SFFloat    palaProfundidad 0.048     # m, largo de las paredes laterales de la U
+  field SFBool     compuerta       TRUE      # puerta con servo en la boca de la U
+  # Pala real (2026-10-30): abierta y ancha, tramo central recto y dos alas de igual largo dobladas
+  # palaAngulo hacia adelante (ancho total ~ el del robot). Medidas SUPUESTAS hasta medir la pala real.
+  field SFBool     palaAbierta     FALSE     # TRUE: pala abierta (la real); FALSE: la U con embudo
+  field SFFloat    palaTramo       0.062     # m, largo del tramo central y de cada ala
+  field SFFloat    palaAngulo      0.5236    # rad, alas respecto al tramo central (30 grados)
+]
+{
+  %<
+    const ruedaR = 0.0325;    // radio rueda mecanum 65 mm
+    const ruedaW = 0.03;      // ancho rueda
+    const ejeX = 0.0605;      // mitad de la distancia entre ejes
+    const ejeY = 0.0655;      // mitad de la trocha (161 mm - ancho de rueda)
+    const ruedas = [
+      { n: 'fl', x:  ejeX, y:  ejeY, mat: 'ExteriorWheelMat' },
+      { n: 'fr', x:  ejeX, y: -ejeY, mat: 'InteriorWheelMat' },
+      { n: 'rl', x: -ejeX, y:  ejeY, mat: 'InteriorWheelMat' },
+      { n: 'rr', x: -ejeX, y: -ejeY, mat: 'ExteriorWheelMat' }
+    ];
+    const lineas = [
+      { n: 'fl', x:  0.075, y:  0.035 },
+      { n: 'fr', x:  0.075, y: -0.035 },
+      { n: 'rl', x: -0.075, y:  0.035 },
+      { n: 'rr', x: -0.075, y: -0.035 }
+    ];
+  >%
+  Robot {
+    translation IS translation
+    rotation IS rotation
+    name IS name
+    model "RecolectorUCAB"
+    controller IS controller
+    controllerArgs IS controllerArgs
+    window IS window
+    children [
+      # ---------------- Estructura (solo visual) ----------------
+      DEF PLACA_INFERIOR Pose {
+        translation 0 0 0.045
+        children [
+          Shape {
+            appearance DEF ALUMINIO PBRAppearance { baseColor IS colorChasis roughness 0.5 metalness 0.6 }
+            geometry Box { size 0.17 0.095 0.0025 }
+          }
+        ]
+      }
+      DEF PLACA_SUPERIOR Pose {
+        translation -0.005 0 0.08
+        children [
+          Shape {
+            appearance USE ALUMINIO
+            geometry Box { size 0.15 0.095 0.0025 }
+          }
+        ]
+      }
+      %< for (const sx of [1, -1]) for (const sy of [1, -1]) { >%
+      Pose {
+        translation %<= sx * 0.065 >% %<= sy * 0.04 >% 0.0625
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.75 0.6 0.3 roughness 0.4 metalness 0.8 }
+            geometry Cylinder { height 0.033 radius 0.0025 }
+          }
+        ]
+      }
+      Pose {
+        translation %<= sx * 0.03 >% %<= sy * 0.035 >% 0.033
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.95 0.8 0.15 roughness 0.6 metalness 0 }
+            geometry Box { size 0.064 0.022 0.019 }
+          }
+        ]
+      }
+      %< } >%
+      DEF PORTAPILAS_2S Pose {
+        translation -0.02 0 0.0575
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.05 0.05 0.05 roughness 0.8 metalness 0 }
+            geometry Box { size 0.077 0.042 0.021 }
+          }
+        ]
+      }
+      DEF REGULADOR_5V Pose {
+        translation 0.045 0 0.0525
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.1 0.25 0.6 roughness 0.6 metalness 0 }
+            geometry Box { size 0.026 0.05 0.012 }
+          }
+        ]
+      }
+      DEF PI5_HAT Pose {
+        translation -0.02 0 0.0995
+        children [
+          Shape {
+            appearance PBRAppearance { baseColor 0.1 0.35 0.2 roughness 0.6 metalness 0.1 }
+            geometry Box { size 0.085 0.056 0.035 }
+          }
+        ]
+      }
+      DEF MARCADOR_ARUCO Pose {
+        translation -0.02 0 0.1175
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColorMap ImageTexture { url IS marcadorUrl filtering 0 }
+              roughness 1
+              metalness 0
+            }
+            geometry Plane { size 0.06 0.06 }
+          }
+        ]
+      }
+      DEF SOPORTE_CAMARA Pose {
+        translation 0.07 0 0.095
+        children [
+          Shape {
+            appearance USE ALUMINIO
+            geometry Box { size 0.004 0.03 0.03 }
+          }
+        ]
+      }
+
+      # ---------------- Ruedas mecanum (sin encoder) ----------------
+      %< for (const r of ruedas) { >%
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor %<= r.x >% %<= r.y >% %<= ruedaR >%
+        }
+        device [
+          RotationalMotor {
+            name "motor_%<= r.n >%"
+            maxVelocity IS velMaxMotor
+            maxTorque IS torqueMaxMotor
+          }
+        ]
+        endPoint Solid {
+          translation %<= r.x >% %<= r.y >% %<= ruedaR >%
+          rotation 1 0 0 1.5708
+          name "rueda_%<= r.n >%"
+          contactMaterial "%<= r.mat >%"
+          children [
+            Shape {
+              appearance PBRAppearance { baseColor 0.08 0.08 0.08 roughness 0.9 metalness 0 }
+              geometry DEF CIL_RUEDA Cylinder { height %<= ruedaW >% radius %<= ruedaR >% subdivision 24 }
+            }
+            Pose {
+              translation 0 0 %<= (r.y > 0 ? 1 : -1) * 0.0155 >%
+              children [
+                Shape {
+                  appearance PBRAppearance { baseColor 0.7 0.7 0.72 roughness 0.4 metalness 0.7 }
+                  geometry Cylinder { height 0.002 radius 0.022 }
+                }
+              ]
+            }
+          ]
+          boundingObject USE CIL_RUEDA
+          physics Physics { density -1 mass 0.05 }
+        }
+      }
+      %< } >%
+
+      # ---------------- Pala de un cubo (servo SG90) ----------------
+      # angulo 0 = pala abajo (empuja); negativo = sube (unos -0.7 rad, ~40 grados, libera el cubo)
+      HingeJoint {
+        jointParameters HingeJointParameters {
+          axis 0 1 0
+          anchor 0.09 0 0.055
+          minStop -1.0
+          maxStop 0.02
+        }
+        device [
+          RotationalMotor {
+            name "servo_pala"
+            maxVelocity 10.5
+            maxTorque 0.18
+            minPosition -1.0
+            maxPosition 0.0
+            controlPID 10 0 0
+          }
+        ]
+        endPoint Solid {
+          translation 0.09 0 0.055
+          name "pala"
+          children [
+            %<
+              // U de la pala en el marco de la pala (x hacia adelante): pared del fondo en x = 0.038,
+              // paredes laterales que pueden converger hacia la boca (cuña) y embudo de 44 grados.
+              const xb = 0.038;
+              const wb = fields.palaFondoAncho.value / 2 + 0.0015;   // eje de la pared, lado del fondo
+              const wm = fields.palaBoca.value / 2 + 0.0015;         // eje de la pared, lado de la boca
+              const prof = fields.palaProfundidad.value;
+              const xm = xb + 0.0015 + prof;                        // x de la boca
+              const lado = Math.hypot(prof, wb - wm);
+              const ang = Math.atan2(wm - wb, prof);                 // < 0 si la U se cierra hacia la boca
+              const emb = 0.0396, embAng = 0.767;
+              const piezas = [
+                { x: 0.003, y: 0, z: -0.008, sx: 0.006, sy: 2 * wb + 0.002, sz: 0.016, r: 0, solid: false },
+                { x: 0.021, y: 0, z: -0.0155, sx: 0.042, sy: 2 * wb + 0.002, sz: 0.003, r: 0, solid: true },
+              ];
+              if (fields.palaAbierta.value) {
+                // Tramo central recto en x = xb y dos alas que salen de sus extremos hacia adelante y afuera.
+                const t = fields.palaTramo.value, a = fields.palaAngulo.value;
+                piezas.push({ x: xb, y: 0, z: -0.035, sx: 0.003, sy: t, sz: 0.035, r: 0, solid: true });
+                for (const s of [1, -1])
+                  piezas.push({ x: xb + t / 2 * Math.sin(a), y: s * (t / 2 + t / 2 * Math.cos(a)), z: -0.035,
+                                sx: t, sy: 0.003, sz: 0.035, r: s * (Math.PI / 2 - a), solid: true });
+              } else {
+              piezas.push({ x: xb, y: 0, z: -0.035, sx: 0.003, sy: 2 * wb, sz: 0.035, r: 0, solid: true });
+              for (const s of [1, -1]) {
+                piezas.push({ x: xb + 0.0015 + prof / 2, y: s * (wb + wm) / 2, z: -0.035, sx: lado, sy: 0.003, sz: 0.035, r: s * ang, solid: true });
+                piezas.push({ x: xm + emb / 2 * Math.cos(embAng), y: s * (wm + emb / 2 * Math.sin(embAng)), z: -0.035, sx: emb, sy: 0.003, sz: 0.035, r: s * embAng, solid: true });
+              }
+              }
+            >%
+            DEF PALA_FORMA Group {
+              children [
+                %< for (const q of piezas) { >%
+                Pose { translation %<= q.x >% %<= q.y >% %<= q.z >% rotation 0 0 1 %<= q.r >% children [ Shape { appearance DEF PLA_AP PBRAppearance { baseColor 0.35 0.35 0.37 roughness 0.6 metalness 0 } geometry Box { size %<= q.sx >% %<= q.sy >% %<= q.sz >% } } ] }
+                %< } >%
+              ]
+            }
+            %< if (fields.compuerta.value) { >%
+            # Compuerta con servo (SG90) en la boca de la U: retiene el cubo para girar en el sitio y
+            # retroceder con el. Puerta lateral con bisagra vertical en el extremo de la pared izquierda
+            # de la U: 0 = cerrada (cruza la boca delante del cubo); 2.34 rad = abierta (pegada a la pared
+            # izquierda del embudo). Una aleta con bisagra arriba se probo antes: abierta quedaba entre la
+            # camara y el cubo de la boca y lo partia en dos (sin deteccion, sin captura).
+            HingeJoint {
+              jointParameters HingeJointParameters {
+                axis 0 0 1
+                anchor %<= xm >% %<= wm - 0.0015 >% -0.0325
+                minStop -0.02
+                maxStop 2.40
+              }
+              device [
+                RotationalMotor {
+                  name "servo_compuerta"
+                  maxVelocity 10.5
+                  maxTorque 0.18
+                  minPosition 0.0
+                  maxPosition 2.34
+                }
+              ]
+              endPoint Solid {
+                translation %<= xm >% %<= wm - 0.0015 >% -0.0325
+                name "compuerta"
+                children [
+                  Pose {
+                    translation 0.0015 %<= -(wm - 0.0015) >% 0
+                    children [ Shape { appearance PBRAppearance { baseColor 0.35 0.35 0.37 roughness 0.6 metalness 0 } geometry Box { size 0.003 %<= 2 * (wm - 0.0015) - 0.004 >% 0.030 } } ]
+                  }
+                ]
+                boundingObject Pose { translation 0.0015 %<= -(wm - 0.0015) >% 0 children [ Box { size 0.003 %<= 2 * (wm - 0.0015) - 0.004 >% 0.030 } ] }
+                physics Physics { density -1 mass 0.002 }
+              }
+            }
+            %< } >%
+            # FC-51: IR de obstaculo en la pared izquierda de la U, mirando al otro lado (cubo adentro = 1)
+            DistanceSensor {
+              translation %<= xb + 0.018 >% %<= wb - 0.002 >% -0.04
+              rotation 0 0 1 -1.5708
+              name "ir_pala"
+              type "infra-red"
+              lookupTable [ 0 1 0, 0.02 1 0, 0.0201 0 0 ]
+              numberOfRays 1
+            }
+            # TCS34725: sensor de color mirando el cubo de cerca (se simula con una camara de 4x4)
+            Camera {
+              translation 0.0405 0 -0.028
+              rotation 0 1 0 0.35
+              name "color_pala"
+              width 4
+              height 4
+              fieldOfView 0.6
+              near 0.002
+            }
+          ]
+          boundingObject Group {
+            children [
+              %< for (const q of piezas) { if (!q.solid) continue; >%
+              Pose { translation %<= q.x >% %<= q.y >% %<= q.z >% rotation 0 0 1 %<= q.r >% children [ Box { size %<= q.sx >% %<= q.sy >% %<= q.sz >% } ] }
+              %< } >%
+            ]
+          }
+          physics Physics { density -1 mass 0.03 }
+        }
+      }
+
+      # ---------------- Sensores ----------------
+      # Camara Pi5-IMX219-120 (Waveshare: 120 grados en diagonal, lente de 1.79 mm), inclinada ~24 grados.
+      # Webots usa un modelo pinhole con FOV horizontal: 2*atan(1.84/1.79) = 1.60 rad con el area activa
+      # del IMX219 (3.68 x 2.76 mm); la distorsion del gran angular real no se simula.
+      # Con la OV5647 (0.94 rad) el cubo dentro de la pala quedaba fuera de la imagen.
+      # Altura e inclinacion: medir en el robot real y ajustar (docs/team-todo.md, tarea 7).
+      Camera {
+        translation 0.075 0 0.11
+        rotation 0 1 0 0.42
+        name "camara"
+        fieldOfView 1.60
+        width 640
+        height 480
+        near 0.01
+        far 3
+        noise 0.01
+      }
+      # TCRT5000 x4 mirando al piso (blanco = valor alto, linea negra = valor bajo)
+      %< for (const l of lineas) { >%
+      DistanceSensor {
+        translation %<= l.x >% %<= l.y >% 0.012
+        rotation 0 1 0 1.5708
+        name "linea_%<= l.n >%"
+        type "infra-red"
+        lookupTable [ 0 1023 0.01, 0.025 0 0.01 ]
+        numberOfRays 1
+      }
+      %< } >%
+      # HC-SR04: 2 cm a 4 m, cono de ~15 grados, devuelve metros
+      DistanceSensor {
+        translation 0.088 0 0.068
+        name "ultrasonido"
+        type "sonar"
+        lookupTable [ 0.02 0.02 0.005, 4 4 0.005 ]
+        numberOfRays 5
+        aperture 0.26
+      }
+      # MPU6050 (sin magnetometro: no da rumbo absoluto)
+      Accelerometer {
+        translation -0.02 0 0.085
+        name "acelerometro"
+        lookupTable [ -19.6 -19.6 0.02, 19.6 19.6 0.02 ]
+      }
+      Gyro {
+        translation -0.02 0 0.085
+        name "giroscopio"
+        lookupTable [ -8.7 -8.7 0.005, 8.7 8.7 0.005 ]
+      }
+      Group { children IS extensiones }
+    ]
+    boundingObject Group {
+      children [
+        Pose { translation 0 0 0.062 children [ Box { size 0.17 0.095 0.036 } ] }
+        Pose { translation -0.02 0 0.0995 children [ Box { size 0.085 0.056 0.035 } ] }
+      ]
+    }
+    physics Physics {
+      density -1
+      mass IS masaCuerpo
+      centerOfMass [ 0 0 0.05 ]
+    }
+  }
+}
