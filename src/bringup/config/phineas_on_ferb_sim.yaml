@@ -8,9 +8,6 @@
     # /zone/occupant or `pose`, so the gate would hold the robot still forever.
     require_heartbeat: false
     require_pose: false
-    # Ferb's simulator has no line sensor (see docs/phineas/integracion-simulacion.md): without this the gate
-    # would treat the silent `line` topic as tape and refuse to move forward.
-    require_line: false
 
 /behavior:
   ros__parameters:

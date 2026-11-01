@@ -7,9 +7,10 @@ Our phineas_cube_detector replaces Ferb's cube_detector (both publish `cubes`;
 only ours also publishes `cubes/scene`), reading the bridge's `image_raw`.
 
 SAFETY LIMITS of this setup (simulation only, never copy to a real robot):
-  * Ferb's bridge has no line sensor, so `line` is never published. Neither
-    behavior nor safety_gate checks that `line` is alive: they silently assume
-    "no tape". The tape guard is therefore NOT active here.
+  * The bridge simulates the line sensor from the floor sensors at the front
+    (see docs/phineas/integracion-simulacion.md): black tape and the table
+    edge read as `black`. It is only a stand-in for the single TCRT5000 of
+    the real robot, not a measurement of it.
   * No `pose` (overhead camera), no /zone/occupant (arbiter), no peer pose:
     require_pose and require_heartbeat are set to false (see the YAML).
 
