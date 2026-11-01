@@ -20,4 +20,4 @@ The pure core (behavior, safety, cartographer) is unchanged and still uses norma
 
 ## Pending
 
-`src/multirobot_sim/multirobot_sim/recolector_driver.py` (Webots driver) still publishes `std_msgs/Bool` on `line_front`; it must move to `LineSensors` on `line`. `camera.hfov_rad` defaults to Ferb's lens (0.94); the IMX219-120 on Phineas needs its own value.
+`src/multirobot_sim/multirobot_sim/recolector_driver.py` (Webots driver) publishes `LineSensors` on `line` (not run: needs Webots). `camera.hfov_rad` defaults to Ferb's lens (0.94); the IMX219-120 on Phineas needs its own value.

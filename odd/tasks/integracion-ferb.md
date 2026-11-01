@@ -17,4 +17,4 @@ Route: inline (mechanical imports, no new design).
 tools/lab tests need termios (Linux); tools/sim needs rclpy. Run scripts/test_in_docker.sh.
 
 ## Not verified (T4/T5)
-rclpy/colcon missing on Windows: nodes only py_compile'd; Scene.msg not built. recolector_driver.py (multirobot_sim) still publishes line_front: outside the allowed surface, see docs/phineas/integracion-interfaces.md.
+rclpy/colcon missing on Windows: nodes only py_compile'd; Scene.msg not built. recolector_driver.py (Webots) now publishes LineSensors on `line` (untested: needs Webots).
