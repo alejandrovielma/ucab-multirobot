@@ -10,6 +10,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/LineSensors.msg"
   "msg/CubeDetection.msg"
   "msg/CubeDetectionArray.msg"
+  "msg/Scene.msg"
   DEPENDENCIES std_msgs
 )
 
