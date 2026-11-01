@@ -334,7 +334,9 @@ def mode_line(args, cfg):
     print(f"GPIO{line.pin}, nivel activo {line.active_level} = linea negra. Ctrl+C para salir.", flush=True)
     while True:
         raw = line.raw()
-        print(f"\rnivel={raw}  {'NEGRO (linea)' if line.black() else 'blanco'}      ", end="", flush=True)
+        counts = line.counts()
+        analog = "" if counts is None else f"  AO={counts} cuentas ({line.millivolts()} mV)"
+        print(f"\rnivel={raw}  {'NEGRO (linea)' if line.black() else 'blanco'}{analog}      ", end="", flush=True)
         time.sleep(0.1)
 
 

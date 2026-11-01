@@ -13,9 +13,11 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "src" / "mobile_base"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import yaml  # noqa: E402
 
+from analog_line import ADC_I2C_BUS, AnalogReader, BlackConfirm, counts_to_millivolts  # noqa: E402
 from mobile_base.core.fusion_hat import DEFAULT_PORTS, load_motor_class, open_bank, wiring_from  # noqa: E402
 from mobile_base.core.kinematics import MecanumGeometry, duty_cap, hbridge_pwm, normalize, to_duty, wheel_speeds  # noqa: E402
 
@@ -173,18 +175,40 @@ class Motors:
 
 
 class LineSensor:
-    def __init__(self, cfg: dict, gpio):
+    """Bottom TCRT5000. DO through the GPIO wrapper; optional (from Ferb's tools/teleop_web.yaml):
+    `confirm_reads` black reads in a row before black() is True (default 1 = unfiltered) and
+    `adc_channel` (0-3) for the AO output through the Fusion HAT+ ADC (default: not wired)."""
+
+    def __init__(self, cfg: dict, gpio, bus=None):
         line = cfg["line_sensor"]
         self.gpio = gpio
         self.pin = line["pin"]
         self.active_level = line["active_level"]
+        self._confirm = BlackConfirm(line.get("confirm_reads", 1))
+        self._analog = None
+        channel = line.get("adc_channel")
+        if channel is not None:
+            if bus is None and not gpio.dry_run:
+                from smbus2 import SMBus  # only on the Pi
+
+                bus = SMBus(ADC_I2C_BUS)
+            self._analog = AnalogReader(bus, channel) if bus is not None else None
         gpio.claim_input(self.pin)
 
     def raw(self) -> int:
         return self.gpio.read(self.pin)
 
     def black(self) -> bool:
-        return self.raw() == self.active_level
+        """Black after `confirm_reads` consecutive black reads: call it once per control iteration."""
+        return self._confirm.update(self.raw() == self.active_level)
+
+    def counts(self) -> int | None:
+        """AO ADC counts (0-4095), or None when AO is not wired, dry run, or the read failed."""
+        return None if self._analog is None else self._analog.counts()
+
+    def millivolts(self) -> int | None:
+        counts = self.counts()
+        return None if counts is None else counts_to_millivolts(counts)
 
 
 def camera_holders(proc_root="/proc", me: int | None = None) -> list[tuple[int, str]]:
