@@ -1,0 +1,15 @@
+# Overrides for the Phineas behavior chain in Ferb's Webots simulation
+# (phineas_on_ferb_sim.launch.py). Applied on top of mobile_base/config/phineas.yaml.
+# Nodes run un-namespaced so their topics match Ferb's bridge.
+
+/safety_gate:
+  ros__parameters:
+    # Ferb's sim has no zone arbiter and no overhead camera: nothing publishes
+    # /zone/occupant or `pose`, so the gate would hold the robot still forever.
+    require_heartbeat: false
+    require_pose: false
+
+/behavior:
+  ros__parameters:
+    robot: phineas
+    use_lease: false

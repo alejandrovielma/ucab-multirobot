@@ -4,7 +4,8 @@ import ast
 import pathlib
 
 LAUNCH_DIR = pathlib.Path(__file__).resolve().parents[1] / "launch"
-EXPECTED = {"phineas_robot.launch.py", "phineas_robot_logic.launch.py", "phineas_sim.launch.py", "phineas_perry.launch.py"}
+EXPECTED = {"phineas_robot.launch.py", "phineas_robot_logic.launch.py", "phineas_sim.launch.py", "phineas_perry.launch.py",
+            "phineas_on_ferb_sim.launch.py"}
 
 
 def test_expected_launch_files_exist():
