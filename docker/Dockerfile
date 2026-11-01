@@ -41,6 +41,12 @@ RUN apt-get update \
  && rm -f /tmp/webots.deb \
  && rm -rf /var/lib/apt/lists/*
 
+# webots-bin links libsndio.so.7 and the .deb does not pull it on Ubuntu 26.04 (exit 127).
+# Its own layer so the Webots download above stays cached.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libsndio7.0 \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV WEBOTS_HOME=/usr/local/webots
 # Webots without GPU: software rendering
 ENV LIBGL_ALWAYS_SOFTWARE=1
