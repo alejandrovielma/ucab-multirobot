@@ -2,6 +2,7 @@
 
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool, String
 
 from mobile_base.core.adapters import line_front_from_sensors
@@ -34,7 +35,7 @@ class SafetyGateNode(Node):
         self._last_reason = ""
 
         self.create_subscription(Twist, "cmd_vel_nav", self._on_cmd, 10)
-        self.create_subscription(LineSensors, "line", self._on_line, 10)
+        self.create_subscription(LineSensors, "line", self._on_line, qos_profile_sensor_data)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
         self.create_subscription(RobotPose, peer_topic, self._on_peer_pose, 10)
         self.create_subscription(RobotState, "state", self._on_state, 10)

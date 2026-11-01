@@ -11,6 +11,7 @@ empty = the robot stays still) and avoid_colors (forbidden). Unknown color names
 from geometry_msgs.msg import Twist
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from std_msgs.msg import Bool, String
 
 from mobile_base.core.adapters import cube_from_ferb, line_front_from_sensors
@@ -50,7 +51,7 @@ class BehaviorNode(Node):
 
         self.create_subscription(CubeDetectionArray, "cubes", self._on_cubes, 10)
         self.create_subscription(Scene, "cubes/scene", self._on_scene, 10)
-        self.create_subscription(LineSensors, "line", self._on_line, 10)
+        self.create_subscription(LineSensors, "line", self._on_line, qos_profile_sensor_data)
         self.create_subscription(RobotPose, "pose", self._on_pose, 10)
         self.create_subscription(String, "/zone/occupant", self._on_zone, ZONE_OCCUPANT_QOS)
         self._cmd_pub = self.create_publisher(Twist, "cmd_vel_nav", 10)
