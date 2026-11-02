@@ -59,12 +59,25 @@ class Seen:
         bearing_rad=0.0,
         v=300,
         entry_angle_rad=0.0,
+        far_distance_m=None,
     ):
         self.color = color
         self.distance_m = distance_m
         self.bearing_rad = bearing_rad
         self.v = v
         self.entry_angle_rad = entry_angle_rad
+        self.far_distance_m = far_distance_m
+
+
+def blind_push_end_s(cfg, edge_m, start_s, blind_s):
+    """
+    End of a delivery push whose edge was last seen at `edge_m` when the
+    push started at `start_s` and went blind at `blind_s` (too short to
+    measure the speed: the fallback forward_speed_mps is used).
+    """
+    speed = cfg.forward_speed_mps
+    edge_m -= speed * (blind_s - start_s)
+    return blind_s + (edge_m + cfg.deliver_insert_m - cfg.cube_ahead_m) / speed
 
 
 def make_pilot():
@@ -89,11 +102,15 @@ def test_pick_carry_deliver_and_count():
     vision.zone = Seen("floor", 0.11)
     pilot.step(1.3)
     assert pilot.state == "DROP"
-    assert pilot.step(2.0).vy == -1.0  # backs up leaving the cube
+    vision.zone = None  # the edge went under the scoop
+    pilot.step(1.35)
+    assert pilot.state == "DROP (blind)"
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 1.3, 1.35)
+    assert pilot.step(end_s + 0.1).vy == -1.0  # backs up leaving the cube
     assert pilot.delivered_count == 1 and not pilot.carrying
-    pilot.step(2.4)
+    pilot.step(end_s + 0.6)
     assert pilot.state == "DROP (turn)"
-    pilot.step(3.0)
+    pilot.step(end_s + 1.2)
     assert pilot.state.startswith("EXPLORE")
 
 
@@ -278,10 +295,29 @@ def test_delivery_squares_up_to_the_pink_line_slides_in_front_then_pushes():
     # there.
     vision.zone = Seen("floor", 0.18)
     assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
-    push_m = 0.18 + cfg.deliver_insert_m - cfg.cube_ahead_m
-    push_s = push_m / cfg.forward_speed_mps
-    assert pilot.step(0.1 + push_s - 0.01).vy == 1.0
-    assert pilot.step(0.1 + push_s + 0.01).vy == -1.0
+
+
+def test_the_delivery_push_follows_the_edge_then_ends_blind_at_its_speed():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    cfg = pilot.cfg
+    vision.zone = Seen("floor", 0.18)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
+    # The edge comes closer at 0.1 m/s: keep pushing while it is in view,
+    # however long a fixed-time push would have lasted.
+    vision.zone = Seen("floor", 0.14)
+    assert pilot.step(0.5).vy == 1.0 and pilot.state == "DROP"
+    # Close enough that the scoop hides it: the rest is blind, timed with
+    # the measured 0.1 m/s.
+    vision.zone = Seen("floor", cfg.deliver_blind_edge_m - 0.01)
+    pilot.step(0.8)
+    assert pilot.state == "DROP (blind)"
+    speed = (0.18 - (cfg.deliver_blind_edge_m - 0.01)) / 0.7
+    blind_m = cfg.deliver_blind_edge_m - 0.01 + cfg.deliver_insert_m - cfg.cube_ahead_m
+    end_s = 0.8 + blind_m / speed
+    assert pilot.step(end_s - 0.02).vy == 1.0
+    assert pilot.step(end_s + 0.02).vy == -1.0
 
 
 def test_without_the_pink_line_in_view_it_waits_instead_of_pushing():
@@ -290,7 +326,19 @@ def test_without_the_pink_line_in_view_it_waits_instead_of_pushing():
     pilot.state = "CARRY"
     vision.zone = Seen("floor", 0.18, entry_angle_rad=None)
     assert pilot.step(0.0).speed == 0.0
-    assert pilot.state == "CARRY (no pink line)" and pilot.carrying
+    assert pilot.state == "CARRY (no entry line)" and pilot.carrying
+
+
+def test_too_close_to_see_the_pink_line_it_centres_and_pushes_anyway():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    close_m = pilot.cfg.entry_hidden_distance_m - 0.05
+    vision.zone = Seen("floor", close_m, bearing_rad=0.3, entry_angle_rad=None)
+    command = pilot.step(0.0)
+    assert pilot.state == "CARRY (center)" and command.vx < 0  # slides left
+    vision.zone = Seen("floor", close_m, entry_angle_rad=None)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
 
 
 def test_squaring_up_finishes_the_turn_before_sliding():
@@ -315,26 +363,28 @@ def test_a_cube_still_in_front_after_backing_up_is_not_counted():
     pilot.step(0.0)
     assert pilot.state == "DROP"
     vision.zone = None
-    pilot.step(0.6)  # backing up: counted for now
+    pilot.step(0.05)
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)  # backing up: counted for now
     assert pilot.delivered_count == 1
     vision.det = Seen("yellow", pilot.cfg.drop_verify_distance_m - 0.05)
-    pilot.step(1.1)  # backed up, and the cube is right there
+    pilot.step(end_s + 0.6)  # backed up, and the cube is right there
     assert pilot.delivered_count == 0 and not pilot.carrying
     assert pilot.state == "SEARCH" or pilot.state.startswith("APPROACH")
 
 
-def test_a_close_paper_gets_a_short_push_and_backup():
+def test_an_edge_never_lost_still_ends_the_push_after_the_limit():
     config = AutoConfig(**{**FAST_PHASES, "floor_deliver_backup_s": 0.3})
     pilot = AutoPilot(config, StubVision())
-    pilot.vision.zone = Seen("floor", 0.12)
+    pilot.vision.zone = Seen("floor", 0.18)  # the edge reads 18 cm forever
     pilot.carrying = True
     pilot.state = "CARRY"
     assert pilot.step(0.0).vy == 1.0 and pilot.state == "DROP"
-    push_m = 0.12 + config.deliver_insert_m - config.cube_ahead_m
-    push_s = push_m / config.forward_speed_mps
-    assert pilot.step(push_s + 0.05).vy == -1.0  # already backing up
-    assert pilot.delivered_count == 1
-    assert pilot.step(push_s + 0.35).vy == 0.0 and pilot.state == "DROP (turn)"
+    limit_s = config.deliver_push_max_s
+    assert pilot.step(limit_s - 0.1).vy == 1.0 and pilot.state == "DROP"
+    pilot.step(limit_s + 0.01)
+    assert pilot.state == "DROP (blind)"  # then the blind rest, and back up
+    assert pilot.step(limit_s + 5.0).vy != 1.0
 
 
 def test_without_cubes_it_spins_then_moves_to_another_spot_and_keeps_going():
@@ -567,3 +617,94 @@ def test_a_cube_in_front_of_the_gate_is_not_taken_for_delivered(monkeypatch):
     behind = Detection("yellow", 316, 220, 12, 12, (310, 208, 12, 12))
     kept = without_cubes_in_zone([in_front, behind], gate, margin_px)
     assert kept == [in_front]  # the one behind the legos is inside the area
+
+
+def test_a_cube_still_in_front_after_the_catch_push_is_not_collected():
+    pilot, vision = make_pilot()
+    cfg = pilot.cfg
+    vision.det = Seen("yellow", cfg.stop_distance_m - 0.01)
+    pilot.step(0.0)
+    assert pilot.state == "CATCH"
+    # The push fell short: the cube is still right in front.
+    vision.det = Seen("yellow", 0.08)
+    assert pilot.step(cfg.scoop_push_s + 0.05).speed == 0.0
+    assert pilot.state == "CATCH (check)"
+    pilot.step(cfg.scoop_push_s + cfg.catch_check_s + 0.05)
+    assert not pilot.carrying and pilot.collected_count == 0
+    assert not pilot.state.startswith("CARRY")
+
+
+def test_another_cube_off_to_a_side_does_not_undo_a_delivery():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    cfg = pilot.cfg
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(0.0)
+    assert pilot.state == "DROP"
+    vision.zone = None
+    pilot.step(0.05)
+    end_s = blind_push_end_s(cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)  # backing up
+    # Another cube on the table, close but to a side: not the delivered one.
+    vision.det = Seen(
+        "yellow",
+        cfg.drop_verify_distance_m - 0.05,
+        bearing_rad=cfg.drop_verify_bearing_rad + 0.1,
+    )
+    pilot.step(end_s + cfg.floor_deliver_backup_s + 0.05)
+    assert pilot.state == "DROP (turn)" and pilot.delivered_count == 1
+    pilot.step(end_s + cfg.floor_deliver_backup_s + 0.2)  # still turning
+    assert pilot.delivered_count == 1
+
+
+def test_the_push_stops_when_the_far_edge_is_close_never_past_the_area():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    stop_m = pilot.cfg.deliver_far_stop_m
+    vision.zone = Seen("floor", 0.18, far_distance_m=0.35)
+    assert pilot.step(0.0).vy == 1.0 and pilot.state == "DROP"
+    # The near edge goes under the scoop, the far one is still in view:
+    # keep pushing, no blind guess.
+    vision.zone = Seen("floor", 0.09, far_distance_m=0.25)
+    assert pilot.step(0.4).vy == 1.0 and pilot.state == "DROP"
+    vision.zone = Seen("floor", 0.05, far_distance_m=stop_m - 0.005)
+    assert pilot.step(0.8).vy != 1.0  # there: backs up, cube delivered
+    assert pilot.delivered_count == 1
+
+
+def test_a_blind_rest_never_goes_past_the_far_edge_last_seen():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    cfg = pilot.cfg
+    vision.zone = Seen("floor", 0.20, far_distance_m=cfg.deliver_far_stop_m + 0.02)
+    pilot.step(0.0)
+    vision.zone = None  # area lost: blind rest
+    pilot.step(0.05)
+    assert pilot.state == "DROP (blind)"
+    # 2 cm left to the stop point, however far the near edge said.
+    assert pilot._phase_until - 0.05 <= 0.02 / cfg.forward_speed_mps + 1e-6
+
+
+def test_squaring_up_stays_committed_when_the_paper_jitters_or_drops_out():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    cfg = pilot.cfg
+    commit_m = cfg.deliver_commit_distance_m
+    vision.zone = Seen("floor", commit_m - 0.02, entry_angle_rad=0.4)
+    pilot.step(0.0)
+    assert pilot.state == "CARRY (square)"
+    # The paper reads a bit farther (cubes on it): keep squaring up.
+    vision.zone = Seen("floor", commit_m + 0.02, entry_angle_rad=0.4)
+    pilot.step(0.25)
+    assert pilot.state == "CARRY (square)"
+    # Only the landmarks for a moment: wait still, do not turn to them.
+    vision.zone = Seen("gate", 0.30, bearing_rad=0.5)
+    assert pilot.step(0.5).speed == 0.0
+    assert pilot.state == "CARRY (square)"
+    # Still no paper after the hold: back to heading for the area.
+    pilot.step(0.25 + cfg.carry_paper_hold_s + 0.1)
+    assert pilot.state.startswith("CARRY") and pilot.state != "CARRY (square)"

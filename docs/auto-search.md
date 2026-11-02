@@ -46,7 +46,7 @@ stateDiagram-v2
   STOPPED: DONE / NO CUBES (stopped)
   SQUARE: CARRY (square)\nturn in place
   CENTER: CARRY (center)\nslide sideways
-  NO_ENTRY: CARRY (no pink line)\nwait
+  NO_ENTRY: CARRY (no entry line)\nwait
   DROP_BACKUP: DROP (back up)
   DROP_TURN: DROP (turn)
 ```
@@ -69,7 +69,7 @@ then resume.
 | The paper in view, far | Steer toward the paper's centre | |
 | The paper's near edge within `deliver_commit_distance_m` (or at row `floor_arrive_v_px`) | Turn in place until facing the pink line squarely (`entry_square_tolerance_rad`) | A crooked push knocks the legos down |
 | Square, the paper's centre off to a side | Slide sideways at `strafe_speed` (heading kept) until it is within `drop_align_tolerance_rad` | Enter in front of the centre, not on a diagonal |
-| The pink line not in view at the paper | Wait (`CARRY (no pink line)`) | Better stopped than pushing crooked |
+| The pink line not in view at the paper | Wait (`CARRY (no entry line)`) | Better stopped than pushing crooked |
 | Push | Straight, blind, for (edge + `deliver_insert_m` − `cube_ahead_m`) / `forward_speed_mps` | The near edge's distance is precise; the far edge's is not |
 | Nothing in view for `carry_zone_timeout_s` | The cube slipped out: search again | |
 | **After a delivery** | | |
