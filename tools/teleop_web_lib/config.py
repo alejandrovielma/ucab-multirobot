@@ -88,23 +88,18 @@ DEFAULT_CARRY_ZONE_TIMEOUT_S = 15.0
 # Without a cube in view, do not roam forward with the gate this close.
 # TODO measure
 DEFAULT_GATE_AVOID_DISTANCE_M = 0.35
-# Delivery: facing the paper's centre with its near edge this close (m),
-# push the cube straight in, deliver_insert_m past that edge. Forward at
+# Delivery: with the paper's near edge this close (m), face the pink entry
+# line squarely (within entry_square_tolerance_rad), slide sideways at
+# strafe_speed until the paper's centre is within drop_align_tolerance_rad,
+# then push the cube straight in, deliver_insert_m past that edge. Forward at
 # forward_speed covers forward_speed_mps; the cube's centre sits
 # cube_ahead_m ahead of the lens. TODO measure
 DEFAULT_DELIVER_COMMIT_DISTANCE_M = 0.20
 DEFAULT_DELIVER_INSERT_M = 0.07
 DEFAULT_FORWARD_SPEED_MPS = 0.31
 DEFAULT_CUBE_AHEAD_M = 0.022
-# Carrying with the paper this close (m), the black line is the area's own
-# tape or the border next to its entry: cross it instead of turning back.
-DEFAULT_CARRY_LINE_IGNORE_DISTANCE_M = 0.45
-# Search without cubes: one spin in place (s), then go this far (m, within
-# the tolerance) from the area, about the middle of the arena, and spin
-# again. TODO measure
-DEFAULT_SEARCH_SPIN_S = 9.0
-DEFAULT_SEARCH_CENTER_DISTANCE_M = 0.55
-DEFAULT_SEARCH_CENTER_TOLERANCE_M = 0.08
+DEFAULT_ENTRY_SQUARE_TOLERANCE_RAD = 0.10
+DEFAULT_STRAFE_SPEED = 0.40
 # A cube this close (m) after backing up from a delivery was left outside
 # the area: the delivery does not count. TODO measure
 DEFAULT_DROP_VERIFY_DISTANCE_M = 0.30
@@ -187,10 +182,8 @@ class AutoConfig:
     deliver_insert_m: float = DEFAULT_DELIVER_INSERT_M
     forward_speed_mps: float = DEFAULT_FORWARD_SPEED_MPS
     cube_ahead_m: float = DEFAULT_CUBE_AHEAD_M
-    carry_line_ignore_distance_m: float = DEFAULT_CARRY_LINE_IGNORE_DISTANCE_M
-    search_spin_s: float = DEFAULT_SEARCH_SPIN_S
-    search_center_distance_m: float = DEFAULT_SEARCH_CENTER_DISTANCE_M
-    search_center_tolerance_m: float = DEFAULT_SEARCH_CENTER_TOLERANCE_M
+    entry_square_tolerance_rad: float = DEFAULT_ENTRY_SQUARE_TOLERANCE_RAD
+    strafe_speed: float = DEFAULT_STRAFE_SPEED
     drop_verify_distance_m: float = DEFAULT_DROP_VERIFY_DISTANCE_M
 
     @classmethod

@@ -116,6 +116,9 @@ class Region:
     bbox: tuple[int, int, int, int]
     bearing_rad: float
     distance_m: float
+    # Turn (rad, positive = left) that leaves the robot facing the area's
+    # entry line squarely; None when the line is not in view.
+    entry_angle_rad: float | None = None
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,20 @@ DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM = False
 # touches it.
 FLOOR_BOTTOM_MARGIN_PX = 3
 
+# Smallest entry line blob (px) whose angle is trusted (TODO measure).
+DEFAULT_ENTRY_MIN_AREA_PX = 150
+# Fewest outline points needed to fit the entry line.
+MIN_ENTRY_POINTS = 2
+# The entry line is searched from the paper's top down to one paper height
+# below it, and this many paper widths past each side: on the real area the
+# pink strip is a separate blob just below the blue sheet, outside its
+# bounding box.
+ENTRY_SIDE_MARGIN_WIDTHS = 0.5
+ENTRY_BELOW_HEIGHTS = 1.0
+# The entry strip looks at least this many times wider than tall; the table
+# tinted pink near the image corners makes big blobs that are not.
+ENTRY_MIN_FLATNESS = 3.0
+
 # Smaller polygons (twice their area, m^2) have no usable centroid.
 MIN_DOUBLE_AREA_M2 = 1e-6
 
@@ -91,6 +105,11 @@ class ZoneParams:
     # on the floor) instead of the middle of its near edge; the distance stays
     # the near edge's.
     floor_aim_centre: bool = False
+    # Colour of the line the robot enters the area across (one of
+    # `floor_colors`); its angle on the floor is measured so the robot can
+    # face it squarely. Empty = not measured.
+    entry_color: str = ""
+    entry_min_area_px: int = DEFAULT_ENTRY_MIN_AREA_PX
 
 
 def is_plausible_floor(
@@ -147,6 +166,27 @@ def polygon_centroid(
         float(((xs + next_xs) * cross).sum() / scale),
         float(((ys + next_ys) * cross).sum() / scale),
     )
+
+
+def is_flat_strip(contour: np.ndarray) -> bool:
+    """
+    True when `contour` looks like a strip lying on the floor (much wider
+    than tall), as the area's entry line does.
+    """
+    _, _, width_px, height_px = cv2.boundingRect(contour)
+    return width_px >= ENTRY_MIN_FLATNESS * max(height_px, 1)
+
+
+def entry_angle(points: np.ndarray) -> float:
+    """
+    Turn (rad, positive = left) that leaves the robot facing squarely the
+    straight line through the floor `points` ((forward_m, left_m) rows).
+    Facing it squarely, the line runs across the robot (along `left`).
+    """
+    forward, left = cv2.fitLine(points, cv2.DIST_L2, 0, 0.01, 0.01)[:2, 0]
+    if left < 0:
+        forward, left = -forward, -left
+    return math.atan2(-forward, left)
 
 
 def without_cubes_in_zone(
@@ -237,8 +277,54 @@ class ZoneLocator:
         if not is_plausible_floor(floor, bgr.shape[0], self.params):
             return None
         if self.params.floor_aim_centre:
-            return self._aim_at_floor_centre(bgr, floor)
-        return self._aim_at_center(floor)
+            floor = self._aim_at_floor_centre(bgr, floor)
+        else:
+            floor = self._aim_at_center(floor)
+        return self._with_entry_angle(bgr, floor)
+
+    def _with_entry_angle(self, bgr: np.ndarray, floor: Region) -> Region:
+        """
+        The area paper with the turn that faces its entry line squarely: the
+        line's outline projected on the floor and fitted with a straight
+        line. Unchanged when the line is not measured or not in view.
+        """
+        color = self.params.entry_color
+        if not color or color not in self._floor.ranges:
+            return floor
+        frame_h, frame_w = bgr.shape[:2]
+        left, top, width_px, paper_h = floor.bbox
+        margin_px = int(width_px * ENTRY_SIDE_MARGIN_WIDTHS)
+        x = max(0, left - margin_px)
+        y = top
+        width_px = min(frame_w, left + width_px + margin_px) - x
+        bottom = top + paper_h + int(paper_h * ENTRY_BELOW_HEIGHTS)
+        height_px = min(frame_h, bottom) - y
+        hsv = cv2.cvtColor(
+            bgr[y : y + height_px, x : x + width_px],
+            cv2.COLOR_BGR2HSV,
+        )
+        contours, _ = cv2.findContours(
+            self._floor.mask(hsv, color),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_NONE,
+        )
+        strips = [c for c in contours if is_flat_strip(c)]
+        if not strips:
+            return floor
+        outline = max(strips, key=cv2.contourArea)
+        if cv2.contourArea(outline) < self.params.entry_min_area_px:
+            return floor
+        ground = [
+            self._camera.ground_point(u + x, v + y)
+            for u, v in outline.reshape(-1, 2)
+        ]
+        points = [point[:2] for point in ground if point is not None]
+        if len(points) < MIN_ENTRY_POINTS:
+            return floor
+        return replace(
+            floor,
+            entry_angle_rad=entry_angle(np.array(points, dtype=np.float32)),
+        )
 
     def _aim_at_floor_centre(self, bgr: np.ndarray, floor: Region) -> Region:
         """

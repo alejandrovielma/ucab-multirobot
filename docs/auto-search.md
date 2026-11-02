@@ -5,90 +5,89 @@ Parameters are in the `auto` section of `tools/teleop_web.yaml`; the names
 below are those keys.
 
 The robot has no wheel encoders and does not use Perry's pose here. Its only
-landmark is the delivery area: the two legos from afar (`gate`) and the blue +
-pink paper up close (`floor`). "The middle of the arena" means
-`search_center_distance_m` from the area, which is the arena's centre when the
-area sits in the middle of one side.
+landmark is the delivery area: the two legos from afar (`gate`) and the blue
+paper with the pink entry line up close (`floor`). The cube is always pushed
+in head-on across the pink line.
 
 ## State diagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> SPIN: Auto on
+  [*] --> ROAM: Auto on
 
   state "Search, no cube in view" as SEARCHING {
-    SPIN: EXPLORE (turn)\nspin in place for search_spin_s
-    FIND: EXPLORE (find area)\nturn until the area is in view
-    TO_CENTER: EXPLORE (to center)\nface the area, drive until it is\nsearch_center_distance_m away
-    CENTER_SPIN: EXPLORE (turn)\nspin once more in the middle
+    ROAM_TURN: EXPLORE (turn)\nspin to scan
+    ROAM_FWD: EXPLORE (forward)\nroam_forward_s to another spot
     AVOID: EXPLORE (avoid gate)\nturn away from the area
 
-    SPIN --> FIND: spin over, area not in view
-    SPIN --> TO_CENTER: spin over, area in view
-    SPIN --> AVOID: area closer than gate_avoid_distance_m
-    AVOID --> SPIN: area out of reach
-    FIND --> TO_CENTER: area in view
-    TO_CENTER --> CENTER_SPIN: within search_center_tolerance_m
-    CENTER_SPIN --> STOPPED: spin over
+    ROAM_TURN --> ROAM_FWD: end of each roam_period_s
+    ROAM_FWD --> ROAM_TURN
+    ROAM_TURN --> AVOID: area closer than gate_avoid_distance_m
+    AVOID --> ROAM_TURN: area out of reach
   }
 
-  SEARCHING --> APPROACH: cube in view (resets the search)
+  SEARCHING --> APPROACH: cube in view
+  SEARCHING --> STOPPED: no cube for no_cubes_stop_s
   APPROACH --> CATCH: cube at the scoop and aligned
   CATCH --> CARRY: blind push of scoop_push_s
-  CARRY --> CARRY_ALIGN: paper in view, edge within deliver_commit_distance_m,\nnot facing its centre
-  CARRY_ALIGN --> DROP: facing the paper's centre
-  CARRY --> DROP: paper's edge within deliver_commit_distance_m, facing its centre
+  CARRY --> SQUARE: paper's edge within deliver_commit_distance_m
+  SQUARE --> NO_ENTRY: pink line not in view
+  NO_ENTRY --> SQUARE: pink line in view
+  SQUARE --> CENTER: facing the pink line squarely,\ncentre off to a side
+  SQUARE --> DROP: square, centre straight ahead
+  CENTER --> SQUARE: no longer square
+  CENTER --> DROP: centre straight ahead
   DROP --> DROP_BACKUP: push of (edge + deliver_insert_m - cube_ahead_m) / forward_speed_mps
-  DROP_BACKUP --> SPIN: cube still in front (left outside, not counted)
+  DROP_BACKUP --> SEARCHING: cube still in front (left outside, not counted)
   DROP_BACKUP --> DROP_TURN: nothing in front (counted)
-  DROP_TURN --> SPIN
-  CARRY --> SPIN: area never seen for carry_zone_timeout_s (cube lost)
+  DROP_TURN --> SEARCHING
+  CARRY --> SEARCHING: area never seen for carry_zone_timeout_s (cube lost)
 
   STOPPED: DONE / NO CUBES (stopped)
-  CARRY_ALIGN: CARRY (align)
+  SQUARE: CARRY (square)\nturn in place
+  CENTER: CARRY (center)\nslide sideways
+  NO_ENTRY: CARRY (no pink line)\nwait
   DROP_BACKUP: DROP (back up)
   DROP_TURN: DROP (turn)
 ```
 
-The black line overrides every state except the ones listed under "Line" in
-the table: brake, move away from it, turn inward, then resume.
+The black line overrides every state: brake, move away from it, turn inward,
+then resume.
 
 ## Situations and responses
 
 | Situation | Response | Why |
 |---|---|---|
 | **Searching** | | |
-| Auto turned on, no cube in view | Spin in place for `search_spin_s` (about one turn at `search_turn_speed`) | A cube anywhere in view range is found without moving |
-| A cube appears at any point of the search | Go for it; the search restarts from a spin afterwards | |
-| Spin over, the area in view | Face the area and drive (or back up) until it is `search_center_distance_m` away, then spin again | From the middle every cube is within the camera's range |
-| Spin over, the area not in view | Keep turning until it shows up | It is the only landmark to find the middle with |
-| Already at the middle when the first spin ends | That spin counts as the one in the middle | |
-| Spin in the middle over, no cube | Stop: `DONE (n delivered)` or `NO CUBES (stopped)` | Two spins (one in the middle) covered the arena |
-| Searching longer than `no_cubes_stop_s` | Stop | Hard limit (the area never found, a loop) |
-| During a spin, the area or its legos closer than `gate_avoid_distance_m` | Turn away from it, keep the scan turning that way | Roaming there ran the robot over the legos |
+| No cube in view | Turn to scan at `search_turn_speed`, then drive forward `roam_forward_s` at the end of every `roam_period_s` | A spin that saw nothing is not the whole arena |
+| A cube appears | Go for it | |
+| No cube seen for `no_cubes_stop_s` (since the start, the last cube or the last delivery) | Stop: `DONE (n delivered)` or `NO CUBES (stopped)` | |
+| The area or its legos closer than `gate_avoid_distance_m` | Turn away from it, keep the scan turning that way | Roaming there ran the robot over the legos |
 | A cube seen, then lost | Wait `lost_timeout_s`; keep heading where it was for `reacquire_s`; if it was close, back up `reveal_backup_s` (it may be under the scoop) | |
 | **Carrying** | | |
 | Only the legos in view | Drive toward their midpoint, slowing below `zone_stop_distance_m`; never push from there | A push started from the legos left the cube 20 cm short |
-| The paper in view, far | Steer toward the paper's centre (bearing of its outline projected on the floor) | Its image centre is not its floor centre |
-| The paper's near edge within `deliver_commit_distance_m` (or at row `floor_arrive_v_px`) | Turn in place until facing its centre (`drop_align_tolerance_rad`), then push | |
-| Push | Straight, blind, for (edge + `deliver_insert_m` − `cube_ahead_m`) / `forward_speed_mps`; also from a diagonal | The near edge's distance is precise; the far edge's is not |
+| The paper in view, far | Steer toward the paper's centre | |
+| The paper's near edge within `deliver_commit_distance_m` (or at row `floor_arrive_v_px`) | Turn in place until facing the pink line squarely (`entry_square_tolerance_rad`) | A crooked push knocks the legos down |
+| Square, the paper's centre off to a side | Slide sideways at `strafe_speed` (heading kept) until it is within `drop_align_tolerance_rad` | Enter in front of the centre, not on a diagonal |
+| The pink line not in view at the paper | Wait (`CARRY (no pink line)`) | Better stopped than pushing crooked |
+| Push | Straight, blind, for (edge + `deliver_insert_m` − `cube_ahead_m`) / `forward_speed_mps` | The near edge's distance is precise; the far edge's is not |
 | Nothing in view for `carry_zone_timeout_s` | The cube slipped out: search again | |
 | **After a delivery** | | |
 | Backed up and a cube is within `drop_verify_distance_m` | The delivery does not count; go for that cube | A cube left at the area's edge was counted twice |
 | Backed up, nothing in front | Counted; turn, then search | Cubes inside the area are filtered out by vision |
 | **Line** | | |
 | Black line while searching or going for a cube | Line recovery; cubes are ignored for `line_cube_ban_s` if it was chasing one | That cube is at the border |
-| Black line while carrying, paper not close | Line recovery; the cube is left behind | It was pushed over the border |
-| Black line while carrying with the paper within `carry_line_ignore_distance_m`, or during the delivery | Ignored: keep going | It is the area's own tape or the border next to its entry; turning back made the robot curve around instead of going straight in |
+| Black line while carrying | Line recovery; the cube is left behind | It was pushed over the border |
+| Black line during the delivery push | Line recovery; the cube counts as delivered | It is the area's back tape |
 | A single black read | Ignored (`line_sensor.confirm_reads`) | The sensor lifting off the table while moving |
 
 ## Open points
 
-- `search_spin_s`, `search_center_distance_m`, `deliver_insert_m` and
+- `entry_square_tolerance_rad`, `strafe_speed`, `deliver_insert_m` and
   `forward_speed_mps` are estimates (TODO measure in `tools/teleop_web.yaml`).
-- The middle is found only along the line from the robot to the area: the
-  robot ends somewhere at that distance from the area, not necessarily on the
-  arena's axis.
+- The pink line must be found at `deliver_commit_distance_m` under the lab
+  light (`camera.area_hsv.area_pink`); an earlier squared entry missed it at
+  30 cm, before the two-range pink.
 - A false "paper" on the arena's border tape (it reads blue at some angles)
   can still draw the robot there.
 
