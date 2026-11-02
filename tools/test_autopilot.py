@@ -355,6 +355,57 @@ def test_squaring_up_finishes_the_turn_before_sliding():
     assert pilot.step(0.2).vy == 1.0 and pilot.state == "DROP"
 
 
+def test_arriving_diagonally_it_slides_toward_the_paper_before_turning():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    side_rad = pilot.cfg.square_max_bearing_rad
+
+    def crooked_paper(bearing_rad):
+        return Seen("floor", 0.18, bearing_rad=bearing_rad, entry_angle_rad=0.5)
+
+    # Paper off to the right and the strip crooked: turning would lose it.
+    vision.zone = crooked_paper(-side_rad * 1.5)
+    command = pilot.step(0.0)
+    assert pilot.state == "CARRY (center)"
+    assert command.vx > 0 and command.wz == 0
+    # Past the tolerance but not the exit fraction: keep sliding.
+    vision.zone = crooked_paper(-side_rad * 0.8)
+    assert pilot.step(0.1).vx > 0 and pilot.state == "CARRY (center)"
+    # Centred enough: now it turns to face the strip.
+    vision.zone = crooked_paper(-side_rad * 0.3)
+    assert pilot.step(0.2).wz > 0 and pilot.state == "CARRY (square)"
+
+
+def test_without_the_pink_line_and_the_paper_to_a_side_it_slides_toward_it():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    bearing_rad = pilot.cfg.square_max_bearing_rad * 1.5
+    vision.zone = Seen(
+        "floor", 0.18, bearing_rad=bearing_rad, entry_angle_rad=None
+    )
+    assert pilot.step(0.0).vx < 0 and pilot.state == "CARRY (center)"
+
+
+def test_paper_lost_while_squaring_it_slides_back_instead_of_the_landmarks():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    cfg = pilot.cfg
+    # Turning to square up: the paper last seen on the right.
+    vision.zone = Seen("floor", 0.18, bearing_rad=-0.2, entry_angle_rad=0.5)
+    pilot.step(0.0)
+    assert pilot.state == "CARRY (square)"
+    vision.zone = Seen("gate", 0.25, bearing_rad=0.4)  # only the green lego
+    assert pilot.step(0.5).speed == 0.0  # the hold
+    command = pilot.step(cfg.carry_paper_hold_s + 0.1)
+    assert pilot.state == "CARRY (center)" and command.vx > 0  # slides right
+    # Not back after the slide either: head for the area by the landmarks.
+    pilot.step(cfg.carry_paper_hold_s + cfg.carry_paper_slide_s + 0.1)
+    assert pilot.state == "CARRY (align)"
+
+
 def test_a_cube_still_in_front_after_backing_up_is_not_counted():
     pilot, vision = make_pilot()
     pilot.carrying = True

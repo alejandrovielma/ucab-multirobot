@@ -122,6 +122,12 @@ DEFAULT_DELIVER_BLIND_EDGE_M = 0.12
 # drops out of view instead of turning to the landmarks. TODO measure
 DEFAULT_DELIVER_COMMIT_HYSTERESIS_M = 0.08
 DEFAULT_CARRY_PAPER_HOLD_S = 1.0
+# Squaring up from a diagonal: with the paper's centre farther than this
+# (rad) off straight ahead, slide toward it before turning (turning in place
+# pushed it out of view). If it drops out anyway, slide toward where it was
+# last seen for up to carry_paper_slide_s (s) after the hold. TODO measure
+DEFAULT_SQUARE_MAX_BEARING_RAD = 0.30
+DEFAULT_CARRY_PAPER_SLIDE_S = 2.0
 # Delivery push: stop once the area's far edge is this close (m); 0 = do not
 # use the far edge. TODO measure
 DEFAULT_DELIVER_FAR_STOP_M = 0.142
@@ -219,6 +225,8 @@ class AutoConfig:
     deliver_blind_edge_m: float = DEFAULT_DELIVER_BLIND_EDGE_M
     deliver_commit_hysteresis_m: float = DEFAULT_DELIVER_COMMIT_HYSTERESIS_M
     carry_paper_hold_s: float = DEFAULT_CARRY_PAPER_HOLD_S
+    square_max_bearing_rad: float = DEFAULT_SQUARE_MAX_BEARING_RAD
+    carry_paper_slide_s: float = DEFAULT_CARRY_PAPER_SLIDE_S
     deliver_far_stop_m: float = DEFAULT_DELIVER_FAR_STOP_M
     entry_hidden_distance_m: float = DEFAULT_ENTRY_HIDDEN_DISTANCE_M
     deliver_edge_timeout_s: float = DEFAULT_DELIVER_EDGE_TIMEOUT_S

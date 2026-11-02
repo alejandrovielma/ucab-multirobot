@@ -179,8 +179,10 @@ class AutoPilot:
         self._drop_edge_last = (0.0, 0.0)
         self._drop_far_last: tuple[float, float] | None = None
         self._drop_blind = False
-        # When the area paper was last in view while carrying.
+        # When and where (bearing) the area paper was last in view while
+        # carrying.
         self._last_paper_s = float("-inf")
+        self._last_paper_bearing_rad = 0.0
         self._line_turn_until = 0.0
         self._line_stop_until = 0.0
         self._line_black = False
@@ -700,7 +702,8 @@ class AutoPilot:
         Once squaring up at the paper it stays committed: with cubes already
         on the paper its distance jittered around the commit distance and
         the blob dropped out now and then, and the robot danced between
-        squaring up and turning to the landmarks.
+        squaring up and turning to the landmarks. If it stays out and was
+        last seen off to a side, slide that way to bring it back.
         """
         cfg = self.cfg
         zone = self._zone_in_view(now)
@@ -708,9 +711,22 @@ class AutoPilot:
         paper = zone is not None and zone.color == ZONE_SOURCE_FLOOR
         if paper:
             self._last_paper_s = now
-        elif committed and now - self._last_paper_s < cfg.carry_paper_hold_s:
-            # The paper flickered out: wait for it, do not turn away.
-            return STOP
+            self._last_paper_bearing_rad = zone.bearing_rad
+        elif committed:
+            lost_s = now - self._last_paper_s
+            if lost_s < cfg.carry_paper_hold_s:
+                # The paper flickered out: wait for it, do not turn away.
+                return STOP
+            slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
+            off_side = (
+                abs(self._last_paper_bearing_rad)
+                > cfg.drop_align_tolerance_rad
+            )
+            if off_side and lost_s < slide_until_s:
+                # Squaring up pushed it out of view: slide back toward it.
+                self.state = STATE_CARRY_CENTER
+                side = _side_of(self._last_paper_bearing_rad)
+                return _strafe(side, cfg.strafe_speed)
         if zone is None:
             if now - self._search_start_s >= cfg.carry_zone_timeout_s:
                 return self._give_up_carrying(now)
@@ -751,11 +767,26 @@ class AutoPilot:
         crooked (a crooked push knocks the legos down), unless the paper is
         so close that the scoop hides the line: backing up to see it would
         leave the cube behind, and that close the robot faces it already.
+
+        Arriving diagonally, the paper sits off to a side: turning in place
+        pushed it out of view, so with its centre beyond
+        `square_max_bearing_rad` it slides toward it first.
         """
         cfg = self.cfg
+        side_tol = cfg.square_max_bearing_rad
+        if self.state == STATE_CARRY_CENTER:
+            side_tol *= cfg.align_exit_fraction
         entry_angle_rad = zone.entry_angle_rad
+        hidden = zone.distance_m <= cfg.entry_hidden_distance_m
+        needs_square = entry_angle_rad is not None and (
+            abs(entry_angle_rad) > cfg.entry_square_tolerance_rad
+        )
+        must_face = needs_square or (entry_angle_rad is None and not hidden)
+        if must_face and abs(zone.bearing_rad) > side_tol:
+            self.state = STATE_CARRY_CENTER
+            return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
         if entry_angle_rad is None:
-            if zone.distance_m > cfg.entry_hidden_distance_m:
+            if not hidden:
                 self.state = STATE_CARRY_NO_ENTRY
                 return STOP
             entry_angle_rad = 0.0

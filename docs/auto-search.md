@@ -31,6 +31,8 @@ stateDiagram-v2
   APPROACH --> CATCH: cube at the scoop and aligned
   CATCH --> CARRY: blind push of scoop_push_s
   CARRY --> SQUARE: paper's edge within deliver_commit_distance_m
+  CARRY --> CENTER: same, paper beyond square_max_bearing_rad
+  SQUARE --> CENTER: paper lost off to a side (slide back for carry_paper_slide_s)
   SQUARE --> NO_ENTRY: pink line not in view
   NO_ENTRY --> SQUARE: pink line in view
   SQUARE --> CENTER: facing the pink line squarely,\ncentre off to a side
@@ -68,6 +70,8 @@ then resume.
 | Only the legos in view | Drive toward their midpoint, slowing below `zone_stop_distance_m`; never push from there | A push started from the legos left the cube 20 cm short |
 | The paper in view, far | Steer toward the paper's centre | |
 | The paper's near edge within `deliver_commit_distance_m` (or at row `floor_arrive_v_px`) | Turn in place until facing the pink line squarely (`entry_square_tolerance_rad`) | A crooked push knocks the legos down |
+| At the paper, arriving diagonally: its centre beyond `square_max_bearing_rad`, or the pink line not in view | Slide toward it at `strafe_speed` before turning | Turning in place pushed the paper out of view and the robot alternated squaring up and turning to the legos for over a minute |
+| Squaring up, the paper drops out of view | Wait `carry_paper_hold_s`; if it was last seen off to a side, slide that way for up to `carry_paper_slide_s`; then steer by the legos | |
 | Square, the paper's centre off to a side | Slide sideways at `strafe_speed` (heading kept) until it is within `drop_align_tolerance_rad` | Enter in front of the centre, not on a diagonal |
 | The pink line not in view at the paper | Wait (`CARRY (no entry line)`) | Better stopped than pushing crooked |
 | Push | Straight, blind, for (edge + `deliver_insert_m` − `cube_ahead_m`) / `forward_speed_mps` | The near edge's distance is precise; the far edge's is not |
