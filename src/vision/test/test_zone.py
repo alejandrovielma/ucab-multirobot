@@ -239,3 +239,27 @@ def test_an_entry_line_nearer_on_the_right_means_turning_right():
         img
     )
     assert zone.entry_angle_rad < -0.05
+
+
+def test_an_entry_strip_apart_from_the_paper_is_found_below_it():
+    # Real area: black tape between the blue sheet and the pink strip, so the
+    # strip is its own blob outside the paper's bounding box.
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 40, BLUE)
+    paint_hsv(img, 200, 350, 240, 12, RED)
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
+        img
+    )
+    assert zone.entry_angle_rad is not None
+    assert abs(zone.entry_angle_rad) < 0.02
+
+
+def test_a_big_pink_blob_that_is_not_a_strip_is_not_the_entry_line():
+    # The table tinted pink near an image corner: big, but not flat.
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 40, BLUE)
+    paint_hsv(img, 400, 346, 30, 30, RED)
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
+        img
+    )
+    assert zone.entry_angle_rad is None

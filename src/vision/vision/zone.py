@@ -61,6 +61,15 @@ FLOOR_BOTTOM_MARGIN_PX = 3
 DEFAULT_ENTRY_MIN_AREA_PX = 150
 # Fewest outline points needed to fit the entry line.
 MIN_ENTRY_POINTS = 2
+# The entry line is searched from the paper's top down to one paper height
+# below it, and this many paper widths past each side: on the real area the
+# pink strip is a separate blob just below the blue sheet, outside its
+# bounding box.
+ENTRY_SIDE_MARGIN_WIDTHS = 0.5
+ENTRY_BELOW_HEIGHTS = 1.0
+# The entry strip looks at least this many times wider than tall; the table
+# tinted pink near the image corners makes big blobs that are not.
+ENTRY_MIN_FLATNESS = 3.0
 
 # Smaller polygons (twice their area, m^2) have no usable centroid.
 MIN_DOUBLE_AREA_M2 = 1e-6
@@ -157,6 +166,15 @@ def polygon_centroid(
         float(((xs + next_xs) * cross).sum() / scale),
         float(((ys + next_ys) * cross).sum() / scale),
     )
+
+
+def is_flat_strip(contour: np.ndarray) -> bool:
+    """
+    True when `contour` looks like a strip lying on the floor (much wider
+    than tall), as the area's entry line does.
+    """
+    _, _, width_px, height_px = cv2.boundingRect(contour)
+    return width_px >= ENTRY_MIN_FLATNESS * max(height_px, 1)
 
 
 def entry_angle(points: np.ndarray) -> float:
@@ -273,7 +291,14 @@ class ZoneLocator:
         color = self.params.entry_color
         if not color or color not in self._floor.ranges:
             return floor
-        x, y, width_px, height_px = floor.bbox
+        frame_h, frame_w = bgr.shape[:2]
+        left, top, width_px, paper_h = floor.bbox
+        margin_px = int(width_px * ENTRY_SIDE_MARGIN_WIDTHS)
+        x = max(0, left - margin_px)
+        y = top
+        width_px = min(frame_w, left + width_px + margin_px) - x
+        bottom = top + paper_h + int(paper_h * ENTRY_BELOW_HEIGHTS)
+        height_px = min(frame_h, bottom) - y
         hsv = cv2.cvtColor(
             bgr[y : y + height_px, x : x + width_px],
             cv2.COLOR_BGR2HSV,
@@ -283,9 +308,10 @@ class ZoneLocator:
             cv2.RETR_EXTERNAL,
             cv2.CHAIN_APPROX_NONE,
         )
-        if not contours:
+        strips = [c for c in contours if is_flat_strip(c)]
+        if not strips:
             return floor
-        outline = max(contours, key=cv2.contourArea)
+        outline = max(strips, key=cv2.contourArea)
         if cv2.contourArea(outline) < self.params.entry_min_area_px:
             return floor
         ground = [
