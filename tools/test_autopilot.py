@@ -48,14 +48,23 @@ class StubVision:
 
 class Seen:
     """
-    A detection or region: colour, distance, bearing and bottom row.
+    A detection or region: colour, distance, bearing, bottom row and the
+    turn that faces the area's entry line (0 = already square).
     """
 
-    def __init__(self, color, distance_m, bearing_rad=0.0, v=300):
+    def __init__(
+        self,
+        color,
+        distance_m,
+        bearing_rad=0.0,
+        v=300,
+        entry_angle_rad=0.0,
+    ):
         self.color = color
         self.distance_m = distance_m
         self.bearing_rad = bearing_rad
         self.v = v
+        self.entry_angle_rad = entry_angle_rad
 
 
 def make_pilot():
@@ -88,30 +97,26 @@ def test_pick_carry_deliver_and_count():
     assert pilot.state.startswith("EXPLORE")
 
 
-def test_the_delivery_push_crosses_the_black_line():
+def test_a_line_hit_during_the_delivery_push_counts_the_cube_and_stops():
     pilot, vision = make_pilot()
     pilot.carrying = True
     pilot.state = "CARRY"
     vision.zone = Seen("floor", 0.18)
     pilot.step(0.0)
     assert pilot.state == "DROP"
-    # The area's own tape under the sensor: keep pushing.
-    assert pilot.step(0.2, line_black=True).vy == 1.0
-    assert pilot.state == "DROP" and pilot.carrying
+    # The area's back tape: the cube is already inside.
+    assert pilot.step(0.2, line_black=True).speed == 0.0
+    assert pilot.state.startswith("LINE")
+    assert pilot.delivered_count == 1 and not pilot.carrying
 
 
-def test_carrying_near_the_paper_crosses_the_line_but_not_near_the_legos():
+def test_carrying_never_crosses_the_black_line_even_next_to_the_paper():
     pilot, vision = make_pilot()
     pilot.carrying = True
     pilot.state = "CARRY"
-    near_m = pilot.cfg.carry_line_ignore_distance_m - 0.05
-    vision.zone = Seen("floor", near_m)
+    vision.zone = Seen("floor", 0.3)
     pilot.step(0.0, line_black=True)
-    assert pilot.state.startswith("CARRY") and pilot.carrying
-    # Only the landmarks in view: the line is the arena border, stop there.
-    vision.zone = Seen("gate", near_m)
-    pilot.step(0.1, line_black=True)
-    assert pilot.state.startswith("LINE")
+    assert pilot.state.startswith("LINE") and not pilot.carrying
 
 
 def test_line_hit_while_carrying_leaves_the_cube_and_searches_again():
@@ -254,22 +259,52 @@ def test_a_turn_to_align_is_finished_before_driving_again():
     assert pilot.step(0.2).vy == 1.0 and pilot.state == "APPROACH"
 
 
-def test_delivery_faces_the_paper_centre_then_pushes_just_far_enough():
+def test_delivery_squares_up_to_the_pink_line_slides_in_front_then_pushes():
     pilot, vision = make_pilot()
     pilot.carrying = True
     pilot.state = "CARRY"
     cfg = pilot.cfg
-    # The paper's centre to the left (a diagonal approach): turn to it.
-    vision.zone = Seen("floor", 0.18, bearing_rad=0.3)
+    # Arrived at an angle (the pink line turned to the left): turn left.
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.3, entry_angle_rad=0.4)
     command = pilot.step(0.0)
-    assert pilot.state == "CARRY (align)" and command.wz > 0
-    # Facing it: push straight in, long enough to bring the cube there.
+    assert pilot.state == "CARRY (square)"
+    assert command.wz > 0 and command.vx == command.vy == 0.0
+    # Square, but the paper's centre is to the left: slide left, no turn.
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.3)
+    command = pilot.step(0.05)
+    assert pilot.state == "CARRY (center)"
+    assert command.vx < 0 and command.vy == command.wz == 0.0
+    # Square and in front: push straight in, far enough to bring the cube
+    # there.
     vision.zone = Seen("floor", 0.18)
     assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
     push_m = 0.18 + cfg.deliver_insert_m - cfg.cube_ahead_m
     push_s = push_m / cfg.forward_speed_mps
     assert pilot.step(0.1 + push_s - 0.01).vy == 1.0
     assert pilot.step(0.1 + push_s + 0.01).vy == -1.0
+
+
+def test_without_the_pink_line_in_view_it_waits_instead_of_pushing():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.18, entry_angle_rad=None)
+    assert pilot.step(0.0).speed == 0.0
+    assert pilot.state == "CARRY (no pink line)" and pilot.carrying
+
+
+def test_squaring_up_finishes_the_turn_before_sliding():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    tol_rad = pilot.cfg.entry_square_tolerance_rad
+    vision.zone = Seen("floor", 0.18, entry_angle_rad=-tol_rad * 1.5)
+    assert pilot.step(0.0).wz < 0 and pilot.state == "CARRY (square)"
+    # Inside the tolerance but not past the exit fraction: keep turning.
+    vision.zone = Seen("floor", 0.18, entry_angle_rad=-tol_rad * 0.8)
+    assert pilot.step(0.1).wz < 0 and pilot.state == "CARRY (square)"
+    vision.zone = Seen("floor", 0.18, entry_angle_rad=-tol_rad * 0.3)
+    assert pilot.step(0.2).vy == 1.0 and pilot.state == "DROP"
 
 
 def test_a_cube_still_in_front_after_backing_up_is_not_counted():
@@ -302,48 +337,19 @@ def test_a_close_paper_gets_a_short_push_and_backup():
     assert pilot.step(push_s + 0.35).vy == 0.0 and pilot.state == "DROP (turn)"
 
 
-def test_search_spins_then_goes_to_the_middle_spins_again_and_stops():
+def test_without_cubes_it_spins_then_moves_to_another_spot_and_keeps_going():
     pilot, vision = make_pilot()
     pilot.configure(now=0.0, enabled=True, reset=True)
     cfg = pilot.cfg
-    spin_s = cfg.search_spin_s
-    vision.zone = Seen("gate", 1.0)  # the area far away, straight ahead
-    for step in range(0, int(spin_s * 10)):
-        command = pilot.step(step * 0.1)
-        assert command.vy == 0.0 and command.wz != 0.0  # one spin in place
-    # Nothing seen: drive toward the middle (closer to the area).
-    command = pilot.step(spin_s + 0.05)
-    assert pilot.state == "EXPLORE (to center)" and command.vy == 1.0
-    # At the middle: spin once more...
-    vision.zone = Seen("gate", cfg.search_center_distance_m)
-    assert pilot.step(spin_s + 1.0).wz != 0.0
-    assert pilot.step(2 * spin_s).wz != 0.0
-    # ...and stop for good when it ends without a cube.
-    assert pilot.step(2 * spin_s + 1.1).speed == 0.0
-    assert pilot.state == "NO CUBES (stopped)"
-
-
-def test_too_close_to_the_area_the_search_backs_away_to_the_middle():
-    pilot, vision = make_pilot()
-    pilot.configure(now=0.0, enabled=True, reset=True)
-    vision.zone = Seen("floor", pilot.cfg.search_center_distance_m - 0.2)
-    command = pilot.step(pilot.cfg.search_spin_s + 0.05)
-    assert pilot.state == "EXPLORE (to center)" and command.vy == -1.0
-
-
-def test_a_cube_seen_restarts_the_search_from_a_spin():
-    pilot, vision = make_pilot()
-    pilot.configure(now=0.0, enabled=True, reset=True)
-    spin_s = pilot.cfg.search_spin_s
-    vision.zone = Seen("gate", pilot.cfg.search_center_distance_m)
-    pilot.step(spin_s + 0.05)  # at the middle: second spin
-    vision.det = Seen("yellow", 0.6)
-    pilot.step(spin_s + 1.0)
-    vision.det = None
-    t = spin_s + 1.0 + pilot.cfg.reacquire_s + 0.1
-    pilot.step(t)
-    assert pilot.state == "EXPLORE (turn)"  # a fresh spin, not a stop
-    assert pilot.step(t + spin_s - 0.5).wz != 0.0
+    vision.zone = Seen("gate", 1.0)  # the area far away: never goes there
+    turn_s = cfg.roam_period_s - cfg.roam_forward_s
+    command = pilot.step(0.1)
+    assert pilot.state == "EXPLORE (turn)" and command.wz != 0.0
+    command = pilot.step(turn_s + 0.1)
+    assert pilot.state == "EXPLORE (forward)" and command.vy == 1.0
+    # A second period: still searching, not stopped.
+    command = pilot.step(cfg.roam_period_s + 0.1)
+    assert pilot.state == "EXPLORE (turn)" and command.wz != 0.0
 
 
 def test_the_robot_goes_straight_for_a_cube_the_moment_it_sees_one():

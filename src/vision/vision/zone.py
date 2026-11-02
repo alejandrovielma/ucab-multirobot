@@ -57,6 +57,11 @@ DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM = False
 # touches it.
 FLOOR_BOTTOM_MARGIN_PX = 3
 
+# Smallest entry line blob (px) whose angle is trusted (TODO measure).
+DEFAULT_ENTRY_MIN_AREA_PX = 150
+# Fewest outline points needed to fit the entry line.
+MIN_ENTRY_POINTS = 2
+
 # Smaller polygons (twice their area, m^2) have no usable centroid.
 MIN_DOUBLE_AREA_M2 = 1e-6
 
@@ -91,6 +96,11 @@ class ZoneParams:
     # on the floor) instead of the middle of its near edge; the distance stays
     # the near edge's.
     floor_aim_centre: bool = False
+    # Colour of the line the robot enters the area across (one of
+    # `floor_colors`); its angle on the floor is measured so the robot can
+    # face it squarely. Empty = not measured.
+    entry_color: str = ""
+    entry_min_area_px: int = DEFAULT_ENTRY_MIN_AREA_PX
 
 
 def is_plausible_floor(
@@ -147,6 +157,18 @@ def polygon_centroid(
         float(((xs + next_xs) * cross).sum() / scale),
         float(((ys + next_ys) * cross).sum() / scale),
     )
+
+
+def entry_angle(points: np.ndarray) -> float:
+    """
+    Turn (rad, positive = left) that leaves the robot facing squarely the
+    straight line through the floor `points` ((forward_m, left_m) rows).
+    Facing it squarely, the line runs across the robot (along `left`).
+    """
+    forward, left = cv2.fitLine(points, cv2.DIST_L2, 0, 0.01, 0.01)[:2, 0]
+    if left < 0:
+        forward, left = -forward, -left
+    return math.atan2(-forward, left)
 
 
 def without_cubes_in_zone(
@@ -237,8 +259,46 @@ class ZoneLocator:
         if not is_plausible_floor(floor, bgr.shape[0], self.params):
             return None
         if self.params.floor_aim_centre:
-            return self._aim_at_floor_centre(bgr, floor)
-        return self._aim_at_center(floor)
+            floor = self._aim_at_floor_centre(bgr, floor)
+        else:
+            floor = self._aim_at_center(floor)
+        return self._with_entry_angle(bgr, floor)
+
+    def _with_entry_angle(self, bgr: np.ndarray, floor: Region) -> Region:
+        """
+        The area paper with the turn that faces its entry line squarely: the
+        line's outline projected on the floor and fitted with a straight
+        line. Unchanged when the line is not measured or not in view.
+        """
+        color = self.params.entry_color
+        if not color or color not in self._floor.ranges:
+            return floor
+        x, y, width_px, height_px = floor.bbox
+        hsv = cv2.cvtColor(
+            bgr[y : y + height_px, x : x + width_px],
+            cv2.COLOR_BGR2HSV,
+        )
+        contours, _ = cv2.findContours(
+            self._floor.mask(hsv, color),
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_NONE,
+        )
+        if not contours:
+            return floor
+        outline = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(outline) < self.params.entry_min_area_px:
+            return floor
+        ground = [
+            self._camera.ground_point(u + x, v + y)
+            for u, v in outline.reshape(-1, 2)
+        ]
+        points = [point[:2] for point in ground if point is not None]
+        if len(points) < MIN_ENTRY_POINTS:
+            return floor
+        return replace(
+            floor,
+            entry_angle_rad=entry_angle(np.array(points, dtype=np.float32)),
+        )
 
     def _aim_at_floor_centre(self, bgr: np.ndarray, floor: Region) -> Region:
         """

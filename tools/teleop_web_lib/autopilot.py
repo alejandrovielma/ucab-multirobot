@@ -54,8 +54,11 @@ STATE_NO_CUBES = f"{PREFIX_NO_CUBES} (stopped)"
 SUFFIX_FORWARD = " (forward)"
 SUFFIX_TURN = " (turn)"
 SUFFIX_ALIGN = " (align)"
-STATE_EXPLORE_FIND_AREA = f"{STATE_EXPLORE} (find area)"
-STATE_EXPLORE_TO_CENTER = f"{STATE_EXPLORE} (to center)"
+# Delivery approach (docs/auto-search.md): face the pink entry line squarely,
+# slide in front of the area's centre, or wait when the line is not in view.
+STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
+STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
+STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no pink line)"
 
 # --- Direction helpers --------------------------------------------------------
 # Direction of a turn: +1 toward the left, -1 toward the right.
@@ -175,10 +178,8 @@ class AutoPilot:
         self._ignore_cubes_until = 0.0
         # Turn direction while avoiding the area, fixed for the whole turn.
         self._avoid_dir = DIR_RIGHT
-        # Search without cubes (docs/auto-search.md): the last spin was made
-        # in the middle of the arena, and when the robot last had something
-        # to do (start, a cube seen, a delivery).
-        self._centered = False
+        # When the robot last had something to do (start, a cube seen, a
+        # delivery): the search gives up no_cubes_stop_s after it.
         self._idle_start_s = self._search_start_s
 
     # ---------- mode control ----------
@@ -202,7 +203,6 @@ class AutoPilot:
             )
             self._search_start_s = now
             self._idle_start_s = now
-            self._centered = False
             if reset:
                 self.collected_count = 0
                 self.delivered_count = 0
@@ -233,12 +233,7 @@ class AutoPilot:
             # Back from WASD or pause: if it had a cube, keep carrying it.
             self._resume_after_pause(now)
         self._line_black = line_black
-        crossing = self._may_cross_line(now)
-        if (
-            line_black
-            and not crossing
-            and not self.state.startswith(PREFIX_LINE)
-        ):
+        if line_black and not self.state.startswith(PREFIX_LINE):
             self._start_line_recovery(now)
         for phase in (self._line_phase, self._catch_phase, self._drop_phase):
             command = phase(now)
@@ -250,24 +245,6 @@ class AutoPilot:
         if self.state.startswith(STATE_CARRY):
             return self._carry_step(now)
         return self._search_step(now)
-
-    def _may_cross_line(self, now: float) -> bool:
-        """
-        True while delivering, or carrying with the area paper close: the
-        black line there is the area's own tape or the border next to its
-        entry, and turning back from it made the robot curve around instead
-        of going straight in.
-        """
-        if self.state.startswith(PREFIX_DROP):
-            return True
-        if not self.carrying:
-            return False
-        zone = self._zone_in_view(now)
-        return (
-            zone is not None
-            and zone.color == ZONE_SOURCE_FLOOR
-            and zone.distance_m <= self.cfg.carry_line_ignore_distance_m
-        )
 
     def _resume_after_pause(self, now: float) -> None:
         """
@@ -454,7 +431,6 @@ class AutoPilot:
         self.state = STATE_SEARCH
         self._search_start_s = now
         self._idle_start_s = now
-        self._centered = False
 
     def _cube_left_out(self, now: float) -> bool:
         """
@@ -487,7 +463,6 @@ class AutoPilot:
         self._reveal_pending = det.distance_m <= cfg.reveal_max_distance_m
         self._search_start_s = now
         self._idle_start_s = now
-        self._centered = False
         self._search_dir = _side_of(det.bearing_rad)
 
         # Cube at the scoop threshold (~18.5 cm or image bottom) and aligned.
@@ -548,43 +523,9 @@ class AutoPilot:
             self.state = STATE_EXPLORE_BACKUP
             return _backward(cfg.line_speed)
         zone = self._zone_in_view(now)
-        if self._spinning(now) and self._must_avoid(zone):
+        if self._must_avoid(zone):
             return self._avoid_step(zone)
-        return self._reacquire_step(now) or self._explore_step(now, zone)
-
-    def _spinning(self, now: float) -> bool:
-        """
-        True during the spin in place that scans for cubes.
-        """
-        return now - self._search_start_s < self.cfg.search_spin_s
-
-    def _explore_step(self, now: float, zone) -> DriveCommand:
-        """
-        No cube in view (docs/auto-search.md): spin once in place; if none
-        showed up, go to the middle of the arena (search_center_distance_m
-        from the area, the only landmark) and spin once more; then stop.
-        """
-        cfg = self.cfg
-        if self._spinning(now):
-            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        if self._centered:
-            return self._give_up()
-        if zone is None:
-            self.state = STATE_EXPLORE_FIND_AREA
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        error_m = zone.distance_m - cfg.search_center_distance_m
-        if abs(error_m) <= cfg.search_center_tolerance_m:
-            self._centered = True
-            self._search_start_s = now  # spin again from here
-            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        self.state = STATE_EXPLORE_TO_CENTER
-        if abs(zone.bearing_rad) > cfg.align_tolerance_rad:
-            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
-        if error_m > 0:
-            return _forward(cfg.roam_forward_speed)
-        return _backward(cfg.line_speed)
+        return self._reacquire_step(now) or self._roam(now, STATE_EXPLORE)
 
     def _reacquire_step(self, now: float) -> DriveCommand | None:
         """
@@ -656,15 +597,14 @@ class AutoPilot:
         self._search_start_s = now
         self._search_dir = _side_of(zone.bearing_rad)
         # The landmarks only lead there (slowing down near them): the push
-        # starts once the paper is in view, straight at its centre from
-        # wherever the robot is (no detour to enter square).
+        # starts once the paper is in view, from in front of the pink line.
         paper = zone.color == ZONE_SOURCE_FLOOR
         at_paper = paper and (
             zone.distance_m <= cfg.deliver_commit_distance_m
             or zone.v >= cfg.floor_arrive_v_px
         )
         if at_paper:
-            return self._drop_or_align(now, zone)
+            return self._square_and_drop(now, zone)
         stop_distance_m = (
             cfg.deliver_commit_distance_m if paper else cfg.zone_stop_distance_m
         )
@@ -675,17 +615,33 @@ class AutoPilot:
             STATE_CARRY,
         )
 
-    def _drop_or_align(self, now: float, zone) -> DriveCommand:
+    def _square_and_drop(self, now: float, zone) -> DriveCommand:
         """
-        At the paper: turn in place to face its centre, then push the cube
-        blind just far enough to bring it there.
+        At the paper: turn in place until facing the pink entry line
+        squarely, slide sideways (Mecanum, keeps the heading) until the
+        area's centre is straight ahead, then push the cube blind straight
+        in. Without the pink line in view it waits instead of pushing
+        crooked: a crooked push knocks the legos down.
         """
         cfg = self.cfg
-        if abs(zone.bearing_rad) > cfg.drop_align_tolerance_rad:
-            self.state = f"{STATE_CARRY}{SUFFIX_ALIGN}"
-            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
+        if zone.entry_angle_rad is None:
+            self.state = STATE_CARRY_NO_ENTRY
+            return STOP
+        # Once turning (or sliding), finish it: do not stop at the edge.
+        square_tol = cfg.entry_square_tolerance_rad
+        if self.state == STATE_CARRY_SQUARE:
+            square_tol *= cfg.align_exit_fraction
+        if abs(zone.entry_angle_rad) > square_tol:
+            self.state = STATE_CARRY_SQUARE
+            return _turn(_side_of(zone.entry_angle_rad), cfg.search_turn_speed)
+        center_tol = cfg.drop_align_tolerance_rad
+        if self.state == STATE_CARRY_CENTER:
+            center_tol *= cfg.align_exit_fraction
+        if abs(zone.bearing_rad) > center_tol:
+            self.state = STATE_CARRY_CENTER
+            return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
         # The near edge's distance is precise; the centre is half the sheet
-        # past it, along the push (also from a corner).
+        # past it, straight ahead.
         push_m = zone.distance_m + cfg.deliver_insert_m - cfg.cube_ahead_m
         self.state = STATE_DROP
         self._phase_until = now + push_m / cfg.forward_speed_mps

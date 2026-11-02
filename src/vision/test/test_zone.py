@@ -13,6 +13,7 @@ from vision.zone import (
     ZoneLocator,
     ZoneParams,
     choose_zone,
+    entry_angle,
     is_plausible_floor,
     polygon_centroid,
     without_cubes_in_zone,
@@ -182,3 +183,59 @@ def test_the_paper_can_be_aimed_at_its_centre_on_the_floor():
         ZoneParams(floor_colors=["blue"], floor_aim_centre=True),
     ).locate(img)
     assert abs(centre.bearing_rad - CAM.bearing_distance(140, 355)[0]) < 0.05
+
+
+def line_points(yaw_rad):
+    """
+    Floor points (forward_m, left_m) of a line 0.2 m ahead, seen by a robot
+    turned `yaw_rad` to the left of facing it squarely.
+    """
+    lefts = np.linspace(-0.1, 0.1, 11)
+    forwards = np.full_like(lefts, 0.2)
+    cos_yaw, sin_yaw = np.cos(-yaw_rad), np.sin(-yaw_rad)
+    return np.stack(
+        [
+            cos_yaw * forwards - sin_yaw * lefts,
+            sin_yaw * forwards + cos_yaw * lefts,
+        ],
+        axis=1,
+    ).astype(np.float32)
+
+
+def test_entry_angle_is_the_turn_that_faces_the_line_squarely():
+    assert abs(entry_angle(line_points(0.0))) < 1e-3
+    # Turned 0.3 rad to the left of square: turn 0.3 rad right.
+    assert abs(entry_angle(line_points(0.3)) + 0.3) < 1e-3
+    assert abs(entry_angle(line_points(-0.2)) - 0.2) < 1e-3
+
+
+def entry_params(**kwargs):
+    return ZoneParams(floor_colors=["blue", "red"], **kwargs)
+
+
+def test_the_entry_line_angle_is_measured_only_when_asked_and_in_view():
+    img = blank()
+    paint_hsv(img, 220, 330, 200, 30, BLUE)
+    paint_hsv(img, 220, 360, 200, 12, RED)  # the entry strip, square
+    off = ZoneLocator(RANGES, CAM, entry_params()).locate(img)
+    assert off.entry_angle_rad is None
+    on = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert abs(on.entry_angle_rad) < 0.02
+    img = blank()
+    paint_hsv(img, 220, 330, 200, 42, BLUE)  # no entry strip
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
+        img
+    )
+    assert zone is not None and zone.entry_angle_rad is None
+
+
+def test_an_entry_line_nearer_on_the_right_means_turning_right():
+    img = blank()
+    paint_hsv(img, 200, 300, 240, 60, BLUE)
+    strip = np.array([[200, 350], [440, 380], [440, 392], [200, 362]])
+    bgr = cv2.cvtColor(np.uint8([[RED]]), cv2.COLOR_HSV2BGR)[0, 0]
+    cv2.fillPoly(img, [strip], [int(c) for c in bgr])
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
+        img
+    )
+    assert zone.entry_angle_rad < -0.05
