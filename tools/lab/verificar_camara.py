@@ -51,7 +51,7 @@ def try_open_real_camera(width=640, height=480, target_fps=12):
             cam.configure(
                 cam.create_video_configuration(
                     main={"size": (width, height), "format": "RGB888"},
-                    controls={"FrameDurationLimits": (frame_us, frame_us)},
+                    controls={"FrameDurationLimits": (frame_us, frame_us), "HFlip": 1, "VFlip": 1},
                 )
             )
             cam.start()

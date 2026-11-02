@@ -286,7 +286,9 @@ class Camera:
 
         cam = Picamera2()
         # Picamera2 manual: "RGB888" is ordered [B, G, R] in memory, which is what OpenCV expects.
-        cam.configure(cam.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"}))
+        # Camera is mounted upside down: hflip=True, vflip=True rotates 180 degrees.
+        cam.configure(cam.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"},
+                                                     controls={"HFlip": 1, "VFlip": 1}))
         cam.start()
         time.sleep(0.5)
         self._read = cam.capture_array
@@ -294,8 +296,10 @@ class Camera:
     def _open_gstreamer(self) -> None:
         import cv2
 
+        # Rotate 180 (flip-method=2) for upside-down mounted camera
         pipeline = (
             f"libcamerasrc ! video/x-raw,width={self.width},height={self.height},format=BGRx ! "
+            "videoflip method=rotate-180 ! "
             "videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1"
         )
         self._from_capture(cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER))
@@ -306,9 +310,11 @@ class Camera:
         cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self._from_capture(cap)
+        self._from_capture(cap, rotate180=True)
 
-    def _from_capture(self, cap) -> None:
+    def _from_capture(self, cap, rotate180: bool = False) -> None:
+        import cv2
+
         if not cap.isOpened():
             raise RuntimeError("VideoCapture did not open")
         ok, frame = cap.read()
@@ -318,7 +324,9 @@ class Camera:
 
         def read():
             ok, img = cap.read()
-            return img if ok else None
+            if not ok or img is None:
+                return None
+            return cv2.rotate(img, cv2.ROTATE_180) if rotate180 else img
 
         self._read = read
 

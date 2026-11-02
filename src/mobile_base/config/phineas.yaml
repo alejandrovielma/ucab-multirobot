@@ -16,7 +16,7 @@
     turn_angle_min: 2.356  # 135 deg
     turn_angle_max: 3.927  # 225 deg
     k_turn: 1.5
-    approach_speed: 0.10
+    approach_speed: 0.06  # m/s, slow toward the cube so the fixed scoop takes it straight
     approach_turn_min: 0.4  # rad/s, slowest spin while centering a cube
     approach_align: 0.15
     lost_timeout: 1.0
@@ -32,6 +32,10 @@
     spin_hold: 1.0  # s a carry spin keeps its direction (two cues flipping it made the robot dither)
     approach_spin_timeout: 4.0  # s centering by spinning: longer = the cube turns with the robot
     approach_backoff_time: 1.5  # s backing off to leave it
+    verify_time: 1.0  # s stopped with the target in view before approaching it (a one-frame color is not a cube)
+    scan_period: 8.0  # s of exploring between slow in-place scans (0 = off)
+    scan_turn_speed: 0.5  # rad/s, slow so no cube is skipped; >= approach_turn_min or the motors stall
+    scan_angle: 6.283  # rad, a full turn
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
     capture_distance: 0.08  # m pushed so the cube enters the U (48 mm deep); time = distance / capture_speed

@@ -9,7 +9,9 @@ forbidden and neutral cubes may be moved on the track but never into the square.
 
 IDLE     -> all zeros until a mission with at least one target color arrives.
 EXPLORE  -> drive forward; on the border line back off line_backoff and spin a random 135-225 deg
-            (measured with the overhead pose; a random time when there is no pose).
+            (measured with the overhead pose; a random time when there is no pose). Every scan_period
+            a slow full spin in place looks for nearby cubes; a target seen stops the robot for
+            verify_time and is approached only if it stays in view.
 APPROACH -> spin in place until the largest (closest) target cube is centered, then drive straight.
 CAPTURE  -> push forward for a fixed time so the cube enters the fixed scoop; it counts only if the
             camera then sees a target cube inside the U (scoop_color), otherwise APPROACH again.
@@ -149,6 +151,14 @@ class BehaviorParams:
     # it and ignore it for skip_time. 0 = off.
     approach_spin_timeout: float = 0.0  # s
     approach_backoff_time: float = 1.5  # s
+    # Think before acting: a target first seen while exploring stops the robot, which approaches only if
+    # the target stays in view this long (one misread frame or a passing color is not a cube). 0 = off.
+    verify_time: float = 0.0  # s
+    # Scan in place while exploring: every scan_period of driving, a slow full spin looks for cubes
+    # nearby before driving on (a fast spin blurs and skips small cubes). 0 = off.
+    scan_period: float = 0.0  # s
+    scan_turn_speed: float = 0.5  # rad/s, keep >= approach_turn_min (slower stalls the motors)
+    scan_angle: float = 2.0 * math.pi  # rad
     capture_cy: float = 0.62  # cube this low in the image is at the scoop mouth (IMX219-120, measured 0.66)
     capture_speed: float = 0.08  # m/s
     # Push of this length so the cube enters the U (48 mm deep): timed as distance / capture_speed, so a
@@ -345,6 +355,9 @@ class BehaviorFSM:
         self._assumed = ""  # color of the cube assumed inside the scoop (assume_capture)
         self._absent_since: float | None = None  # CAPTURE (assume_capture): no target at the mouth since
         self._align_since: float | None = None  # APPROACH: spinning to center the target since
+        self._verify_since: float | None = None  # EXPLORE: stopped, target in view since (verify_time)
+        self._scan_due: float | None = None  # EXPLORE: next in-place scan at
+        self._scan_until: float | None = None  # EXPLORE: scanning in place until
         self._yield_since: float | None = None  # camera carry: waiting for the other robot since
         self._dodges = 0  # camera carry: sidesteps around non-target cubes in this transport
         self._dodging = False
@@ -732,13 +745,24 @@ class BehaviorFSM:
             self._turn_until = None
         if self._turn_until is None:
             if inp.line_front or self._square_ahead(inp):
+                self._verify_since = self._scan_until = None
                 self._start_line_turn(inp.now, inp.pose)
             elif self._target(inp.cubes, inp.now) is not None:
+                if p.verify_time > 0.0:
+                    # Stop and look before committing: approach only a target that stays in view.
+                    self._scan_until = None
+                    self._verify_since = inp.now if self._verify_since is None else self._verify_since
+                    if inp.now - self._verify_since < p.verify_time:
+                        self.note = "cube seen: stopped to verify it"
+                        return ZERO
+                self._verify_since = None
                 self.state = State.APPROACH
                 self._last_seen = inp.now
                 self._aligning = False
                 self._strafe_since = self._align_since = self._avoid_since = None
                 return self._approach(inp)
+            else:
+                self._verify_since = None  # gone before verify_time: not a cube, keep exploring
         if inp.now < self._line_backoff_until:
             return (-p.reverse_speed, 0.0, 0.0)  # body back inside the tape before spinning
         if self._backoff_until is not None:
@@ -763,12 +787,33 @@ class BehaviorFSM:
             # misread part of the robot), so dodging it never ends. Ignore it for a while.
             self._avoid_ignore_until = inp.now + p.skip_time
             self._avoid_since = None
+        scan = self._scan(inp)
+        if scan is not None:
+            return scan
         if (inp.est_pose is not None and all(math.isfinite(v) for v in inp.est_pose)
                 and inp.now >= self._guide_off_until):
             guided = self._guided(inp)
             if guided is not None:
                 return guided
         return (p.explore_speed, 0.0, 0.0)
+
+    def _scan(self, inp: BehaviorInput) -> Command | None:
+        """Slow full spin in place every scan_period of exploring (timed, works without a pose); None = drive."""
+        p = self.params
+        if p.scan_period <= 0.0 or p.scan_turn_speed <= 0.0:
+            return None
+        if self._scan_until is not None:
+            if inp.now < self._scan_until:
+                self.note = "scanning in place for cubes"
+                return (0.0, 0.0, p.scan_turn_speed)
+            self._scan_until = None
+            self._scan_due = inp.now + p.scan_period
+        if self._scan_due is None:
+            self._scan_due = inp.now  # first explore tick: look around before driving
+        if inp.now >= self._scan_due:
+            self._scan_until = inp.now + p.scan_angle / p.scan_turn_speed
+            return (0.0, 0.0, p.scan_turn_speed)
+        return None
 
     def _guided(self, inp: BehaviorInput) -> Command | None:
         """Star motion toward the cartographer's goal: spin in place to face it, then straight. The tape

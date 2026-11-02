@@ -32,6 +32,10 @@
     spin_hold: 1.0  # s a carry spin keeps its direction (two cues flipping it made the robot dither)
     approach_spin_timeout: 4.0  # s centering by spinning: longer = the cube turns with the robot
     approach_backoff_time: 1.5  # s backing off to leave it
+    verify_time: 0.0  # s stopped to verify a target before approaching it (0 = off; Phineas uses 1.0)
+    scan_period: 0.0  # s of exploring between slow in-place scans (0 = off; Phineas uses 8.0)
+    scan_turn_speed: 0.5  # rad/s
+    scan_angle: 6.283  # rad, a full turn
     capture_cy: 0.62  # IMX219-120: cube at the scoop mouth measured at 0.66 in Webots
     capture_speed: 0.08
     capture_distance: 0.08  # m pushed so the cube enters the U (48 mm deep); time = distance / capture_speed
