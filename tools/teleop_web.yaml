@@ -6,7 +6,7 @@ motors:
   driver: fusion_hat
   # PWM channels (a, b) per wheel: M0=(11,10) M1=(9,8) M2=(6,7) M3=(4,5).
   # Mapping checked channel by channel after the robot was rewired (11.2026): M0=FR,
-  # M1=RL, M2=FL, M3=RR. The *_inverted flags below were checked in the same test.
+  # M1=RL, M2=FL, M3=RR. Names are the real wheels (drive.py maps the keys' axes).
   fusion_channels:
     fl: [6, 7]
     fr: [11, 10]
@@ -21,10 +21,11 @@ motors:
   # nSLEEP pins of both DRV8833 (must be HIGH to enable the H-bridges).
   nsleep_pins: [12, 13]
   # true if that wheel spins backwards (inverted here, not in the wiring).
+  # Checked with the keys after the rewiring (11.2026): the rear wheels spun backwards.
   fl_inverted: true
   fr_inverted: false
-  rl_inverted: true
-  rr_inverted: false
+  rl_inverted: false
+  rr_inverted: true
   pwm_frequency_hz: 200
   # Duty cycle cap (0–1). Start low and raise it with the wheels off the ground.
   max_duty_ratio: 0.9
@@ -51,14 +52,14 @@ camera:
   # src/vision/config/hsv_ranges.yaml, measured in the cropped mode).
   # hfov_rad: from the lego measured at 50 cm (61 px tall, 6.4 cm: focal 477 px,
   # about 68 degrees); height_m: 5.8 cm measured, centre of the lens to the
-  # table (the old 0.10 was wrong); tilt_rad: the camera was tilted further down
-  # (11.2026), least-squares fit to cubes at 20, 30 and 45 cm (errors +2.1,
-  # -1.2, 0.0 cm; was 0.0605). The image bottom now sees 5.8 cm from the lens.
+  # table (the old 0.10 was wrong); tilt_rad: refitted with the new scoop and paddles on (11.2026),
+  # least-squares fit to cubes at 20, 30 and 45 cm (errors -0.5, -0.9, +0.5 cm; was 0.2822,
+  # 0.2612, 0.3222, 0.0605 before). The image bottom now sees 7.7 cm from the lens.
   # TODO re-check height_m and the far range (60+ cm).
   model:
     hfov_rad: 1.1826
     height_m: 0.058
-    tilt_rad: 0.3222
+    tilt_rad: 0.1835
   target_colors: [yellow]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
@@ -75,32 +76,46 @@ camera:
     # table that hid the cubes inside it. The real sheet is H 88-92, S 67-101, V 166-183.
     # V from 140 (was 110): up close the area's black tape reads H 93-98, S 66-91, V 115-131,
     # joined the sheet's blob and pulled its centre and near edge onto the tape; the robot
-    # aimed right of the sheet and left a cube on the tape. TODO recheck if the light changes.
-    area_blue: [74, 50, 140, 100, 140, 195]
+    # aimed right of the sheet and left a cube on the tape. S from 65 (was 50): with the camera
+    # re-tilted (11.2026) the far table by the border tape reads H 83-92, S 45-83 (median 53),
+    # V 147-203; a 3466 px blob of it was taken for the area 24 cm away and hid the three cubes
+    # on it. From 65 that blob is 587 px and the real sheet is still found.
+    # TODO recheck if the light changes.
+    area_blue: [74, 65, 140, 100, 140, 195]
     # Two ranges: its hue wraps (the pink strip reads H 175-179 and 0-3, S 43-52, V 203-222 up
     # close; the old 3-22 caught only its lower rim).
     area_pink: [0, 25, 140, 22, 100, 235, 165, 25, 140, 179, 100, 235]
+    # The real area (11.2026): a pocket of black tape in the border (16.6 cm wide inside) with a
+    # 13.8 cm deep teal sheet between two 1.8 cm lime-green tape strips; the robot enters across
+    # the near strip. The teal measured from 30 cm reads H 94-95, S 207-232, V 152-160: far from
+    # the table (H ~73, S ~30) and from the dark things behind the area (V ~83).
+    area_teal: [88, 150, 120, 102, 255, 220]
+    # The lime strips read H 74-86, S 54-123 from 30 cm, where they are 4-5 rows tall and blend
+    # with the teal and the table: this camera renders them sea-green, not yellow (the cubes are
+    # H 20-36). TODO measure up close (~15 cm) and narrow it.
+    area_lime: [55, 60, 140, 86, 160, 225]
   zone:
-    # The area is the blue sheet plus the pink line where it starts (the
-    # robot enters across the pink one). The claw robot's blue/green parts
-    # were taken for the old blue/green paper (distances of 187 cm and more),
-    # so those colours stay out; these two ranges exclude it (it is dark).
-    floor_colors: [area_blue, area_pink]
+    # The area is the sheet plus the strip where it starts (the robot enters across it). The claw
+    # robot's blue/green parts were taken for the old blue/green paper (distances of 187 cm and
+    # more), so those colours stay out; these ranges exclude it (it is dark).
+    floor_colors: [area_teal, area_lime]
     # Aim at the paper's centre on the floor (its outline projected), not the middle of its near
     # edge: the robot slides sideways until that centre is straight ahead before pushing.
     floor_aim_centre: true
-    # The robot enters across the pink line: its angle on the floor tells how far to turn to face
-    # it squarely before pushing. TODO check the pink strip is found at 20 cm under this light.
-    entry_color: area_pink
+    # The robot enters across the near lime strip: its angle on the floor tells how far to turn
+    # to face it squarely before pushing. TODO check it is found at 20 cm under this light.
+    entry_color: area_lime
     entry_min_area_px: 150
     # Larger than the old default: a small blob (1600 px) matched the claw's
     # surroundings; the real area is ~14700 px at 50 cm and ~3700 at 1 m.
     floor_min_area_px: 3000
-    # Under some white balances (facing a dark wall) the pale table or the
-    # sign paper read as blue: a real blob has floor in front of it and is not
-    # bigger than ~30% of the image.
-    floor_max_area_px: 90000
-    floor_ignore_touching_bottom: true
+    # Under some white balances (facing a dark wall) the pale table or the sign paper read as the
+    # old pale blue, so blobs touching the image bottom or over ~30% of it were dropped. The real
+    # area's teal (S from 150) is far from the table (S ~30), and while the robot pushes a cube in
+    # the area fills the bottom of the image: dropping it there ended the guided push at 16-20 cm
+    # and the blind rest carried the cube across the area (11.2026).
+    floor_max_area_px: 200000
+    floor_ignore_touching_bottom: false
     # Cubes this many px nearer than the landmarks' bases still count as already delivered when
     # only the gate is known. The shared 80 was tuned in the old cropped mode; in this one it
     # covered everything from the legos (86 cm) to ~30 cm in front of them, so a cube 50 cm away
@@ -110,6 +125,12 @@ camera:
     # graph paper). Cubes inside it are ignored by their distance from this point, so with 0.38
     # a delivered cube near the red lego was not covered and the robot went for it again.
     gate_aim_fraction: 0.5
+    # On the real area the pots stand right beside it and the legos 12.5 cm from its centre on
+    # each side (11.2026; moved in from 22.5 cm, where the robot lost them while delivering a
+    # fourth cube): with only one lego in view, the area is 12.5 / 6.4 cm (its height) = 2.0
+    # lego heights towards the middle (the old 2.4 / 3.2 were for the temporary area).
+    left_aim_heights: 2.0
+    right_aim_heights: 2.0
   # Accept only cubes that stand on the white table: the strip just below
   # them must be bright and unsaturated. A yellow object in the room behind
   # the table (a chair, a shelf) has something dark below it; it was taken
@@ -143,9 +164,9 @@ camera:
 
 line_sensor:
   # GPIO (BCM) of the bottom TCRT5000's DO output. null = no sensor (black line not seen).
-  # Power it from 3.3 V, not 5 V. Wired like the ucab-multirobot repo: 40-pin header,
-  # signal on GPIO5 (pin 29), GND on pin 30, VCC on 3V3 (pin 1). The HAT does not use GPIO5.
-  pin: 5
+  # Power it from 3.3 V, not 5 V. Rewired (11.2026) to the Fusion HAT+ DIGITAL port 27: DO on
+  # its SIG pin (GPIO27), VCC on its 3V3 pin, GND on its - pin. Before it was GPIO5 (pin 29).
+  pin: 27
   # DO value over the black tape (the usual module gives 1 on black, 0 on white).
   black_value: 1
   # Black reads in a row (one per 20 ms loop) before the robot reacts. Single reads while moving
@@ -156,16 +177,21 @@ line_sensor:
   # Fusion HAT+ analog input (0-3 = A0-A3) where the module's AO pin is wired,
   # to see how much light each surface reflects while the potentiometer is
   # set. null = AO not wired. AO goes to the HAT's signal pin only: keep the
-  # module's VCC on 3V3 (the output must stay under 3.3 V).
+  # module's VCC on 3V3 (the output must stay under 3.3 V). Since the rewiring: ADC row 0 SIG.
   adc_channel: 0
+  # Also black when AO reads at least this (mV); null = DO only. The DO threshold (the
+  # potentiometer) flipped at ~1700-1900 mV while the border tape read 1610-2400 mV, and the
+  # robot crossed the border without seeing it (11.2026). White reads ~120-200 mV.
+  black_mv: 900
 
 auto:
   # NEVER start in Auto: the operator turns it on from the page.
   enabled: false
-  # Geometry (camera tilted down 11.2026): the image bottom (row 479) sees a cube's near edge
-  # down to 5.8 cm from the lens and the scoop front is ~0.7 cm ahead of the lens, so the last
-  # ~5 cm before the scoop are blind. The blind push starts at 12.5 cm from the lens (row 294):
-  # ~12 cm before the scoop. TODO re-measure the forward speed.
+  # Scoop (measured 11.2026, from the lens along the table): a curved band 3.5 cm tall whose
+  # deepest point is 4 cm ahead, with side paddles whose tips reach 7.5 cm and 12.5 cm apart
+  # inside. The band hides the floor nearer than ~10 cm from the camera (image rows below
+  # ~359), and a 3 cm cube in the scoop is hidden behind it. The blind push starts with the
+  # cube's near face at 12.5 cm (row 362), still in view and 5 cm before the paddle tips.
   stop_distance_m: 0.125
   slow_down_distance_m: 0.45
   forward_speed: 0.42
@@ -179,11 +205,16 @@ auto:
   # Longest time searching without seeing any cube before stopping for good.
   # Counted from the last thing it did (start, a cube seen, a delivery); meanwhile it roams.
   no_cubes_stop_s: 60.0
-  # Time (s) driving straight blind at ~18.5 cm to push the cube into the scoop.
-  # Forward at 0.42 measured ~0.31 m/s (4 pushes of 0.67 s moved ~21 cm each). The cube is
-  # ~11.8 cm from the scoop when the push starts, so 0.5 s (15.5 cm) touches it and seats it
-  # ~3.7 cm; longer would only shove it farther.
+  # Time (s) driving straight blind to push the cube into the scoop. The cube's near face is
+  # 8.5 cm from the scoop's deepest point (12.5 - 4) when the push starts. 0.35 s fell short on
+  # the robot (11.2026): the cube was still 8 cm ahead of the lens afterwards and the robot
+  # carried an empty scoop. Short pushes cover ~0.21 m/s (the motors' ramp-up), so 0.5 s is
+  # ~10.5 cm. TODO check that the cube ends against the band.
   scoop_push_s: 0.5
+  # Then stop catch_check_s and look: a cube still in view within catch_check_distance_m did
+  # not go in, so it is not counted and the robot goes for it again.
+  catch_check_s: 0.3
+  catch_check_distance_m: 0.20
   # Black line: stop, move opposite to the approach direction, then turn inward.
   line_stop_s: 0.2
   line_backup_s: 0.5
@@ -195,14 +226,14 @@ auto:
   # landmarks (59 cm away) left the cube ~20 cm short of the paper and still counted it.
   zone_stop_distance_m: 0.59
   # Area paper in view: also at it when its near edge is this low in the image (px), 12.0 cm
-  # from the lens (row 301 since the camera was tilted down; was 436), even if its centre still
+  # from the lens (row 370 with the scoop on; was 321, 331, 301, 436), even if its centre still
   # reads farther than deliver_commit_distance_m.
-  floor_arrive_v_px: 301
+  floor_arrive_v_px: 370
   # Then back up leaving the cube and turn to look for the next one.
   deliver_turn_s: 2.0
-  # A cube counts as at the scoop when its bottom edge passes this image row (px): row 301 is
-  # a cube near edge at ~12 cm from the lens (was 436 before the camera was tilted down).
-  scoop_arrive_v_px: 301
+  # A cube counts as at the scoop when its bottom edge passes this image row (px): row 370 is
+  # a cube near edge at ~12 cm from the lens (was 321, 331, 301, 436 with earlier tilts).
+  scoop_arrive_v_px: 370
   # Catch / drop only start if the bearing is within align_tolerance_rad times this.
   catch_align_factor: 1.4
   # Roaming without a target: turn to scan, then drive forward roam_forward_s at the end of every
@@ -238,26 +269,56 @@ auto:
   # Delivery needs the robot to face the area squarely: legos stand at both
   # sides of it and a crooked push knocks them down. TODO measure
   drop_align_tolerance_rad: 0.12
-  # After the push, back up this long: at 0.35 measured ~0.23 m/s, 1.0 s is 23 cm, enough to
-  # leave the area.
-  floor_deliver_backup_s: 1.0
-  # Delivery, always head-on across the pink line: with the paper's near edge this close (m),
-  # turn in place until facing the pink line squarely (entry_square_tolerance_rad), slide
-  # sideways at strafe_speed until the paper's centre is within drop_align_tolerance_rad, then
-  # push the cube straight in until it is deliver_insert_m past that edge (half the 13.6 cm
-  # sheet). Without the pink line in view it waits (state "CARRY (no pink line)"). The push lasts
-  # (edge + insert - cube_ahead_m) / forward_speed_mps: forward at 0.42 measured ~0.31 m/s, the
-  # cube's centre sits ~2.2 cm ahead of the lens. An earlier squared entry missed the pink line
-  # at 30 cm (before the two-range area_pink). TODO measure entry tolerance and strafe speed
+  # After the push, back up this long. 1.0 s left a cube that stayed outside within the ~10 cm
+  # the scoop hides from the camera, so the check after backing up missed it; 1.5 s puts it
+  # back in view.
+  floor_deliver_backup_s: 1.5
+  # Delivery, always head-on across the entry strip: with the area's near edge this close (m),
+  # turn in place until facing the strip squarely (entry_square_tolerance_rad), slide sideways
+  # at strafe_speed until the area's centre is within drop_align_tolerance_rad, then push the
+  # cube straight in until its centre is deliver_insert_m past that edge: the middle of the
+  # real area's teal sheet (1.8 cm strip + 13.8 / 2). Without the strip in view it waits (state
+  # "CARRY (no entry line)"). The cube's centre sits 5.5 cm ahead of the lens (against the
+  # scoop's deepest point, 4 cm, plus half the 3 cm cube). TODO measure entry tolerance and
+  # strafe speed
   deliver_commit_distance_m: 0.20
-  deliver_insert_m: 0.07
-  forward_speed_mps: 0.31
-  cube_ahead_m: 0.022
+  # Once squaring up, stay committed while the paper reads up to this much (m) farther, and wait
+  # still this long (s) if it drops out of view. With three cubes already on the paper its
+  # distance jittered 18-22 cm and the blob came and went: the robot danced between squaring up
+  # and turning to the landmarks and never delivered the fourth cube (11.2026).
+  deliver_commit_hysteresis_m: 0.08
+  carry_paper_hold_s: 1.0
+  deliver_insert_m: 0.087
+  # The push is guided by the camera. Mainly by the area's far edge: drive until it is
+  # deliver_far_stop_m away, so it never pushes past the area. Recorded pushes read the far edge
+  # 12-13 cm beyond the near one: the teal alone (13.8 cm), the thin lime strips mostly out of
+  # the blob. The cube's centre over the teal's middle is 6.9 + cube_ahead_m 5.5 = 12.4 cm from
+  # it; 12 errs short, never across (11.2026). Without the far edge: drive while the near edge
+  # is in view (seen within deliver_edge_timeout_s) and farther than deliver_blind_edge_m (the
+  # scoop hides the floor below ~10 cm), at most deliver_push_max_s; then push blind (edge +
+  # insert - cube_ahead_m) at the speed measured from the edge coming closer (over
+  # deliver_speed_min_s at least), never past the far edge last seen. TODO check on the robot
+  deliver_far_stop_m: 0.12
+  deliver_blind_edge_m: 0.12
+  deliver_edge_timeout_s: 0.3
+  deliver_push_max_s: 3.0
+  deliver_speed_min_s: 0.3
+  # Fallback speed (m/s) for the blind part when the edge was not seen long enough to measure
+  # it: 0.31 on 0.67 s pushes, 0.21 and 0.12 on the short delivery pushes (11.2026).
+  forward_speed_mps: 0.15
+  cube_ahead_m: 0.055
   entry_square_tolerance_rad: 0.10
+  # With the paper's near edge this close (m) the scoop hides the pink line: deliver without
+  # squaring. Re-catching a cube left at the paper's edge put the robot at 8-14 cm, where it
+  # waited "CARRY (no entry line)" for good (11.2026); backing up would leave the cube behind.
+  entry_hidden_distance_m: 0.15
   strafe_speed: 0.40
-  # A cube this close (m) once backed up from a delivery was left outside: it does not count and
-  # the robot goes for it again. TODO measure
+  # A cube this close (m) and within drop_verify_bearing_rad of straight ahead once backed up
+  # from a delivery was left outside: it does not count and the robot goes for it again. Without
+  # the bearing limit, another cube on the table nearby undid two deliveries that were on the
+  # area (11.2026). TODO measure
   drop_verify_distance_m: 0.30
+  drop_verify_bearing_rad: 0.2
   # Closer than this to its target, the alignment tolerance is widened by the
   # factor below (a few cm sideways is already a big angle up close). Keep the
   # factor under catch_align_factor. TODO measure
