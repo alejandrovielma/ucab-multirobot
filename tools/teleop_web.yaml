@@ -121,6 +121,17 @@ camera:
     # covered everything from the legos (86 cm) to ~30 cm in front of them, so a cube 50 cm away
     # was thrown out as "delivered" and the robot ignored it.
     ignore_margin_px: 10
+    # Measured on the floor instead (m), so it does not depend on how far the area is. A cube
+    # already delivered and left on the near lime strip was picked up again from just in front of
+    # the paper (02.11.2026). With the paper in view, a cube up to ignore_floor_margin_m nearer
+    # than its near edge counts as in the area (the blob's near edge is the teal's or, when the
+    # lime is found, the strip's: 3.5 cm covers a cube on the strip either way without taking one
+    # left outside, which the delivery check must still see);
+    # with only the legos, up to ignore_gate_depth_m nearer than them (they stand beside the
+    # area's middle: half the 17.4 cm depth + the cube, rounded up). Cubes behind either are
+    # outside the arena and are ignored too. TODO measure
+    ignore_floor_margin_m: 0.035
+    ignore_gate_depth_m: 0.13
     # The temporary area sits at the midpoint of the two legos (the shared 0.38 was for the old
     # graph paper). Cubes inside it are ignored by their distance from this point, so with 0.38
     # a delivered cube near the red lego was not covered and the robot went for it again.
@@ -161,6 +172,18 @@ camera:
     side_ratio: 1.0
     # Share of dark pixels in that area that marks the cube as at the border.
     min_dark_fraction: 0.12
+    # Skip cubes outside the arena: the border tape crosses the floor between the robot and the
+    # cube. In run 3 (02.11.2026) the robot went five times for a cube past the line, the line
+    # sensor stopped it each time and it pushed the cube farther out. This camera renders the tape
+    # grey (min ~98 against a ~210 table), so it is taken relative to the table: pixels at most
+    # beyond_dark_ratio of it, rows at least beyond_row_fraction of such pixels, beyond_min_rows
+    # of them in a row. Checked on 269 target cubes of three runs: it flagged the ones past the
+    # line and the ones beside the pots, and no cube inside the arena (their contact shadow is
+    # ~143; a far blurred line gave 2 rows).
+    beyond_line: true
+    beyond_dark_ratio: 0.55
+    beyond_row_fraction: 0.6
+    beyond_min_rows: 3
 
 line_sensor:
   # GPIO (BCM) of the bottom TCRT5000's DO output. null = no sensor (black line not seen).
@@ -288,6 +311,14 @@ auto:
   # and turning to the landmarks and never delivered the fourth cube (11.2026).
   deliver_commit_hysteresis_m: 0.08
   carry_paper_hold_s: 1.0
+  # Arriving diagonally (from beside the yellow pot), turning in place to face the strip pushed
+  # the paper out of view, the robot turned back to the green lego, saw the paper again and kept
+  # alternating "CARRY (square)" / "CARRY (align)" for over a minute (02.11.2026). With the
+  # paper's centre farther than square_max_bearing_rad off straight ahead it slides toward it
+  # first (Mecanum, keeps the heading); if the paper drops out anyway it slides toward where it
+  # was last seen for up to carry_paper_slide_s after carry_paper_hold_s. TODO measure
+  square_max_bearing_rad: 0.30
+  carry_paper_slide_s: 2.0
   deliver_insert_m: 0.087
   # The push is guided by the camera. Mainly by the area's far edge: drive until it is
   # deliver_far_stop_m away, so it never pushes past the area. Recorded pushes read the far edge
