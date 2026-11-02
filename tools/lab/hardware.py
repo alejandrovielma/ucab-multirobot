@@ -282,16 +282,19 @@ class Camera:
         self._read = lambda: frame.copy()
 
     def _open_picamera2(self) -> None:
+        import cv2
         from picamera2 import Picamera2
 
         cam = Picamera2()
-        # Picamera2 manual: "RGB888" is ordered [B, G, R] in memory, which is what OpenCV expects.
-        # Camera is mounted upside down: hflip=True, vflip=True rotates 180 degrees.
-        cam.configure(cam.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"},
-                                                     controls={"HFlip": 1, "VFlip": 1}))
+        # Picamera2 manual: "RGB888" is ordered [B, G, R] in memory, which is
+        # what OpenCV expects. HFlip/VFlip are not advertised by this libcamera
+        # (Pi 5 / PiSP), so they cannot be set: the camera is mounted upside
+        # down and the 180 degrees happens in software (same approach as v4l2).
+        main = {"size": (self.width, self.height), "format": "RGB888"}
+        cam.configure(cam.create_video_configuration(main=main))
         cam.start()
         time.sleep(0.5)
-        self._read = cam.capture_array
+        self._read = lambda: cv2.rotate(cam.capture_array(), cv2.ROTATE_180)
 
     def _open_gstreamer(self) -> None:
         import cv2

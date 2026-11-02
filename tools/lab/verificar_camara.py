@@ -51,12 +51,18 @@ def try_open_real_camera(width=640, height=480, target_fps=12):
             cam.configure(
                 cam.create_video_configuration(
                     main={"size": (width, height), "format": "RGB888"},
-                    controls={"FrameDurationLimits": (frame_us, frame_us), "HFlip": 1, "VFlip": 1},
+                    controls={"FrameDurationLimits": (frame_us, frame_us)},
                 )
             )
             cam.start()
             time.sleep(0.4)
-            return ("picamera2", cam.capture_array, cam.close, "")
+
+            def read():
+                # Camera mounted upside down: this libcamera does not advertise
+                # HFlip/VFlip, so the 180 degrees turn happens in software.
+                return cv2.rotate(cam.capture_array(), cv2.ROTATE_180)
+
+            return ("picamera2", read, cam.close, "")
     except Exception as exc:
         errors.append(f"picamera2: {exc}")
 

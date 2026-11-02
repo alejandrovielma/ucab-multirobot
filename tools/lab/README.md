@@ -160,6 +160,7 @@ Si se detiene muy lejos o muy cerca del cubo, repetir con `--capture-cy` usando 
 | `lgpio not available: falling back to GPIO dry run` (modos `line` y `chase`) | No está instalado `python3-lgpio` | `sudo apt install python3-lgpio` |
 | `no pinctrl-rp1 gpiochip found` | No es una Pi 5 o el kernel numera distinto | `gpiodetect` y pasar `--chip N` del que diga `pinctrl-rp1` |
 | `Permission denied` al abrir el gpiochip | El usuario no está en el grupo dueño de `/dev/gpiochip*` | `ls -l /dev/gpiochip*`, agregar el usuario a ese grupo y volver a entrar, o correr con `sudo` |
+| `Control HFlip is not advertised by libcamera` (picamera2) | Esta build de libcamera no publica ese control | Actualizar `tools/lab/hardware.py` (la rotacion de 180 grados ya va por software); no anadir `HFlip`/`VFlip` a los controls |
 | `no camera backend worked` | Ninguna vía de cámara funciona todavía en Ubuntu | Revisar el cable CSI (con todo apagado); probar una webcam USB con `--camera v4l2` |
 | El navegador no carga el video | Otra red, IP equivocada o puerto ocupado | `hostname -I`, misma red Wi-Fi, o `--port 8081` |
 
