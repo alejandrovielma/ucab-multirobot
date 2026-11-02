@@ -111,6 +111,16 @@ def test_adc_counts_convert_to_millivolts_of_a_3v3_reference():
     assert counts_to_millivolts(4095) == 3299
 
 
+def test_a_dark_analog_read_counts_as_black_even_if_do_says_white():
+    from teleop_web_lib.line_sensor import reads_black
+
+    assert reads_black(1, 1, None, None)  # DO alone still works
+    assert not reads_black(0, 1, 1610, None)  # no analog threshold set
+    assert reads_black(0, 1, 1610, 900)  # tape under the DO threshold
+    assert not reads_black(0, 1, 180, 900)  # white table
+    assert not reads_black(0, 1, None, 900)  # AO read failed
+
+
 def test_line_sensor_ignores_a_single_black_read():
     from teleop_web_lib.line_sensor import BlackConfirm
 
