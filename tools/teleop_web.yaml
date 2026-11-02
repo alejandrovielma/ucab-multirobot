@@ -5,12 +5,13 @@ motors:
   # "fusion_hat" (SunFounder Fusion HAT+, I2C 0x17) or "gpio" (Cokoino HAT with BCM pins).
   driver: fusion_hat
   # PWM channels (a, b) per wheel: M0=(11,10) M1=(9,8) M2=(6,7) M3=(4,5).
-  # Mapping deduced from observation (M0=FL, M1=FR, M2=RR, M3=RL). TODO confirm on the robot.
+  # Mapping checked channel by channel after the robot was rewired (11.2026): M0=FR,
+  # M1=RL, M2=FL, M3=RR. The *_inverted flags below were checked in the same test.
   fusion_channels:
-    fl: [11, 10]
-    fr: [9, 8]
-    rr: [6, 7]
-    rl: [4, 5]
+    fl: [6, 7]
+    fr: [11, 10]
+    rr: [4, 5]
+    rl: [9, 8]
   # GPIO (BCM) for IN1 / IN2 of each motor on the Cokoino CKK0018 HAT (2× DRV8833).
   # M3=FL (DRV8833#2 A), M4=FR (DRV8833#2 B), M1=RL (DRV8833#1 A), M2=RR (DRV8833#1 B).
   fl_pins: [24, 25]
