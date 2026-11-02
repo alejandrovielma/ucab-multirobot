@@ -8,6 +8,12 @@ the line for good. Such cubes are dropped from the detections.
 The test looks for black tape in a strip behind the cube and beside it. It
 is OFF by default: its thresholds must be tuned on real frames first, or it
 could hide valid cubes (a dark background behind a far cube looks the same).
+
+A second test drops cubes outside the arena: the border tape crosses the
+floor between the robot and the cube (below the cube in the image). The
+arena is a rectangle, so from inside it no tape lies between the robot and a
+cube that is inside too. The tape is compared with the table's own
+brightness: this camera renders it grey (~100 against ~210), never black.
 """
 
 from dataclasses import dataclass
@@ -19,6 +25,12 @@ DEFAULT_MAX_VALUE = 70
 DEFAULT_ROWS_BEHIND_RATIO = 1.5
 DEFAULT_SIDE_RATIO = 1.0
 DEFAULT_MIN_DARK_FRACTION = 0.12
+# Beyond the line: a pixel is tape when its brightest channel is at most this
+# fraction of the table's (the median below the cube), a row is tape when at
+# least this share of it is, and the tape needs this many rows in a row.
+DEFAULT_BEYOND_DARK_RATIO = 0.55
+DEFAULT_BEYOND_ROW_FRACTION = 0.6
+DEFAULT_BEYOND_MIN_ROWS = 3
 
 
 @dataclass(frozen=True)
@@ -32,6 +44,35 @@ class BorderParams:
     rows_behind_ratio: float = DEFAULT_ROWS_BEHIND_RATIO
     side_ratio: float = DEFAULT_SIDE_RATIO
     min_dark_fraction: float = DEFAULT_MIN_DARK_FRACTION
+    beyond_line: bool = False
+    beyond_dark_ratio: float = DEFAULT_BEYOND_DARK_RATIO
+    beyond_row_fraction: float = DEFAULT_BEYOND_ROW_FRACTION
+    beyond_min_rows: int = DEFAULT_BEYOND_MIN_ROWS
+
+
+def is_beyond_line(
+    frame_bgr: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    params: BorderParams,
+) -> bool:
+    """
+    True when a band of tape crosses the floor between the robot and the
+    cube `bbox` (x, y, w, h): the columns of the cube, from its bottom down
+    to the image bottom.
+    """
+    x, y, w, h = bbox
+    strip = frame_bgr[y + h :, max(0, x) : x + w]
+    if strip.size == 0:
+        return False
+    value = strip.max(axis=2)
+    table = float(np.median(value))
+    dark = value <= params.beyond_dark_ratio * table
+    tape_rows = dark.mean(axis=1) >= params.beyond_row_fraction
+    run = longest = 0
+    for is_tape in tape_rows:
+        run = run + 1 if is_tape else 0
+        longest = max(longest, run)
+    return longest >= params.beyond_min_rows
 
 
 def is_near_border(
@@ -63,11 +104,15 @@ def without_cubes_near_border(
     params: BorderParams,
 ) -> list:
     """
-    The detections that are not at the border (all of them when the filter
-    is off).
+    The detections that are neither at the border (when `enabled`) nor
+    beyond the line, outside the arena (when `beyond_line`).
     """
-    if not params.enabled:
-        return list(detections)
-    return [
-        d for d in detections if not is_near_border(frame_bgr, d.bbox, params)
-    ]
+
+    def dropped(det) -> bool:
+        if params.enabled and is_near_border(frame_bgr, det.bbox, params):
+            return True
+        return params.beyond_line and is_beyond_line(
+            frame_bgr, det.bbox, params
+        )
+
+    return [d for d in detections if not dropped(d)]
