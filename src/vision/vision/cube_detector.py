@@ -210,10 +210,13 @@ class CubeDetectorNode(Node):
             self._image_size = size
 
         zone = self._zone_locator.locate(bgr)
+        zone_params = self._zone_locator.params
         detections = without_cubes_in_zone(
             self._detector.detect(bgr),
             zone,
-            self._zone_locator.params.ignore_margin_px,
+            zone_params.ignore_margin_px,
+            zone_params.ignore_floor_margin_m,
+            zone_params.ignore_gate_depth_m,
         )
         self._pub_cubes.publish(_to_message(detections, msg.header))
         zone_msg = CubeDetectionArray(header=msg.header)

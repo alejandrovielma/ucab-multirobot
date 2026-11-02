@@ -46,6 +46,12 @@ DEFAULT_FLOOR_MIN_FLATNESS = 1.5
 # Cubes up to this many px nearer than the landmarks' bases count as in the
 # area when only the gate is known.
 DEFAULT_IGNORE_MARGIN_PX = 80
+# The same, measured on the floor (m; 0 = use the pixel margins): with the
+# paper in view, cubes up to this much nearer than its near edge (on the entry
+# strip); with only the gate, up to this much nearer than the landmarks. Both
+# also cover anything behind the area, outside the arena.
+DEFAULT_IGNORE_FLOOR_MARGIN_M = 0.0
+DEFAULT_IGNORE_GATE_DEPTH_M = 0.0
 # Where the area sits between the left and right landmarks, as a fraction of
 # the distance between them (0 = left one, 1 = right one). 0.38 is where the
 # original graph paper was; a centred area is 0.5.
@@ -101,6 +107,8 @@ class ZoneParams:
     floor_min_area_px: int = DEFAULT_FLOOR_MIN_AREA_PX
     floor_min_flatness: float = DEFAULT_FLOOR_MIN_FLATNESS
     ignore_margin_px: int = DEFAULT_IGNORE_MARGIN_PX
+    ignore_floor_margin_m: float = DEFAULT_IGNORE_FLOOR_MARGIN_M
+    ignore_gate_depth_m: float = DEFAULT_IGNORE_GATE_DEPTH_M
     floor_max_area_px: int = DEFAULT_FLOOR_MAX_AREA_PX
     gate_aim_fraction: float = DEFAULT_GATE_AIM_FRACTION
     # Horizontal offset, in landmark heights, from a single visible landmark
@@ -143,16 +151,30 @@ def choose_zone(gate: Region | None, floor: Region | None) -> Region | None:
     return floor if floor is not None else gate
 
 
-def in_zone(det: Detection, zone: Region, margin_px: int) -> bool:
+def in_zone(
+    det: Detection,
+    zone: Region,
+    margin_px: int,
+    floor_margin_m: float = 0.0,
+    gate_depth_m: float = 0.0,
+) -> bool:
     """
-    True when cube `det` already lies inside the delivery area.
+    True when cube `det` already lies inside the delivery area, or on its
+    edge or behind it (outside the arena) when the floor margins are set.
     """
     x, y, w, h = zone.bbox
     if zone.color == REGION_FLOOR:
-        return x <= det.u <= x + w and y <= det.v <= y + h
+        if not x <= det.u <= x + w:
+            return False
+        if floor_margin_m > 0:
+            return det.distance_m >= zone.distance_m - floor_margin_m
+        return y <= det.v <= y + h
     half_span_px = PAPER_HALF_SPAN_HEIGHTS * h
-    limit_v = y + h + margin_px
-    return abs(det.u - zone.u) <= half_span_px and det.v <= limit_v
+    if abs(det.u - zone.u) > half_span_px:
+        return False
+    if gate_depth_m > 0:
+        return det.distance_m >= zone.distance_m - gate_depth_m
+    return det.v <= y + h + margin_px
 
 
 def polygon_centroid(
@@ -200,13 +222,20 @@ def without_cubes_in_zone(
     detections: list[Detection],
     zone: Region | None,
     margin_px: int,
+    floor_margin_m: float = 0.0,
+    gate_depth_m: float = 0.0,
 ) -> list[Detection]:
     """
-    The detections that are not already inside the delivery area.
+    The detections that are not already inside the delivery area (see
+    `in_zone`).
     """
     if zone is None:
         return list(detections)
-    return [d for d in detections if not in_zone(d, zone, margin_px)]
+    return [
+        d
+        for d in detections
+        if not in_zone(d, zone, margin_px, floor_margin_m, gate_depth_m)
+    ]
 
 
 class ZoneLocator:

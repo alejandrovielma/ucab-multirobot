@@ -91,6 +91,39 @@ def test_cubes_inside_the_floor_area_are_dropped():
     assert without_cubes_in_zone([inside], None, margin_px=80) == [inside]
 
 
+def test_with_a_floor_margin_cubes_on_the_strip_and_behind_are_dropped():
+    floor = Region("floor", 320, 300, 9000, (200, 250, 240, 50), 0.0, 0.20)
+    on_strip = cube_at(300, 310, 20, 0.18)
+    behind = cube_at(260, 240, 12, 0.40)
+    in_front = cube_at(320, 380, 30, 0.12)
+    to_a_side = cube_at(100, 300, 20, 0.20)
+    cubes = [on_strip, behind, in_front, to_a_side]
+    # By pixels only the paper's box counts: the strip cube is kept.
+    assert on_strip in without_cubes_in_zone(cubes, floor, margin_px=10)
+    kept = without_cubes_in_zone(cubes, floor, 10, floor_margin_m=0.035)
+    assert kept == [in_front, to_a_side]
+
+
+def test_with_a_gate_depth_cubes_beside_the_legos_middle_are_dropped():
+    # Only the red lego (64 px tall): the area is aimed 2 heights to its left.
+    gate = Region("gate", 400, 200, 2000, (500, 136, 20, 64), 0.0, 0.32)
+    at_edge = cube_at(410, 260, 20, 0.26)
+    nearer = cube_at(410, 400, 40, 0.15)
+    # By pixels (10 px below the lego's base) the cube at the edge is kept.
+    assert at_edge in without_cubes_in_zone([at_edge], gate, margin_px=10)
+    cubes = [at_edge, nearer]
+    kept = without_cubes_in_zone(cubes, gate, 10, gate_depth_m=0.13)
+    assert kept == [nearer]
+
+
+def cube_at(u, v, size_px, distance_m):
+    """
+    A yellow cube whose bottom centre is at (`u`, `v`), `distance_m` away.
+    """
+    bbox = (u - size_px // 2, v - size_px, size_px, size_px)
+    return Detection("yellow", u, v, size_px, size_px, bbox, 0.0, distance_m)
+
+
 def floor_blob(area_px, v):
     return Region("floor", 320, v, area_px, (0, 0, 640, 40), 0.0, 0.5)
 
