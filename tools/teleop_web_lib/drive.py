@@ -154,7 +154,14 @@ class Drive:
             with self._lock:
                 self._pilot.note_motion(now, command)
             scale = command.speed * self._max_duty
-            ratios = mecanum_wheel_ratios(command.vx, command.vy, command.wz)
+            # DriveCommand: vy forward, vx strafe right; the kinematics take
+            # (forward, left, ccw), so the wheel names in the config are the
+            # real wheels.
+            ratios = mecanum_wheel_ratios(
+                command.vy,
+                -command.vx,
+                command.wz,
+            )
             self._motors.set({w: r * scale for w, r in ratios.items()})
             time.sleep(LOOP_PERIOD_S)
 
