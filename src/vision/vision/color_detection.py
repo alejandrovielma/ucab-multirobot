@@ -119,6 +119,9 @@ class Region:
     # Turn (rad, positive = left) that leaves the robot facing the area's
     # entry line squarely; None when the line is not in view.
     entry_angle_rad: float | None = None
+    # Distance (m) to the area's far edge, straight across its middle; None
+    # when unknown (above the horizon, or not the area paper).
+    far_distance_m: float | None = None
 
 
 @dataclass(frozen=True)
@@ -245,6 +248,8 @@ class ColorDetector:
         left: Marker | None,
         right: Marker | None,
         aim_fraction: float = GATE_AIM_FRACTION,
+        left_aim_heights: float = LEFT_LANDMARK_AIM_HEIGHTS,
+        right_aim_heights: float = RIGHT_LANDMARK_AIM_HEIGHTS,
     ) -> Region | None:
         """
         The delivery area (graph paper) located from the two traffic-light
@@ -269,14 +274,14 @@ class ColorDetector:
             h = float(left.bbox[3])
             u = min(
                 cam.width_px - 1,
-                round(left.u + LEFT_LANDMARK_AIM_HEIGHTS * h),
+                round(left.u + left_aim_heights * h),
             )
             v = left.v
             bbox = left.bbox
             area = left.area_px
         elif right is not None:
             h = float(right.bbox[3])
-            u = max(0, round(right.u - RIGHT_LANDMARK_AIM_HEIGHTS * h))
+            u = max(0, round(right.u - right_aim_heights * h))
             v = right.v
             bbox = right.bbox
             area = right.area_px

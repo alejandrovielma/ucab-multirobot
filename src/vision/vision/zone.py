@@ -22,9 +22,12 @@ import numpy as np
 
 from vision.camera_model import CameraModel
 from vision.color_detection import (
+    LEFT_LANDMARK_AIM_HEIGHTS,
     REGION_FLOOR,
+    RIGHT_LANDMARK_AIM_HEIGHTS,
     ColorDetector,
     Detection,
+    Marker,
     Region,
 )
 from vision.hsv import HsvRange
@@ -100,6 +103,10 @@ class ZoneParams:
     ignore_margin_px: int = DEFAULT_IGNORE_MARGIN_PX
     floor_max_area_px: int = DEFAULT_FLOOR_MAX_AREA_PX
     gate_aim_fraction: float = DEFAULT_GATE_AIM_FRACTION
+    # Horizontal offset, in landmark heights, from a single visible landmark
+    # to the area (left one: to its right; right one: to its left).
+    left_aim_heights: float = LEFT_LANDMARK_AIM_HEIGHTS
+    right_aim_heights: float = RIGHT_LANDMARK_AIM_HEIGHTS
     floor_ignore_touching_bottom: bool = DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM
     # Aim (bearing) at the paper's centre on the floor (its outline projected
     # on the floor) instead of the middle of its near edge; the distance stays
@@ -249,11 +256,13 @@ class ZoneLocator:
         p = self.params
         left_color, right_color = p.landmark_colors
         left, right = (
-            self._landmarks.find_marker(
-                bgr,
-                color,
-                p.landmark_min_area_px,
-                p.landmark_min_height_ratio,
+            self._on_the_floor(
+                self._landmarks.find_marker(
+                    bgr,
+                    color,
+                    p.landmark_min_area_px,
+                    p.landmark_min_height_ratio,
+                )
             )
             for color in (left_color, right_color)
         )
@@ -261,7 +270,21 @@ class ZoneLocator:
             left,
             right,
             p.gate_aim_fraction,
+            p.left_aim_heights,
+            p.right_aim_heights,
         )
+
+    def _on_the_floor(self, marker: Marker | None) -> Marker | None:
+        """
+        `marker` if its base is below the horizon (a landmark stands on the
+        table), else None: something red at the top of the image, in the
+        room behind the table, was taken for the red landmark.
+        """
+        if marker is None:
+            return None
+        if self._camera.ground_point(marker.u, marker.v) is None:
+            return None
+        return marker
 
     def _find_floor(self, bgr: np.ndarray) -> Region | None:
         """
@@ -280,7 +303,19 @@ class ZoneLocator:
             floor = self._aim_at_floor_centre(bgr, floor)
         else:
             floor = self._aim_at_center(floor)
-        return self._with_entry_angle(bgr, floor)
+        return self._with_entry_angle(bgr, self._with_far_edge(floor))
+
+    def _with_far_edge(self, floor: Region) -> Region:
+        """
+        The area paper with the distance to its far edge (the top of its
+        blob, in the middle of its width): it stays in view while the robot
+        pushes a cube in, after the near edge has gone under the scoop.
+        """
+        x, y, width_px, _ = floor.bbox
+        far = self._camera.bearing_distance(x + width_px // 2, y)
+        if far is None:
+            return floor
+        return replace(floor, far_distance_m=far[1])
 
     def _with_entry_angle(self, bgr: np.ndarray, floor: Region) -> Region:
         """

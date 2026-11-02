@@ -263,3 +263,34 @@ def test_a_big_pink_blob_that_is_not_a_strip_is_not_the_entry_line():
         img
     )
     assert zone.entry_angle_rad is None
+
+
+def test_a_landmark_above_the_horizon_is_something_in_the_room():
+    # Something red at the top of the image, its base above the horizon
+    # (row ~113 for this camera): not a landmark standing on the table.
+    img = blank()
+    paint_hsv(img, 300, 20, 20, 50, RED)
+    assert ZoneLocator(RANGES, CAM, ZoneParams()).locate(img) is None
+    img = blank()
+    paint_hsv(img, 300, 150, 20, 50, RED)
+    assert ZoneLocator(RANGES, CAM, ZoneParams()).locate(img) is not None
+
+
+def test_a_single_landmark_aims_by_the_configured_offset():
+    img = blank()
+    paint_hsv(img, 450, 150, 20, 50, RED)  # only the right one, 50 px tall
+    near = ZoneLocator(RANGES, CAM, ZoneParams(right_aim_heights=1.0))
+    far = ZoneLocator(RANGES, CAM, ZoneParams(right_aim_heights=4.0))
+    assert near.locate(img).u - far.locate(img).u == 150  # 3 heights more
+
+
+def test_the_area_paper_reports_its_far_edge_beyond_its_near_edge():
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 60, BLUE)
+    zone = ZoneLocator(RANGES, CAM, ZoneParams(floor_colors=["blue"])).locate(
+        img
+    )
+    assert zone.far_distance_m is not None
+    far_expected = CAM.bearing_distance(320, 300)[1]
+    assert abs(zone.far_distance_m - far_expected) < 0.005
+    assert zone.far_distance_m > zone.distance_m
