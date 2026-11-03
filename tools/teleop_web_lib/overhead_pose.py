@@ -38,7 +38,7 @@ MAX_CUBE_AREA_PX = 220
 MAX_CUBE_SIDE_PX = 22
 MAX_CUBE_ASPECT = 2.2
 # Blobs this close to the robot's centre are its own parts (board, wheels), not cubes.
-ROBOT_EXCLUDE_RADIUS_PX = 34
+ROBOT_EXCLUDE_RADIUS_PX = 45
 
 
 @dataclass(frozen=True)
