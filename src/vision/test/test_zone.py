@@ -256,9 +256,7 @@ def test_the_entry_line_angle_is_measured_only_when_asked_and_in_view():
     assert abs(on.entry_angle_rad) < 0.02
     img = blank()
     paint_hsv(img, 220, 330, 200, 42, BLUE)  # no entry strip
-    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
-        img
-    )
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
     assert zone is not None and zone.entry_angle_rad is None
 
 
@@ -268,9 +266,7 @@ def test_an_entry_line_nearer_on_the_right_means_turning_right():
     strip = np.array([[200, 350], [440, 380], [440, 392], [200, 362]])
     bgr = cv2.cvtColor(np.uint8([[RED]]), cv2.COLOR_HSV2BGR)[0, 0]
     cv2.fillPoly(img, [strip], [int(c) for c in bgr])
-    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
-        img
-    )
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
     assert zone.entry_angle_rad < -0.05
 
 
@@ -280,9 +276,7 @@ def test_an_entry_strip_apart_from_the_paper_is_found_below_it():
     img = blank()
     paint_hsv(img, 220, 300, 200, 40, BLUE)
     paint_hsv(img, 200, 350, 240, 12, RED)
-    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
-        img
-    )
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
     assert zone.entry_angle_rad is not None
     assert abs(zone.entry_angle_rad) < 0.02
 
@@ -292,9 +286,7 @@ def test_a_big_pink_blob_that_is_not_a_strip_is_not_the_entry_line():
     img = blank()
     paint_hsv(img, 220, 300, 200, 40, BLUE)
     paint_hsv(img, 400, 346, 30, 30, RED)
-    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(
-        img
-    )
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
     assert zone.entry_angle_rad is None
 
 

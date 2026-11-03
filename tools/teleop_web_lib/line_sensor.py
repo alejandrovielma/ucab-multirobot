@@ -127,7 +127,9 @@ class LineSensor:
             if counts is not None:
                 ao_mv = counts_to_millivolts(counts)
         return self._confirm.update(
-            reads_black(self._dev.value, self._black_value, ao_mv, self._black_mv),
+            reads_black(
+                self._dev.value, self._black_value, ao_mv, self._black_mv
+            ),
         )
 
     def raw_value(self) -> int:

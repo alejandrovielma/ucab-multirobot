@@ -280,7 +280,6 @@ def test_delivery_squares_up_to_the_pink_line_slides_in_front_then_pushes():
     pilot, vision = make_pilot()
     pilot.carrying = True
     pilot.state = "CARRY"
-    cfg = pilot.cfg
     # Arrived at an angle (the pink line turned to the left): turn left.
     vision.zone = Seen("floor", 0.18, bearing_rad=0.3, entry_angle_rad=0.4)
     command = pilot.step(0.0)
@@ -314,7 +313,12 @@ def test_the_delivery_push_follows_the_edge_then_ends_blind_at_its_speed():
     pilot.step(0.8)
     assert pilot.state == "DROP (blind)"
     speed = (0.18 - (cfg.deliver_blind_edge_m - 0.01)) / 0.7
-    blind_m = cfg.deliver_blind_edge_m - 0.01 + cfg.deliver_insert_m - cfg.cube_ahead_m
+    blind_m = (
+        cfg.deliver_blind_edge_m
+        - 0.01
+        + cfg.deliver_insert_m
+        - cfg.cube_ahead_m
+    )
     end_s = 0.8 + blind_m / speed
     assert pilot.step(end_s - 0.02).vy == 1.0
     assert pilot.step(end_s + 0.02).vy == -1.0
@@ -730,7 +734,9 @@ def test_a_blind_rest_never_goes_past_the_far_edge_last_seen():
     pilot.carrying = True
     pilot.state = "CARRY"
     cfg = pilot.cfg
-    vision.zone = Seen("floor", 0.20, far_distance_m=cfg.deliver_far_stop_m + 0.02)
+    vision.zone = Seen(
+        "floor", 0.20, far_distance_m=cfg.deliver_far_stop_m + 0.02
+    )
     pilot.step(0.0)
     vision.zone = None  # area lost: blind rest
     pilot.step(0.05)
