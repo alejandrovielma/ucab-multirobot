@@ -334,6 +334,10 @@ auto:
   # insert - cube_ahead_m) at the speed measured from the edge coming closer (over
   # deliver_speed_min_s at least), never past the far edge last seen. TODO check on the robot
   deliver_far_stop_m: 0.12
+  # Phineas: the area is ~13.8 cm deep. A far edge less than this behind the near edge is a
+  # truncated read and is ignored (far 12.1 cm with near 7.8 cm made the push 0 cm and the
+  # cube stayed outside).
+  deliver_far_min_span_m: 0.08
   deliver_blind_edge_m: 0.12
   deliver_edge_timeout_s: 0.3
   deliver_push_max_s: 3.0

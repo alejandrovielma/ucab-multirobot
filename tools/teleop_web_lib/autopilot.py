@@ -18,12 +18,15 @@ Axes: on the physical robot, `DriveCommand` maps to:
 can think in plain directions.
 """
 
+import logging
 import math
 import time
 from typing import NamedTuple, Protocol
 
 from teleop_web_lib.config import AutoConfig
 from teleop_web_lib.kinematics import clamp
+
+log = logging.getLogger("teleop_web")
 
 # --- Machine states -----------------------------------------------------------
 STATE_PAUSED = "PAUSED"
@@ -221,6 +224,9 @@ class AutoPilot:
         self._drop_edge_last = (0.0, 0.0)
         self._drop_far_last: tuple[float, float] | None = None
         self._drop_blind = False
+        # Phineas: one line about the last delivery push (edges, speed, blind
+        # distance), to tune the push.
+        self.drop_report: str | None = None
         # When and where (bearing) the area paper was last in view while
         # carrying.
         self._last_paper_s = float("-inf")
@@ -573,6 +579,7 @@ class AutoPilot:
             # outside. Only then: checked while turning, any other cube on
             # the table near the area undid deliveries that were fine.
             self.delivered_count -= 1
+            self._report_drop("cube left outside: not counted")  # Phineas
             self._unreported_color = None  # Perry must not count it
             self._end_drop(now)
             return None
@@ -599,11 +606,16 @@ class AutoPilot:
             zone = self.vision.latest_zone(now, cfg.deliver_edge_timeout_s)
         seen = zone is not None and zone.color == ZONE_SOURCE_FLOOR
         far_m = getattr(zone, "far_distance_m", None) if seen else None
+        far_m = self._usable_far_m(zone, far_m)  # Phineas: far-edge guard
         if seen:
             self._drop_edge_last = (now, zone.distance_m)
             if far_m is not None and cfg.deliver_far_stop_m > 0:
                 self._drop_far_last = (now, far_m)
                 if far_m <= cfg.deliver_far_stop_m:
+                    self._report_drop(  # Phineas
+                        f"far edge reached: {far_m:.3f} m <= "
+                        f"{cfg.deliver_far_stop_m:.3f} m, stop pushing"
+                    )
                     self._drop_blind = True
                     self._phase_until = now  # there: stop pushing
                     return
@@ -626,6 +638,49 @@ class AutoPilot:
         self._drop_blind = True
         self.state = STATE_DROP_BLIND
         self._phase_until = now + blind_m / speed
+        self._report_blind_push(edge_m, speed, blind_m)  # Phineas
+
+    def _report_blind_push(
+        self, edge_m: float, speed: float, blind_m: float
+    ) -> None:
+        """
+        Phineas: report the edges and the blind distance of the push.
+        """
+        far_last = self._drop_far_last
+        far_text = "n/a" if far_last is None else f"{far_last[1]:.3f} m"
+        self._report_drop(
+            f"blind push: near edge {edge_m:.3f} m, far {far_text}, "
+            f"speed {speed:.2f} m/s, {blind_m:.3f} m = "
+            f"{blind_m / speed:.2f} s"
+        )
+
+    def _report_drop(self, text: str) -> None:
+        """
+        Phineas: keep and log one line about the delivery push.
+        """
+        self.drop_report = text
+        log.info("delivery: %s", text)
+
+    def _usable_far_m(self, zone, far_m):
+        """
+        Phineas: the area's far edge, or None when it is not credible.
+
+        The paper is ~13.8 cm deep: a far edge closer than
+        deliver_far_min_span_m behind the near one is the blob cut short by
+        the cube or the scoop (it stopped the push at 0 cm and left the
+        cube outside). 0 disables the guard.
+        """
+        min_span_m = self.cfg.deliver_far_min_span_m
+        if far_m is None or not min_span_m:
+            return far_m
+        span_m = far_m - zone.distance_m
+        if span_m >= min_span_m:
+            return far_m
+        self._report_drop(
+            f"far edge ignored: {far_m:.3f} m is only {span_m:.3f} m "
+            f"behind the near edge {zone.distance_m:.3f} m"
+        )
+        return None
 
     def _measured_push_speed(self) -> float:
         """
@@ -962,6 +1017,7 @@ class AutoPilot:
         self._drop_edge_first = (now, zone.distance_m)
         self._drop_edge_last = (now, zone.distance_m)
         far_m = getattr(zone, "far_distance_m", None)
+        far_m = self._usable_far_m(zone, far_m)  # Phineas: far-edge guard
         self._drop_far_last = None if far_m is None else (now, far_m)
         self._phase_until = now + cfg.deliver_push_max_s
         self._drop_blind = False
