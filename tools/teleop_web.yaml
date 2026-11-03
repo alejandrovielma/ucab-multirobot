@@ -196,7 +196,9 @@ line_sensor:
   # GPIO (BCM) of the bottom TCRT5000's DO output. null = no sensor (black line not seen).
   # Power it from 3.3 V, not 5 V. Rewired (11.2026) to the Fusion HAT+ DIGITAL port 27: DO on
   # its SIG pin (GPIO27), VCC on its 3V3 pin, GND on its - pin. Before it was GPIO5 (pin 29).
-  pin: 27
+  # Phineas: GPIO5 (physical pin 29). Ferb's is 27: on Phineas that pin reads nothing, so the border tape
+  # was never seen and the robot could leave the track.
+  pin: 5
   # DO value over the black tape (the usual module gives 1 on black, 0 on white).
   black_value: 1
   # Black reads in a row (one per 20 ms loop) before the robot reacts. Single reads while moving
