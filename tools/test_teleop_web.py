@@ -223,3 +223,17 @@ def test_overhead_pose_finds_the_robot_and_the_area():
     assert abs(pose.robot_px[0] - 304.5) < 3 and abs(pose.robot_px[1] - 192) < 3
     assert abs(pose.zone_px[0] - 137.5) < 3 and abs(pose.zone_px[1] - 224.5) < 3
     assert locate(np.full((360, 640, 3), 230, np.uint8)).robot_px is None
+
+
+def test_overhead_pose_lists_cubes_with_their_colours():
+    import numpy as np
+
+    from teleop_web_lib.overhead_pose import locate
+
+    frame = np.full((360, 640, 3), 230, np.uint8)
+    frame[200:208, 300:308] = (200, 60, 20)  # blue cube, BGR
+    frame[250:258, 400:408] = (20, 230, 240)  # yellow cube
+    frame[170:215, 420:470] = (25, 25, 25)  # robot
+    frame[190:198, 430:438] = (200, 60, 20)  # blue part on the robot: ignored
+    cubes = sorted((c, round(x), round(y)) for c, x, y in locate(frame).cubes)
+    assert cubes == [("blue", 304, 204), ("yellow", 404, 254)]

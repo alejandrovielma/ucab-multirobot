@@ -80,7 +80,11 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             self._stream(self.overhead)
         elif self.path == PATH_POSE and self.overhead is not None:
             pose = self.overhead.pose
-            body = {"robot_px": pose and pose.robot_px, "zone_px": pose and pose.zone_px}
+            body = {
+                "robot_px": pose and pose.robot_px,
+                "zone_px": pose and pose.zone_px,
+                "cubes": [list(c) for c in pose.cubes] if pose else [],
+            }
             self._send(HTTPStatus.OK, json.dumps(body).encode(), CONTENT_JSON)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)

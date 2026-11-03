@@ -410,7 +410,7 @@ overhead:
   fps: 15
   # Inner corners of the arena in the 640 px wide frame (top-left, top-right, bottom-right,
   # bottom-left). Measure them again whenever the phone moves: the robot is the dark blob inside it.
-  arena_px: [[187, 101], [513, 100], [575, 286], [135, 288]]
+  arena_px: [[160, 58], [548, 72], [636, 282], [72, 258]]
 
 server:
   host: 0.0.0.0
