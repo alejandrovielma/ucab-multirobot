@@ -356,7 +356,11 @@ auto:
   # With the paper's near edge this close (m) the scoop hides the pink line: deliver without
   # squaring. Re-catching a cube left at the paper's edge put the robot at 8-14 cm, where it
   # waited "CARRY (no entry line)" for good (11.2026); backing up would leave the cube behind.
-  entry_hidden_distance_m: 0.15
+  # Phineas's area has NO pink entry line (lime strips only), so entry_angle is always None and, with the
+  # paper's near edge farther than this, the robot waited in "CARRY (no entry line)" for good, a few cm
+  # short of the paper (read 20 cm at 25 cm from its centre). 0.30 > deliver_commit_distance_m + hysteresis
+  # (0.28): it never waits, it delivers straight (entry angle 0). Back to 0.15 if the area gets its pink line.
+  entry_hidden_distance_m: 0.30
   strafe_speed: 0.40
   # A cube this close (m) and within drop_verify_bearing_rad of straight ahead once backed up
   # from a delivery was left outside: it does not count and the robot goes for it again. Without
