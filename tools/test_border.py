@@ -120,3 +120,12 @@ def test_cubes_beyond_the_line_are_dropped_only_when_asked():
     cubes = [outside, inside]
     assert without_cubes_near_border(frame, cubes, BorderParams()) == cubes
     assert without_cubes_near_border(frame, cubes, BEYOND) == [inside]
+
+
+def test_a_dark_band_at_the_image_bottom_is_not_tape_when_ignored():
+    frame = np.full((480, 640, 3), 210, np.uint8)
+    frame[420:] = 20  # the scoop, dark, under the cube
+    bbox = (300, 250, 50, 50)
+    on = BorderParams(beyond_line=True)
+    assert is_beyond_line(frame, bbox, on)
+    assert not is_beyond_line(frame, bbox, BorderParams(beyond_line=True, ignore_bottom_px=70))

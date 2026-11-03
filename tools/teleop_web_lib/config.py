@@ -131,6 +131,8 @@ DEFAULT_CARRY_PAPER_SLIDE_S = 2.0
 # Delivery push: stop once the area's far edge is this close (m); 0 = do not
 # use the far edge. TODO measure
 DEFAULT_DELIVER_FAR_STOP_M = 0.142
+DEFAULT_DELIVER_FAR_MIN_SPAN_M = 0.0
+DEFAULT_ASSUME_IN_SCOOP_DISTANCE_M = 0.0
 # With the paper's near edge this close (m) the scoop hides the pink entry
 # line: deliver without squaring instead of waiting for it. TODO measure
 DEFAULT_ENTRY_HIDDEN_DISTANCE_M = 0.15
@@ -228,6 +230,8 @@ class AutoConfig:
     square_max_bearing_rad: float = DEFAULT_SQUARE_MAX_BEARING_RAD
     carry_paper_slide_s: float = DEFAULT_CARRY_PAPER_SLIDE_S
     deliver_far_stop_m: float = DEFAULT_DELIVER_FAR_STOP_M
+    deliver_far_min_span_m: float = DEFAULT_DELIVER_FAR_MIN_SPAN_M
+    assume_in_scoop_distance_m: float = DEFAULT_ASSUME_IN_SCOOP_DISTANCE_M
     entry_hidden_distance_m: float = DEFAULT_ENTRY_HIDDEN_DISTANCE_M
     deliver_edge_timeout_s: float = DEFAULT_DELIVER_EDGE_TIMEOUT_S
     deliver_push_max_s: float = DEFAULT_DELIVER_PUSH_MAX_S

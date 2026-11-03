@@ -759,3 +759,40 @@ def test_squaring_up_stays_committed_when_the_paper_jitters_or_drops_out():
     # Still no paper after the hold: back to heading for the area.
     pilot.step(0.25 + cfg.carry_paper_hold_s + 0.1)
     assert pilot.state.startswith("CARRY") and pilot.state != "CARRY (square)"
+
+
+def _catch_then_check(assume_m, cube_m):
+    vision = StubVision()
+    cfg = AutoConfig(**FAST_PHASES, assume_in_scoop_distance_m=assume_m)
+    pilot = AutoPilot(cfg, vision)
+    pilot.state = "SEARCH"
+    vision.det = Seen("blue", cfg.stop_distance_m - 0.01)
+    assert pilot.step(0.0).vy == 1.0 and pilot.state == "CATCH"
+    vision.det = Seen("blue", cube_m)  # still seen after the push
+    pilot.step(cfg.scoop_push_s + 0.1)  # checking
+    pilot.step(cfg.scoop_push_s + cfg.catch_check_s + 0.2)
+    return pilot
+
+
+def test_a_cube_still_seen_very_close_after_the_push_is_in_the_scoop():
+    pilot = _catch_then_check(0.12, 0.09)
+    assert pilot.carrying and pilot.state == "CARRY"
+    assert pilot.collected_count == 1
+
+
+def test_a_cube_seen_farther_after_the_push_is_chased_again():
+    pilot = _catch_then_check(0.12, 0.17)
+    assert not pilot.carrying and pilot.state == "SEARCH"
+
+
+def test_a_far_edge_too_close_behind_the_near_one_does_not_stop_the_push():
+    vision = StubVision()
+    pilot = AutoPilot(AutoConfig(**FAST_PHASES, deliver_far_min_span_m=0.08), vision)
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    # Near 7.8 cm, far 12.1 cm: the real read that made the push 0 cm.
+    vision.zone = Seen("floor", 0.078, far_distance_m=0.121)
+    pilot.step(0.0)
+    assert pilot.state == "DROP"
+    assert pilot.step(0.05).vy == 1.0  # keeps pushing on the near edge
+    assert pilot._drop_far_last is None

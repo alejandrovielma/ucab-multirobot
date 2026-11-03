@@ -420,7 +420,9 @@ class AutoPilot:
         if now < self._phase_until + cfg.catch_check_s:
             self.state = STATE_CATCH_CHECK
             return STOP
-        if self._cube_ahead(now, cfg.catch_check_distance_m):
+        in_scoop = self._cube_ahead(now, cfg.assume_in_scoop_distance_m)
+        # A cube seen this close is in the scoop, however badly the camera sees it.
+        if self._cube_ahead(now, cfg.catch_check_distance_m) and not in_scoop:
             # Not in the scoop: go for it again.
             self.state = STATE_SEARCH
             self._search_start_s = now
@@ -477,7 +479,11 @@ class AutoPilot:
         if self.vision is not None:
             zone = self.vision.latest_zone(now, cfg.deliver_edge_timeout_s)
         seen = zone is not None and zone.color == ZONE_SOURCE_FLOOR
-        far_m = getattr(zone, "far_distance_m", None) if seen else None
+        far_m = (
+            self._usable_far_m(zone, getattr(zone, "far_distance_m", None))
+            if seen
+            else None
+        )
         if seen:
             self._drop_edge_last = (now, zone.distance_m)
             if far_m is not None and cfg.deliver_far_stop_m > 0:
@@ -505,6 +511,17 @@ class AutoPilot:
         self._drop_blind = True
         self.state = STATE_DROP_BLIND
         self._phase_until = now + blind_m / speed
+
+    def _usable_far_m(self, zone, far_m):
+        """
+        The area's far edge, or None when it is not credible: the paper is
+        ~13.8 cm deep, and a far edge closer than deliver_far_min_span_m
+        behind the near one is the blob cut short by the cube or the scoop.
+        """
+        min_span_m = self.cfg.deliver_far_min_span_m
+        if far_m is None or not min_span_m:
+            return far_m
+        return far_m if far_m - zone.distance_m >= min_span_m else None
 
     def _measured_push_speed(self) -> float:
         """
@@ -807,7 +824,7 @@ class AutoPilot:
         self.state = STATE_DROP
         self._drop_edge_first = (now, zone.distance_m)
         self._drop_edge_last = (now, zone.distance_m)
-        far_m = getattr(zone, "far_distance_m", None)
+        far_m = self._usable_far_m(zone, getattr(zone, "far_distance_m", None))
         self._drop_far_last = None if far_m is None else (now, far_m)
         self._phase_until = now + cfg.deliver_push_max_s
         self._drop_blind = False

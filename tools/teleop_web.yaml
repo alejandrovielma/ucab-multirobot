@@ -60,7 +60,7 @@ camera:
     hfov_rad: 1.1826
     height_m: 0.058
     tilt_rad: 0.1835
-  target_colors: [yellow]
+  target_colors: [blue]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
@@ -184,6 +184,9 @@ camera:
     beyond_dark_ratio: 0.55
     beyond_row_fraction: 0.6
     beyond_min_rows: 3
+    # Phineas's camera sees its dark scoop in the bottom rows of the image: ignore them, or the test
+    # reads it as tape between the robot and every cube and drops them all (blue cube 18 cm ahead).
+    ignore_bottom_px: 70
 
 line_sensor:
   # GPIO (BCM) of the bottom TCRT5000's DO output. null = no sensor (black line not seen).
@@ -201,7 +204,8 @@ line_sensor:
   # to see how much light each surface reflects while the potentiometer is
   # set. null = AO not wired. AO goes to the HAT's signal pin only: keep the
   # module's VCC on 3V3 (the output must stay under 3.3 V). Since the rewiring: ADC row 0 SIG.
-  adc_channel: 0
+  # null on Phineas: the AO read uses raw I2C (smbus2), which fails on this Pi, and black_mv is off.
+  adc_channel: null
   # Also black when AO reads at least this (mV); null = DO only. The DO threshold (the
   # potentiometer) flipped at ~1700-1900 mV while the border tape read 1610-2400 mV, and the
   # robot crossed the border without seeing it (11.2026). White reads ~120-200 mV.
@@ -330,6 +334,13 @@ auto:
   # insert - cube_ahead_m) at the speed measured from the edge coming closer (over
   # deliver_speed_min_s at least), never past the far edge last seen. TODO check on the robot
   deliver_far_stop_m: 0.12
+  # The area is ~13.8 cm deep: a far edge less than this behind the near edge is a truncated read and
+  # is ignored (far 12.1 cm with near 7.8 cm made the push 0 cm and the cube stayed outside).
+  deliver_far_min_span_m: 0.08
+  # After the catch push, a cube still seen this close (m) is in the scoop (the band hides most of it
+  # and the camera reads it badly): it counts as caught and is carried, not chased again. Farther than
+  # this but within catch_check_distance_m it did not go in. 0 = off.
+  assume_in_scoop_distance_m: 0.12
   deliver_blind_edge_m: 0.12
   deliver_edge_timeout_s: 0.3
   deliver_push_max_s: 3.0

@@ -31,6 +31,7 @@ DEFAULT_MIN_DARK_FRACTION = 0.12
 DEFAULT_BEYOND_DARK_RATIO = 0.55
 DEFAULT_BEYOND_ROW_FRACTION = 0.6
 DEFAULT_BEYOND_MIN_ROWS = 3
+DEFAULT_IGNORE_BOTTOM_PX = 0
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class BorderParams:
     beyond_dark_ratio: float = DEFAULT_BEYOND_DARK_RATIO
     beyond_row_fraction: float = DEFAULT_BEYOND_ROW_FRACTION
     beyond_min_rows: int = DEFAULT_BEYOND_MIN_ROWS
+    ignore_bottom_px: int = DEFAULT_IGNORE_BOTTOM_PX
 
 
 def is_beyond_line(
@@ -61,7 +63,9 @@ def is_beyond_line(
     to the image bottom.
     """
     x, y, w, h = bbox
-    strip = frame_bgr[y + h :, max(0, x) : x + w]
+    # The scoop shows dark at the bottom of the image: it is not tape on the floor.
+    bottom = frame_bgr.shape[0] - params.ignore_bottom_px
+    strip = frame_bgr[y + h : bottom, max(0, x) : x + w]
     if strip.size == 0:
         return False
     value = strip.max(axis=2)

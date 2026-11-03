@@ -175,3 +175,37 @@ def test_each_black_edge_of_the_line_sensor_is_logged_with_its_analog_value(
         if "line sensor" in r.getMessage()
     ]
     assert len(edges) == 1 and "ao=3400" in edges[0]
+
+
+def test_fusion_hat_motors_use_the_library(monkeypatch):
+    import sys
+    import types
+
+    from teleop_web_lib.motors import FusionHatMotors
+
+    class FakeMotor:
+        made = {}
+
+        def __init__(self, port):
+            self.reverse, self.powers = None, []
+            FakeMotor.made[port] = self
+
+        def set_is_reverse(self, flag):
+            self.reverse = flag
+
+        def power(self, value):
+            self.powers.append(value)
+
+    module = types.ModuleType("fusion_hat.motor")
+    module.Motor = FakeMotor
+    monkeypatch.setitem(sys.modules, "fusion_hat", types.ModuleType("fusion_hat"))
+    monkeypatch.setitem(sys.modules, "fusion_hat.motor", module)
+    cfg = {
+        "fusion_channels": {"fl": [4, 5], "fr": [11, 10], "rl": [6, 7], "rr": [9, 8]},
+        "fl_inverted": False, "fr_inverted": True, "rl_inverted": False, "rr_inverted": True,
+    }
+    motors = FusionHatMotors(cfg)
+    motors.set({"fl": 0.5, "fr": 0.5, "rl": 0.0, "rr": -0.25})
+    assert FakeMotor.made["M3"].powers[-1] == 50
+    assert FakeMotor.made["M0"].reverse is True
+    assert FakeMotor.made["M1"].powers[-1] == -25

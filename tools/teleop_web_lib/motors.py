@@ -1,6 +1,6 @@
 """
 Motor drivers for the browser tool: a fake one for the laptop and the two
-real HATs (Cokoino via gpiozero, SunFounder Fusion HAT+ via I2C).
+real HATs (Cokoino via gpiozero, SunFounder Fusion HAT+ via its library).
 
 Every driver has the same interface: `set(ratios)` with wheel ratios in
 [-1, 1], and `close()`. The hardware libraries are imported lazily because
@@ -31,21 +31,10 @@ DEFAULT_NSLEEP_PINS = (12, 13)
 RATIO_DECIMALS = 3
 FAKE_LOG_DECIMALS = 2
 
-# --- SunFounder Fusion HAT+ (MCU on I2C) -----------------------------------
-FUSION_I2C_BUS = 1
-FUSION_I2C_ADDRESS = 0x17
-# PWM timer: 72 MHz / (prescaler + 1) / (period + 1) = 100 Hz.
-FUSION_PWM_PERIOD = 39999
-FUSION_PWM_PRESCALER = 17
-# Register banks; the timer or channel number is added to the base.
-FUSION_REG_PERIOD = 0x50
-FUSION_REG_PRESCALER = 0x40
-FUSION_REG_DUTY = 0x60
-# Channels P4-P7 share timer 1 and P8-P11 share timer 2.
-FUSION_CHANNELS_PER_TIMER = 4
-WORD_MASK = 0xFFFF
-BYTE_MASK = 0xFF
-BYTE_BITS = 8
+# --- SunFounder Fusion HAT+ (fusion_hat library) ----------------------------
+# PWM channel pair (a, b) of each motor port.
+FUSION_PORTS = {(11, 10): "M0", (9, 8): "M1", (6, 7): "M2", (4, 5): "M3"}
+FUSION_MAX_POWER = 100
 
 
 class FakeMotors:
@@ -131,61 +120,44 @@ class HatMotors:
 
 class FusionHatMotors:
     """
-    4 motors on the SunFounder Fusion HAT+ (MCU at I2C 0x17, PWM through
-    registers).
+    4 motors on the SunFounder Fusion HAT+, driven through the `fusion_hat`
+    library (its kernel driver owns the I2C chip, so raw I2C access fails on
+    Ubuntu with Python 3.14).
 
-    Each motor uses two PWM channels (a, b): a > 0 forward, b > 0 backward.
+    Each wheel is the port that matches its (a, b) PWM channel pair.
     """
 
     def __init__(self, cfg: dict):
         """
-        Open the I2C bus and configure the PWM timers.
+        Open the four motor ports, flipping the inverted wheels.
         """
         # Only available on the Pi.
-        from smbus2 import SMBus
+        from fusion_hat.motor import Motor
 
-        self._bus = SMBus(FUSION_I2C_BUS)
-        self._channels = {w: tuple(cfg["fusion_channels"][w]) for w in WHEELS}
-        self._inverted = {w: bool(cfg[f"{w}_inverted"]) for w in WHEELS}
+        self._motors = {}
+        for wheel in WHEELS:
+            motor = Motor(FUSION_PORTS[tuple(cfg["fusion_channels"][wheel])])
+            motor.set_is_reverse(bool(cfg[f"{wheel}_inverted"]))
+            self._motors[wheel] = motor
         self._last = dict.fromkeys(WHEELS)
-        timers = {
-            channel // FUSION_CHANNELS_PER_TIMER
-            for pair in self._channels.values()
-            for channel in pair
-        }
-        for timer in sorted(timers):
-            self._write(FUSION_REG_PERIOD + timer, FUSION_PWM_PERIOD)
-            self._write(FUSION_REG_PRESCALER + timer, FUSION_PWM_PRESCALER)
         self.set(dict.fromkeys(WHEELS, 0.0))
-
-    def _write(self, register: int, value: int) -> None:
-        """
-        Write a 16-bit word to a register (the MCU expects it byte-swapped).
-        """
-        value &= WORD_MASK
-        swapped = ((value & BYTE_MASK) << BYTE_BITS) | (value >> BYTE_BITS)
-        self._bus.write_word_data(FUSION_I2C_ADDRESS, register, swapped)
 
     def set(self, ratios: dict[str, float]) -> None:
         """
         Apply the wheel ratios, writing only the wheels that changed.
         """
-        for wheel, (channel_a, channel_b) in self._channels.items():
-            ratio = -ratios[wheel] if self._inverted[wheel] else ratios[wheel]
-            value = clamp(round(ratio, RATIO_DECIMALS))
+        for wheel, motor in self._motors.items():
+            value = clamp(round(ratios[wheel], RATIO_DECIMALS))
             if value == self._last[wheel]:
                 continue
             self._last[wheel] = value
-            duty = int(abs(value) * FUSION_PWM_PERIOD)
-            self._write(FUSION_REG_DUTY + channel_a, duty if value > 0 else 0)
-            self._write(FUSION_REG_DUTY + channel_b, duty if value < 0 else 0)
+            motor.power(value * FUSION_MAX_POWER)
 
     def close(self) -> None:
         """
-        Stop the motors and close the I2C bus.
+        Stop the motors.
         """
         self.set(dict.fromkeys(WHEELS, 0.0))
-        self._bus.close()
 
 
 def pins_configured(cfg: dict) -> bool:
