@@ -31,6 +31,8 @@ STATE_SEARCH = "SEARCH"
 STATE_APPROACH = "APPROACH"
 STATE_ALIGN = "ALIGN"
 STATE_CATCH = "CATCH"
+# Stopped after the blind push, checking the cube is not still in front.
+STATE_CATCH_CHECK = "CATCH (check)"
 STATE_CARRY = "CARRY"
 STATE_DROP = "DROP"
 STATE_EXPLORE = "EXPLORE"
@@ -39,11 +41,13 @@ STATE_LINE_BACKUP = "LINE (back up)"
 STATE_LINE_TURN = "LINE (turn)"
 STATE_DROP_BACKUP = "DROP (back up)"
 STATE_DROP_TURN = "DROP (turn)"
+# The paper's near edge went under the scoop: the last stretch of the push.
+STATE_DROP_BLIND = "DROP (blind)"
 STATE_EXPLORE_BACKUP = "EXPLORE (back up)"
 STATE_EXPLORE_AVOID = "EXPLORE (avoid gate)"
 STATE_EXPLORE_REACQUIRE = "EXPLORE (reacquire)"
 # States in which the robot is going for a cube or pushing it.
-CHASE_STATES = (STATE_APPROACH, STATE_ALIGN, STATE_CATCH)
+CHASE_STATES = (STATE_APPROACH, STATE_ALIGN, STATE_CATCH, STATE_CATCH_CHECK)
 # Prefixes used to recognise a family of states.
 PREFIX_LINE = "LINE"
 PREFIX_DROP = "DROP"
@@ -54,8 +58,17 @@ STATE_NO_CUBES = f"{PREFIX_NO_CUBES} (stopped)"
 SUFFIX_FORWARD = " (forward)"
 SUFFIX_TURN = " (turn)"
 SUFFIX_ALIGN = " (align)"
-STATE_EXPLORE_FIND_AREA = f"{STATE_EXPLORE} (find area)"
-STATE_EXPLORE_TO_CENTER = f"{STATE_EXPLORE} (to center)"
+# Delivery approach (docs/auto-search.md): face the pink entry line squarely,
+# slide in front of the area's centre, or wait when the line is not in view.
+STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
+STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
+STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no entry line)"
+# Squaring up at the paper: committed to delivering from there.
+COMMITTED_CARRY_STATES = (
+    STATE_CARRY_SQUARE,
+    STATE_CARRY_CENTER,
+    STATE_CARRY_NO_ENTRY,
+)
 
 # --- Direction helpers --------------------------------------------------------
 # Direction of a turn: +1 toward the left, -1 toward the right.
@@ -68,6 +81,9 @@ TARGET_LOOKING_FOR_ZONE = "looking for zone"
 CM_PER_M = 100
 # Area estimate made from the area paper (vision/zone.py).
 ZONE_SOURCE_FLOOR = "floor"
+# A push speed measured outside this range (m/s) is noise: use the setting.
+MIN_PUSH_SPEED_MPS = 0.05
+MAX_PUSH_SPEED_MPS = 0.6
 
 
 class DriveCommand(NamedTuple):
@@ -156,6 +172,17 @@ class AutoPilot:
         self.delivered_count = 0  # cubes left on the delivery paper
         self.carrying = False
         self._phase_until = 0.0
+        # Delivery push: the paper's near edge (time, distance) when the push
+        # started and when last seen, the far edge when last seen (None if
+        # not yet), and whether the blind part began.
+        self._drop_edge_first = (0.0, 0.0)
+        self._drop_edge_last = (0.0, 0.0)
+        self._drop_far_last: tuple[float, float] | None = None
+        self._drop_blind = False
+        # When and where (bearing) the area paper was last in view while
+        # carrying.
+        self._last_paper_s = float("-inf")
+        self._last_paper_bearing_rad = 0.0
         self._line_turn_until = 0.0
         self._line_stop_until = 0.0
         self._line_black = False
@@ -175,10 +202,8 @@ class AutoPilot:
         self._ignore_cubes_until = 0.0
         # Turn direction while avoiding the area, fixed for the whole turn.
         self._avoid_dir = DIR_RIGHT
-        # Search without cubes (docs/auto-search.md): the last spin was made
-        # in the middle of the arena, and when the robot last had something
-        # to do (start, a cube seen, a delivery).
-        self._centered = False
+        # When the robot last had something to do (start, a cube seen, a
+        # delivery): the search gives up no_cubes_stop_s after it.
         self._idle_start_s = self._search_start_s
 
     # ---------- mode control ----------
@@ -202,7 +227,6 @@ class AutoPilot:
             )
             self._search_start_s = now
             self._idle_start_s = now
-            self._centered = False
             if reset:
                 self.collected_count = 0
                 self.delivered_count = 0
@@ -233,12 +257,7 @@ class AutoPilot:
             # Back from WASD or pause: if it had a cube, keep carrying it.
             self._resume_after_pause(now)
         self._line_black = line_black
-        crossing = self._may_cross_line(now)
-        if (
-            line_black
-            and not crossing
-            and not self.state.startswith(PREFIX_LINE)
-        ):
+        if line_black and not self.state.startswith(PREFIX_LINE):
             self._start_line_recovery(now)
         for phase in (self._line_phase, self._catch_phase, self._drop_phase):
             command = phase(now)
@@ -250,24 +269,6 @@ class AutoPilot:
         if self.state.startswith(STATE_CARRY):
             return self._carry_step(now)
         return self._search_step(now)
-
-    def _may_cross_line(self, now: float) -> bool:
-        """
-        True while delivering, or carrying with the area paper close: the
-        black line there is the area's own tape or the border next to its
-        entry, and turning back from it made the robot curve around instead
-        of going straight in.
-        """
-        if self.state.startswith(PREFIX_DROP):
-            return True
-        if not self.carrying:
-            return False
-        zone = self._zone_in_view(now)
-        return (
-            zone is not None
-            and zone.color == ZONE_SOURCE_FLOOR
-            and zone.distance_m <= self.cfg.carry_line_ignore_distance_m
-        )
 
     def _resume_after_pause(self, now: float) -> None:
         """
@@ -407,13 +408,23 @@ class AutoPilot:
 
     def _catch_phase(self, now: float) -> DriveCommand | None:
         """
-        Blind push through the last ~16.5 cm, where the scoop hides the cube
-        from the camera; then count the cube as picked.
+        Blind push into the scoop, a short stop, then count the cube as
+        picked unless it is still in view in front: a push that fell short
+        left it outside the paddles and the robot carried an empty scoop.
         """
-        if self.state != STATE_CATCH:
+        if self.state not in (STATE_CATCH, STATE_CATCH_CHECK):
             return None
+        cfg = self.cfg
         if now < self._phase_until:
-            return _forward(self.cfg.forward_speed)
+            return _forward(cfg.forward_speed)
+        if now < self._phase_until + cfg.catch_check_s:
+            self.state = STATE_CATCH_CHECK
+            return STOP
+        if self._cube_ahead(now, cfg.catch_check_distance_m):
+            # Not in the scoop: go for it again.
+            self.state = STATE_SEARCH
+            self._search_start_s = now
+            return STOP
         self.collected_count += 1
         self.carrying = True
         self._reveal_pending = False
@@ -423,12 +434,14 @@ class AutoPilot:
 
     def _drop_phase(self, now: float) -> DriveCommand | None:
         """
-        Delivery: push the cube onto the line, back up leaving it there and
+        Delivery: push the cube onto the paper, back up leaving it there and
         turn around.
         """
         if not self.state.startswith(PREFIX_DROP):
             return None
         cfg = self.cfg
+        if not self._drop_blind:
+            self._guided_push_step(now)
         if now < self._phase_until:
             return _forward(cfg.forward_speed)
         self._finish_drop()
@@ -437,7 +450,9 @@ class AutoPilot:
             self.state = STATE_DROP_BACKUP
             return _backward(cfg.line_speed)
         if self.state == STATE_DROP_BACKUP and self._cube_left_out(now):
-            # Backed up and the cube is still in front: it stayed outside.
+            # Backed up and the cube is still right in front: it stayed
+            # outside. Only then: checked while turning, any other cube on
+            # the table near the area undid deliveries that were fine.
             self.delivered_count -= 1
             self._end_drop(now)
             return None
@@ -447,6 +462,63 @@ class AutoPilot:
         self._end_drop(now)
         return None
 
+    def _guided_push_step(self, now: float) -> None:
+        """
+        Delivery push. With the area's far edge in view, drive until it is
+        deliver_far_stop_m away: the cube is then over the middle of the
+        area, however fast the robot goes (two pushes timed blind carried the
+        cube right across the area). Without it, drive while the near edge is
+        in view and farther than deliver_blind_edge_m (below ~10 cm the scoop
+        hides it), then push blind the rest of the way, timed with the speed
+        measured from the edge coming closer and never past the far edge.
+        """
+        cfg = self.cfg
+        zone = None
+        if self.vision is not None:
+            zone = self.vision.latest_zone(now, cfg.deliver_edge_timeout_s)
+        seen = zone is not None and zone.color == ZONE_SOURCE_FLOOR
+        far_m = getattr(zone, "far_distance_m", None) if seen else None
+        if seen:
+            self._drop_edge_last = (now, zone.distance_m)
+            if far_m is not None and cfg.deliver_far_stop_m > 0:
+                self._drop_far_last = (now, far_m)
+                if far_m <= cfg.deliver_far_stop_m:
+                    self._drop_blind = True
+                    self._phase_until = now  # there: stop pushing
+                    return
+                if now < self._phase_until:
+                    return
+            elif (
+                zone.distance_m > cfg.deliver_blind_edge_m
+                and now < self._phase_until
+            ):
+                return
+        edge_s, edge_m = self._drop_edge_last
+        speed = self._measured_push_speed()
+        # The edge kept coming closer since it was last seen.
+        edge_m = max(0.0, edge_m - speed * (now - edge_s))
+        blind_m = max(0.0, edge_m + cfg.deliver_insert_m - cfg.cube_ahead_m)
+        if self._drop_far_last is not None:
+            far_s, far_m = self._drop_far_last
+            far_m -= speed * (now - far_s)
+            blind_m = min(blind_m, max(0.0, far_m - cfg.deliver_far_stop_m))
+        self._drop_blind = True
+        self.state = STATE_DROP_BLIND
+        self._phase_until = now + blind_m / speed
+
+    def _measured_push_speed(self) -> float:
+        """
+        Forward speed (m/s) from the paper's near edge coming closer during
+        the push; forward_speed_mps when it was not seen long enough.
+        """
+        cfg = self.cfg
+        (t0, d0), (t1, d1) = self._drop_edge_first, self._drop_edge_last
+        if t1 - t0 >= cfg.deliver_speed_min_s:
+            speed = (d0 - d1) / (t1 - t0)
+            if MIN_PUSH_SPEED_MPS <= speed <= MAX_PUSH_SPEED_MPS:
+                return speed
+        return cfg.forward_speed_mps
+
     def _end_drop(self, now: float) -> None:
         """
         Back to looking for cubes, with a fresh search.
@@ -454,20 +526,40 @@ class AutoPilot:
         self.state = STATE_SEARCH
         self._search_start_s = now
         self._idle_start_s = now
-        self._centered = False
 
     def _cube_left_out(self, now: float) -> bool:
         """
-        True when a cube (not one inside the area) is in view this close
-        right after backing up from a delivery.
+        True when a cube (not one inside the area) is in view this close and
+        straight ahead right after backing up from a delivery: where a cube
+        the push did not carry in is left. Another cube off to a side is not
+        the delivered one.
+        """
+        cfg = self.cfg
+        if not self._cube_ahead(
+            now,
+            cfg.drop_verify_distance_m,
+            cfg.lost_timeout_s,
+        ):
+            return False
+        det = self.vision.latest_detection(now, cfg.lost_timeout_s)
+        return abs(det.bearing_rad) <= cfg.drop_verify_bearing_rad
+
+    def _cube_ahead(
+        self,
+        now: float,
+        distance_m: float,
+        timeout_s: float | None = None,
+    ) -> bool:
+        """
+        True when a cube was seen less than `timeout_s` ago (default
+        catch_check_s: only frames taken after the push) this close.
         """
         if self.vision is None:
             return False
-        det = self.vision.latest_detection(now, self.cfg.lost_timeout_s)
-        return (
-            det is not None
-            and det.distance_m <= self.cfg.drop_verify_distance_m
-        )
+        if timeout_s is None:
+            timeout_s = self.cfg.catch_check_s
+        det = self.vision.latest_detection(now, timeout_s)
+        return det is not None and det.distance_m <= distance_m
 
     # ---------- looking for cubes ----------
     def _search_step(self, now: float) -> DriveCommand:
@@ -487,7 +579,6 @@ class AutoPilot:
         self._reveal_pending = det.distance_m <= cfg.reveal_max_distance_m
         self._search_start_s = now
         self._idle_start_s = now
-        self._centered = False
         self._search_dir = _side_of(det.bearing_rad)
 
         # Cube at the scoop threshold (~18.5 cm or image bottom) and aligned.
@@ -548,43 +639,9 @@ class AutoPilot:
             self.state = STATE_EXPLORE_BACKUP
             return _backward(cfg.line_speed)
         zone = self._zone_in_view(now)
-        if self._spinning(now) and self._must_avoid(zone):
+        if self._must_avoid(zone):
             return self._avoid_step(zone)
-        return self._reacquire_step(now) or self._explore_step(now, zone)
-
-    def _spinning(self, now: float) -> bool:
-        """
-        True during the spin in place that scans for cubes.
-        """
-        return now - self._search_start_s < self.cfg.search_spin_s
-
-    def _explore_step(self, now: float, zone) -> DriveCommand:
-        """
-        No cube in view (docs/auto-search.md): spin once in place; if none
-        showed up, go to the middle of the arena (search_center_distance_m
-        from the area, the only landmark) and spin once more; then stop.
-        """
-        cfg = self.cfg
-        if self._spinning(now):
-            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        if self._centered:
-            return self._give_up()
-        if zone is None:
-            self.state = STATE_EXPLORE_FIND_AREA
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        error_m = zone.distance_m - cfg.search_center_distance_m
-        if abs(error_m) <= cfg.search_center_tolerance_m:
-            self._centered = True
-            self._search_start_s = now  # spin again from here
-            self.state = f"{STATE_EXPLORE}{SUFFIX_TURN}"
-            return _turn(self._search_dir, cfg.search_turn_speed)
-        self.state = STATE_EXPLORE_TO_CENTER
-        if abs(zone.bearing_rad) > cfg.align_tolerance_rad:
-            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
-        if error_m > 0:
-            return _forward(cfg.roam_forward_speed)
-        return _backward(cfg.line_speed)
+        return self._reacquire_step(now) or self._roam(now, STATE_EXPLORE)
 
     def _reacquire_step(self, now: float) -> DriveCommand | None:
         """
@@ -641,9 +698,34 @@ class AutoPilot:
         afar) and deliver only once the area paper itself is in view: a push
         started from the landmarks left the cube ~20 cm short of the paper.
         If the area is never found, assume the cube was lost.
+
+        Once squaring up at the paper it stays committed: with cubes already
+        on the paper its distance jittered around the commit distance and
+        the blob dropped out now and then, and the robot danced between
+        squaring up and turning to the landmarks. If it stays out and was
+        last seen off to a side, slide that way to bring it back.
         """
         cfg = self.cfg
         zone = self._zone_in_view(now)
+        committed = self.state in COMMITTED_CARRY_STATES
+        paper = zone is not None and zone.color == ZONE_SOURCE_FLOOR
+        if paper:
+            self._last_paper_s = now
+            self._last_paper_bearing_rad = zone.bearing_rad
+        elif committed:
+            lost_s = now - self._last_paper_s
+            if lost_s < cfg.carry_paper_hold_s:
+                # The paper flickered out: wait for it, do not turn away.
+                return STOP
+            slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
+            off_side = (
+                abs(self._last_paper_bearing_rad) > cfg.drop_align_tolerance_rad
+            )
+            if off_side and lost_s < slide_until_s:
+                # Squaring up pushed it out of view: slide back toward it.
+                self.state = STATE_CARRY_CENTER
+                side = _side_of(self._last_paper_bearing_rad)
+                return _strafe(side, cfg.strafe_speed)
         if zone is None:
             if now - self._search_start_s >= cfg.carry_zone_timeout_s:
                 return self._give_up_carrying(now)
@@ -656,15 +738,15 @@ class AutoPilot:
         self._search_start_s = now
         self._search_dir = _side_of(zone.bearing_rad)
         # The landmarks only lead there (slowing down near them): the push
-        # starts once the paper is in view, straight at its centre from
-        # wherever the robot is (no detour to enter square).
-        paper = zone.color == ZONE_SOURCE_FLOOR
+        # starts once the paper is in view, from in front of the entry line.
+        commit_m = cfg.deliver_commit_distance_m
+        if committed:
+            commit_m += cfg.deliver_commit_hysteresis_m
         at_paper = paper and (
-            zone.distance_m <= cfg.deliver_commit_distance_m
-            or zone.v >= cfg.floor_arrive_v_px
+            zone.distance_m <= commit_m or zone.v >= cfg.floor_arrive_v_px
         )
         if at_paper:
-            return self._drop_or_align(now, zone)
+            return self._square_and_drop(now, zone)
         stop_distance_m = (
             cfg.deliver_commit_distance_m if paper else cfg.zone_stop_distance_m
         )
@@ -675,20 +757,59 @@ class AutoPilot:
             STATE_CARRY,
         )
 
-    def _drop_or_align(self, now: float, zone) -> DriveCommand:
+    def _square_and_drop(self, now: float, zone) -> DriveCommand:
         """
-        At the paper: turn in place to face its centre, then push the cube
-        blind just far enough to bring it there.
+        At the paper: turn in place until facing the pink entry line
+        squarely, slide sideways (Mecanum, keeps the heading) until the
+        area's centre is straight ahead, then push the cube blind straight
+        in. Without the pink line in view it waits instead of pushing
+        crooked (a crooked push knocks the legos down), unless the paper is
+        so close that the scoop hides the line: backing up to see it would
+        leave the cube behind, and that close the robot faces it already.
+
+        Arriving diagonally, the paper sits off to a side: turning in place
+        pushed it out of view, so with its centre beyond
+        `square_max_bearing_rad` it slides toward it first.
         """
         cfg = self.cfg
-        if abs(zone.bearing_rad) > cfg.drop_align_tolerance_rad:
-            self.state = f"{STATE_CARRY}{SUFFIX_ALIGN}"
-            return _turn(_side_of(zone.bearing_rad), cfg.search_turn_speed)
-        # The near edge's distance is precise; the centre is half the sheet
-        # past it, along the push (also from a corner).
-        push_m = zone.distance_m + cfg.deliver_insert_m - cfg.cube_ahead_m
+        side_tol = cfg.square_max_bearing_rad
+        if self.state == STATE_CARRY_CENTER:
+            side_tol *= cfg.align_exit_fraction
+        entry_angle_rad = zone.entry_angle_rad
+        hidden = zone.distance_m <= cfg.entry_hidden_distance_m
+        needs_square = entry_angle_rad is not None and (
+            abs(entry_angle_rad) > cfg.entry_square_tolerance_rad
+        )
+        must_face = needs_square or (entry_angle_rad is None and not hidden)
+        if must_face and abs(zone.bearing_rad) > side_tol:
+            self.state = STATE_CARRY_CENTER
+            return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
+        if entry_angle_rad is None:
+            if not hidden:
+                self.state = STATE_CARRY_NO_ENTRY
+                return STOP
+            entry_angle_rad = 0.0
+        # Once turning (or sliding), finish it: do not stop at the edge.
+        square_tol = cfg.entry_square_tolerance_rad
+        if self.state == STATE_CARRY_SQUARE:
+            square_tol *= cfg.align_exit_fraction
+        if abs(entry_angle_rad) > square_tol:
+            self.state = STATE_CARRY_SQUARE
+            return _turn(_side_of(entry_angle_rad), cfg.search_turn_speed)
+        center_tol = cfg.drop_align_tolerance_rad
+        if self.state == STATE_CARRY_CENTER:
+            center_tol *= cfg.align_exit_fraction
+        if abs(zone.bearing_rad) > center_tol:
+            self.state = STATE_CARRY_CENTER
+            return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
+        # Push straight in, guided by the area's edges (see _guided_push_step).
         self.state = STATE_DROP
-        self._phase_until = now + push_m / cfg.forward_speed_mps
+        self._drop_edge_first = (now, zone.distance_m)
+        self._drop_edge_last = (now, zone.distance_m)
+        far_m = getattr(zone, "far_distance_m", None)
+        self._drop_far_last = None if far_m is None else (now, far_m)
+        self._phase_until = now + cfg.deliver_push_max_s
+        self._drop_blind = False
         return _forward(cfg.forward_speed)
 
     def _give_up_carrying(self, now: float) -> DriveCommand:

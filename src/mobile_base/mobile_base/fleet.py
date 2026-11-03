@@ -1,5 +1,5 @@
 """
-Pure logic of the zone-arbiter side of the fleet link (Phineas and Perry):
+Pure logic of the zone-arbiter side of the fleet link (Ferb and Perry):
 state vocabulary mapping, heartbeat check and delivery-zone lease client.
 
 Peer robot avoidance lives in peer_avoidance.py. No rclpy: time is passed in
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from mobile_base.states import FleetState, State
 
 # --- Defaults (the real values live in config/collector.yaml) -----------------
-DEFAULT_ROBOT_NAME = "ferb"
+DEFAULT_ROBOT_NAME = "phineas"
 DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
 DEFAULT_STATE_RATE_HZ = 2.0
 DEFAULT_RENEW_PERIOD_S = 20.0

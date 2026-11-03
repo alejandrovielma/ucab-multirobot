@@ -35,7 +35,8 @@ def test_heartbeat_timeout():
 
 
 def test_zone_client_request_renew_release():
-    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc = ZoneClient(renew_period_s=20.0)
+    assert zc.robot == "phineas"
     assert not zc.holds
     assert not zc.should_request(0.0)
 
@@ -45,7 +46,7 @@ def test_zone_client_request_renew_release():
     zc.note_requested(0.0)
 
     # Once granted, no new request before renew_period_s.
-    zc.update(occupant="ferb")
+    zc.update(occupant="phineas")
     assert zc.holds
     assert not zc.should_request(10.0)
     assert zc.should_request(20.0)

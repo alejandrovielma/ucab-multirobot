@@ -35,14 +35,6 @@ setup(
             "color_sensor = mobile_base.color_sensor:main",
             "behavior_fsm = mobile_base.behavior_fsm:main",
             "fleet_link = mobile_base.fleet_link:main",
-            # Phineas core: pure logic in core/, ROS wrappers in nodes/.
-            "phineas_behavior = mobile_base.nodes.behavior_node:main",
-            "phineas_safety_gate = mobile_base.nodes.safety_gate_node:main",
-            "phineas_cube_detector = mobile_base.nodes.cube_detector_node:main",
-            "phineas_hat_motor_driver = "
-            "mobile_base.nodes.hat_motor_driver_node:main",
-            "phineas_line_sensor = mobile_base.nodes.line_sensor_node:main",
-            "phineas_camera = mobile_base.nodes.camera_node:main",
         ],
     },
 )

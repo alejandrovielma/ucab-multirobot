@@ -2,7 +2,7 @@
 Peer robot avoidance from overhead poses. Pure logic, no rclpy.
 
 Time is passed in as a float in seconds. Used by the obstacle_guard node to
-keep Ferb from driving into the other collector.
+keep Phineas from driving into the other collector.
 """
 
 import math
@@ -71,9 +71,9 @@ class PeerAvoidance:
     Filters velocity commands using overhead poses to avoid the peer
     collector.
 
-    Ferb yields in a deadlock: after `deadlock_time_s` blocked by the peer,
-    rotate in place at `escape_turn_rad_s` away from the peer until it leaves
-    the front cone.
+    Deadlock escape: after `deadlock_time_s` blocked by the peer, rotate in
+    place at `escape_turn_rad_s` away from the peer until it leaves the front
+    cone.
     """
 
     def __init__(self, params: PeerAvoidanceParams | None = None):

@@ -41,6 +41,23 @@ def counts_to_millivolts(counts: int) -> int:
     return round(counts * ADC_REFERENCE_MV / (ADC_MAX_COUNTS + 1))
 
 
+def reads_black(
+    do_value: int,
+    black_value: int,
+    ao_mv: int | None,
+    black_mv: int | None,
+) -> bool:
+    """
+    True when one read is over the black tape: the DO output says so, or
+    the AO voltage is at least `black_mv` (when both are known). The DO
+    threshold (the potentiometer) sat right at the tape's level, so the
+    robot crossed the border without seeing it.
+    """
+    if do_value == black_value:
+        return True
+    return ao_mv is not None and black_mv is not None and ao_mv >= black_mv
+
+
 class BlackConfirm:
     """
     Reports black only after `confirm_reads` black reads in a row: a single
@@ -92,6 +109,7 @@ class LineSensor:
             cfg.get("confirm_reads", DEFAULT_CONFIRM_READS),
         )
         self._adc_channel = cfg.get("adc_channel")
+        self._black_mv = cfg.get("black_mv")
         self._bus = None
         if self._adc_channel is not None:
             from smbus2 import SMBus
@@ -103,7 +121,19 @@ class LineSensor:
         True when the sensor is over the black line (confirmed over
         `confirm_reads` calls; call it once per control iteration).
         """
-        return self._confirm.update(self._dev.value == self._black_value)
+        ao_mv = None
+        if self._black_mv is not None:
+            counts = self.analog_counts()
+            if counts is not None:
+                ao_mv = counts_to_millivolts(counts)
+        return self._confirm.update(
+            reads_black(
+                self._dev.value,
+                self._black_value,
+                ao_mv,
+                self._black_mv,
+            ),
+        )
 
     def raw_value(self) -> int:
         """

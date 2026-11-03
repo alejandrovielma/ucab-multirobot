@@ -70,7 +70,7 @@ def test_duty_is_capped_and_inverted():
 def test_fake_motors_apply_inversion_per_wheel():
     motors = FakeMotors(MotorHardwareParams(max_duty_ratio=1.0))
     motors.set({"fl": 0.5, "fr": 0.5, "rl": 0.5, "rr": 0.5})
-    # fl and rl are inverted by default.
-    assert motors.duties == {"fl": -0.5, "fr": 0.5, "rl": -0.5, "rr": 0.5}
+    # fr and rr are inverted by default on Phineas.
+    assert motors.duties == {"fl": 0.5, "fr": -0.5, "rl": 0.5, "rr": -0.5}
     motors.stop()
     assert all(d == 0.0 for d in motors.duties.values())

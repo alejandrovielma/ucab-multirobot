@@ -35,7 +35,7 @@ HARDWARE_NODES = (
 )
 
 # Launch arguments and their defaults.
-DEFAULT_ROBOT = "ferb"
+DEFAULT_ROBOT = "phineas"
 DEFAULT_DEVICE = "0"
 DEFAULT_PORT = "8080"
 # Starts paused; see the module docstring.

@@ -2,8 +2,8 @@
 """
 Generates simulation/webots/worlds/pista_ucab_ros.wbt from pista_ucab.wbt.
 
-The ROS 2 variant is the same, but Ferb (our robot) uses the <extern>
-controller (driven by the webots_bridge node) and Phineas (the other
+The ROS 2 variant is the same, but Phineas (our robot) uses the <extern>
+controller (driven by the webots_bridge node) and Ferb (the other
 collector) stays still (<none>). Run it after changing pista_ucab.wbt:
 
   python3 tools/generate_ros_world.py
@@ -20,9 +20,9 @@ TARGET_WORLD = "pista_ucab_ros.wbt"
 SOURCE_CONTROLLER = "recolector_teleop"
 CONTROLLER_EXTERN = "<extern>"
 CONTROLLER_NONE = "<none>"
-# Robot names in the world. We are Ferb; Phineas is the other collector.
-ROS_ROBOT = "Ferb"  # driven by the ROS nodes through webots_bridge
-IDLE_ROBOT = "Phineas"  # stays still
+# Robot names in the world. We are Phineas; Ferb is the other collector.
+ROS_ROBOT = "Phineas"  # driven by the ROS nodes through webots_bridge
+IDLE_ROBOT = "Ferb"  # stays still
 
 # Comment block written at the top of the generated world.
 HEADER = (

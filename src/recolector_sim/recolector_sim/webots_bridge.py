@@ -82,7 +82,7 @@ ULTRASONIC_MIN_RANGE_M = 0.02
 ULTRASONIC_MAX_RANGE_M = 4.0
 # Floor sensor, raw lookupTable units (0 m -> 1023, 0.025 m -> 0). Observed in
 # the sim: white table about 240, black tape and no floor (off the table) 0,
-# so the threshold sits halfway (docs/phineas/integracion-simulacion.md).
+# so the threshold sits halfway.
 LINE_BLACK_BELOW_RAW = 120.0
 # Webots camera images are BGRA: 4 bytes per pixel, the first 3 are BGR.
 WEBOTS_IMAGE_CHANNELS = 4

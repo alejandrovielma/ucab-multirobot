@@ -95,10 +95,13 @@ class DetectionPipeline:
         from vision.zone import without_cubes_in_zone
 
         zone = self._zone_locator.locate(frame)
+        zone_params = self._zone_locator.params
         detections = without_cubes_in_zone(
             self._detector.detect(frame),
             zone,
-            self._zone_locator.params.ignore_margin_px,
+            zone_params.ignore_margin_px,
+            zone_params.ignore_floor_margin_m,
+            zone_params.ignore_gate_depth_m,
         )
         detections = without_cubes_near_border(frame, detections, self._border)
         detections = without_cubes_off_table(frame, detections, self._support)

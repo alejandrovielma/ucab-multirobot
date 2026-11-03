@@ -13,6 +13,7 @@ from vision.zone import (
     ZoneLocator,
     ZoneParams,
     choose_zone,
+    entry_angle,
     is_plausible_floor,
     polygon_centroid,
     without_cubes_in_zone,
@@ -88,6 +89,39 @@ def test_cubes_inside_the_floor_area_are_dropped():
     kept = without_cubes_in_zone([inside, outside], floor, margin_px=80)
     assert kept == [outside]
     assert without_cubes_in_zone([inside], None, margin_px=80) == [inside]
+
+
+def test_with_a_floor_margin_cubes_on_the_strip_and_behind_are_dropped():
+    floor = Region("floor", 320, 300, 9000, (200, 250, 240, 50), 0.0, 0.20)
+    on_strip = cube_at(300, 310, 20, 0.18)
+    behind = cube_at(260, 240, 12, 0.40)
+    in_front = cube_at(320, 380, 30, 0.12)
+    to_a_side = cube_at(100, 300, 20, 0.20)
+    cubes = [on_strip, behind, in_front, to_a_side]
+    # By pixels only the paper's box counts: the strip cube is kept.
+    assert on_strip in without_cubes_in_zone(cubes, floor, margin_px=10)
+    kept = without_cubes_in_zone(cubes, floor, 10, floor_margin_m=0.035)
+    assert kept == [in_front, to_a_side]
+
+
+def test_with_a_gate_depth_cubes_beside_the_legos_middle_are_dropped():
+    # Only the red lego (64 px tall): the area is aimed 2 heights to its left.
+    gate = Region("gate", 400, 200, 2000, (500, 136, 20, 64), 0.0, 0.32)
+    at_edge = cube_at(410, 260, 20, 0.26)
+    nearer = cube_at(410, 400, 40, 0.15)
+    # By pixels (10 px below the lego's base) the cube at the edge is kept.
+    assert at_edge in without_cubes_in_zone([at_edge], gate, margin_px=10)
+    cubes = [at_edge, nearer]
+    kept = without_cubes_in_zone(cubes, gate, 10, gate_depth_m=0.13)
+    assert kept == [nearer]
+
+
+def cube_at(u, v, size_px, distance_m):
+    """
+    A yellow cube whose bottom centre is at (`u`, `v`), `distance_m` away.
+    """
+    bbox = (u - size_px // 2, v - size_px, size_px, size_px)
+    return Detection("yellow", u, v, size_px, size_px, bbox, 0.0, distance_m)
 
 
 def floor_blob(area_px, v):
@@ -182,3 +216,106 @@ def test_the_paper_can_be_aimed_at_its_centre_on_the_floor():
         ZoneParams(floor_colors=["blue"], floor_aim_centre=True),
     ).locate(img)
     assert abs(centre.bearing_rad - CAM.bearing_distance(140, 355)[0]) < 0.05
+
+
+def line_points(yaw_rad):
+    """
+    Floor points (forward_m, left_m) of a line 0.2 m ahead, seen by a robot
+    turned `yaw_rad` to the left of facing it squarely.
+    """
+    lefts = np.linspace(-0.1, 0.1, 11)
+    forwards = np.full_like(lefts, 0.2)
+    cos_yaw, sin_yaw = np.cos(-yaw_rad), np.sin(-yaw_rad)
+    return np.stack(
+        [
+            cos_yaw * forwards - sin_yaw * lefts,
+            sin_yaw * forwards + cos_yaw * lefts,
+        ],
+        axis=1,
+    ).astype(np.float32)
+
+
+def test_entry_angle_is_the_turn_that_faces_the_line_squarely():
+    assert abs(entry_angle(line_points(0.0))) < 1e-3
+    # Turned 0.3 rad to the left of square: turn 0.3 rad right.
+    assert abs(entry_angle(line_points(0.3)) + 0.3) < 1e-3
+    assert abs(entry_angle(line_points(-0.2)) - 0.2) < 1e-3
+
+
+def entry_params(**kwargs):
+    return ZoneParams(floor_colors=["blue", "red"], **kwargs)
+
+
+def test_the_entry_line_angle_is_measured_only_when_asked_and_in_view():
+    img = blank()
+    paint_hsv(img, 220, 330, 200, 30, BLUE)
+    paint_hsv(img, 220, 360, 200, 12, RED)  # the entry strip, square
+    off = ZoneLocator(RANGES, CAM, entry_params()).locate(img)
+    assert off.entry_angle_rad is None
+    on = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert abs(on.entry_angle_rad) < 0.02
+    img = blank()
+    paint_hsv(img, 220, 330, 200, 42, BLUE)  # no entry strip
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert zone is not None and zone.entry_angle_rad is None
+
+
+def test_an_entry_line_nearer_on_the_right_means_turning_right():
+    img = blank()
+    paint_hsv(img, 200, 300, 240, 60, BLUE)
+    strip = np.array([[200, 350], [440, 380], [440, 392], [200, 362]])
+    bgr = cv2.cvtColor(np.uint8([[RED]]), cv2.COLOR_HSV2BGR)[0, 0]
+    cv2.fillPoly(img, [strip], [int(c) for c in bgr])
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert zone.entry_angle_rad < -0.05
+
+
+def test_an_entry_strip_apart_from_the_paper_is_found_below_it():
+    # Real area: black tape between the blue sheet and the pink strip, so the
+    # strip is its own blob outside the paper's bounding box.
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 40, BLUE)
+    paint_hsv(img, 200, 350, 240, 12, RED)
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert zone.entry_angle_rad is not None
+    assert abs(zone.entry_angle_rad) < 0.02
+
+
+def test_a_big_pink_blob_that_is_not_a_strip_is_not_the_entry_line():
+    # The table tinted pink near an image corner: big, but not flat.
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 40, BLUE)
+    paint_hsv(img, 400, 346, 30, 30, RED)
+    zone = ZoneLocator(RANGES, CAM, entry_params(entry_color="red")).locate(img)
+    assert zone.entry_angle_rad is None
+
+
+def test_a_landmark_above_the_horizon_is_something_in_the_room():
+    # Something red at the top of the image, its base above the horizon
+    # (row ~113 for this camera): not a landmark standing on the table.
+    img = blank()
+    paint_hsv(img, 300, 20, 20, 50, RED)
+    assert ZoneLocator(RANGES, CAM, ZoneParams()).locate(img) is None
+    img = blank()
+    paint_hsv(img, 300, 150, 20, 50, RED)
+    assert ZoneLocator(RANGES, CAM, ZoneParams()).locate(img) is not None
+
+
+def test_a_single_landmark_aims_by_the_configured_offset():
+    img = blank()
+    paint_hsv(img, 450, 150, 20, 50, RED)  # only the right one, 50 px tall
+    near = ZoneLocator(RANGES, CAM, ZoneParams(right_aim_heights=1.0))
+    far = ZoneLocator(RANGES, CAM, ZoneParams(right_aim_heights=4.0))
+    assert near.locate(img).u - far.locate(img).u == 150  # 3 heights more
+
+
+def test_the_area_paper_reports_its_far_edge_beyond_its_near_edge():
+    img = blank()
+    paint_hsv(img, 220, 300, 200, 60, BLUE)
+    zone = ZoneLocator(RANGES, CAM, ZoneParams(floor_colors=["blue"])).locate(
+        img
+    )
+    assert zone.far_distance_m is not None
+    far_expected = CAM.bearing_distance(320, 300)[1]
+    assert abs(zone.far_distance_m - far_expected) < 0.005
+    assert zone.far_distance_m > zone.distance_m

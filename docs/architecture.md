@@ -1,25 +1,25 @@
 # Collector architecture
 
-System architecture and ROS 2 graph for the collector robot (**Ferb**). Role 3 maintains it; if you change a topic, message, service or node contract, update this document in the same PR.
+System architecture and ROS 2 graph for the collector robot (**Phineas**). Role 3 maintains it; if you change a topic, message, service or node contract, update this document in the same PR.
 
 ## Layers
 
 ```
-Raspberry Pi 5 → Cokoino HAT (2× DRV8833) → Ubuntu 26.04 → ROS 2 Lyrical → Python nodes
+Raspberry Pi 5 → SunFounder Fusion HAT+ / Cokoino HAT (2× DRV8833) → Ubuntu 26.04 → ROS 2 Lyrical → Python nodes
 ```
 
-All collector nodes execute inside namespace `/ferb` (e.g. `/ferb/cmd_vel`, `/ferb/fleet/ok`). Only inter-robot fleet topics/services (`/zone/*`, peer pose `/phineas/pose`) operate on absolute global names.
+All collector nodes execute inside namespace `/phineas` (e.g. `/phineas/cmd_vel`, `/phineas/fleet/ok`). Only inter-robot fleet topics/services (`/zone/*`, peer pose `/ferb/pose`) operate on absolute global names.
 
 ## Nodes
 
 ```mermaid
 flowchart TD
-  subgraph Vision ["vision package"]
+  subgraph Vision ["vision package (/phineas namespace)"]
     cam[camera_node] -->|image_raw| det[cube_detector]
     det -->|cubes/debug_image| web[web_viewer]
   end
 
-  subgraph MobileBase ["mobile_base package (/ferb namespace)"]
+  subgraph MobileBase ["mobile_base package (/phineas namespace)"]
     det -->|cubes| fsm[behavior_fsm]
     det -->|zone/seen| fsm
     line[line_sensors] -->|line| fsm
@@ -44,18 +44,18 @@ flowchart TD
     guard -->|cmd_vel| motor[motor_driver]
   end
 
-  subgraph External ["Fleet (Perry / Phineas)"]
+  subgraph External ["Fleet (Perry / Ferb)"]
     arbiter["Perry zone_arbiter"] -->|"/zone/occupant (2 Hz)"| fleet
     fleet -->|"/zone/request (srv)"| arbiter
     fleet -->|"/zone/release (srv)"| arbiter
     fleet -->|"state (RobotState, 2 Hz)"| ExternalBus["DDS Fleet Bus"]
-    perry_cam["Perry overhead tracker"] -->|"/ferb/pose"| guard
-    perry_cam -->|"/phineas/pose"| guard
+    perry_cam["Perry overhead tracker"] -->|"/phineas/pose"| guard
+    perry_cam -->|"/ferb/pose"| guard
   end
 ```
 
 In simulation, `webots_bridge` (package `recolector_sim`) replaces `camera_node`,
-`ultrasonic` and `motor_driver`: it publishes `image_raw` and `range` and listens to `cmd_vel`, so the
+`ultrasonic`, `line_sensors` and `motor_driver`: it publishes `image_raw`, `range` and `line` and listens to `cmd_vel`, so the
 rest of the nodes are the same as on the real robot.
 
 | Package | Node | What it does | Owner |
@@ -67,15 +67,15 @@ rest of the nodes are the same as on the real robot.
 | `mobile_base` | `color_sensor` | TCS34725 → colour of the cube in the scoop | role 2 |
 | `mobile_base` | `obstacle_guard` | limits velocity via ultrasonic range, enforces fleet heartbeat (`fleet/ok`), and applies `PeerAvoidance` using overhead poses | role 3 |
 | `mobile_base` | `behavior_fsm` | state machine (search, approach, catch, carry, wait for the zone, deliver, release, line escape) and cube count | role 3 |
-| `mobile_base` | `fleet_link` | bridges local FSM and guard with fleet: monitors `/zone/occupant` heartbeat, requests/releases zone asynchronously, publishes `/ferb/state`, `fleet/ok`, and `zone/granted` | role 3 |
+| `mobile_base` | `fleet_link` | bridges local FSM and guard with fleet: monitors `/zone/occupant` heartbeat, requests/releases zone asynchronously, publishes `/phineas/state`, `fleet/ok`, and `zone/granted` | role 3 |
 | `vision` | `camera_node` | camera → `image_raw` | role 2 |
 | `vision` | `cube_detector` | cubes by colour → `cubes` and `cubes/debug_image`; delivery area → `zone/seen` | role 2 |
 | `vision` | `web_viewer` | web page (port 8080): video, cubes, state; changes `behavior_fsm` parameters; manual control with WASD | role 2 |
-| `recolector_sim` | `webots_bridge` | simulation only: Webots ↔ `image_raw`, `range`, `cmd_vel` | role 4 |
+| `recolector_sim` | `webots_bridge` | simulation only: Webots ↔ `image_raw`, `range`, `line`, `cmd_vel` | role 4 |
 
 ## Topics and services
 
-Unless noted with a leading `/`, all names are local to the robot namespace (`/ferb`).
+Unless noted with a leading `/`, all names are local to the robot namespace (`/phineas`).
 
 | Name | Type | Direction / Connection | Description |
 |---|---|---|---|
@@ -96,13 +96,13 @@ Unless noted with a leading `/`, all names are local to the robot namespace (`/f
 | `fleet/ok` | `std_msgs/Bool` | `fleet_link` → `obstacle_guard` | True if `/zone/occupant` heartbeat is fresh (<2.0 s) |
 | `zone/want` | `std_msgs/Bool` | `behavior_fsm` → `fleet_link` | High when the FSM wants the delivery area (published on change) |
 | `zone/delivered` | `std_msgs/String` | `behavior_fsm` → `fleet_link` | Colour name of the cube delivered inside the area |
-| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Ferb currently holds the delivery area lease |
-| `state` | `multirobot_interfaces/RobotState` | `fleet_link` → fleet | Standardized fleet state published at 2 Hz (`/ferb/state`) |
+| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Phineas currently holds the delivery area lease |
+| `state` | `multirobot_interfaces/RobotState` | `fleet_link` → fleet | Standardized fleet state published at 2 Hz (`/phineas/state`) |
 | `/zone/occupant` | `std_msgs/String` | Perry `zone_arbiter` → `fleet_link` | Current lease occupant (2 Hz, reliable, transient_local) |
 | `/zone/request` | `multirobot_interfaces/RequestZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to request delivery square lease |
 | `/zone/release` | `multirobot_interfaces/ReleaseZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to release delivery square lease |
-| `/ferb/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Own pose in table frame (meters, radians) |
-| `/phineas/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Peer pose used for `PeerAvoidance` |
+| `/phineas/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Own pose in table frame (meters, radians) |
+| `/ferb/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Peer pose used for `PeerAvoidance` |
 
 ## Messages
 
@@ -149,7 +149,7 @@ detections arrive while the state steers by the camera.
 `MANUAL` while `cmd_vel_teleop` keeps arriving (WASD in the web viewer): it takes priority over everything
 else, even when paused, and still goes through `obstacle_guard`.
 
-Target colours: since 2026-10-29 Ferb collects **only yellow** (`target_colors: [yellow]`, also in `cube_detector`'s `color_names`). Earlier rule (2026-10-22): every colour except red.
+Target colours: Phineas enables all six colours in `cube_detector` (`color_names: [red, orange, yellow, green, blue, purple]`) and collects every colour except red by default (`target_colors: [orange, yellow, green, blue, purple]`, changeable at runtime from `web_viewer`).
 
 ```mermaid
 stateDiagram-v2
@@ -174,4 +174,4 @@ In any state:
 
 ## Localization
 
-No wheel encoders or SLAM are used. The robot navigates reactively using the onboard camera (cubes and ArUco markers), bottom line sensors, front ultrasonic sensor, and the global pose published by Perry's overhead localization system (`/ferb/pose`).
+No wheel encoders or SLAM are used. The robot navigates reactively using the onboard camera (cubes and ArUco markers), bottom line sensors, front ultrasonic sensor, and the global pose published by Perry's overhead localization system (`/phineas/pose`).

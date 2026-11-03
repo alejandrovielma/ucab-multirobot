@@ -1,6 +1,6 @@
 #VRML_SIM R2025a utf8
-# ROS 2 variant: Ferb (our robot) uses the <extern> controller (driven by the webots_bridge node)
-# and Phineas, the other collector, stays still. Generated from pista_ucab.wbt by tools/generate_ros_world.py.
+# ROS 2 variant: Phineas (our robot) uses the <extern> controller (driven by the webots_bridge node)
+# and Ferb, the other collector, stays still. Generated from pista_ucab.wbt by tools/generate_ros_world.py.
 # UCAB Robotics field: white board with a black tape border and a delivery square.
 # Measurements estimated from the (rectified) photos: board ~1.93 x 1.22 m, 19 mm tape,
 # delivery square ~24 x 24 cm, 14 cubes of ~2.5 cm in 6 colours. Measure the real field and adjust.
@@ -117,7 +117,7 @@ DEF MARCADOR_CUADRADO Solid {
 DEF PHINEAS RecolectorUCAB {
   translation -0.45 0.0 0
   name "Phineas"
-  controller "<none>"
+  controller "<extern>"
   controllerArgs [ "--colors=red,orange,yellow" ]
   marcadorUrl [ "textures/aruco_phineas_id1.png" ]
 }
@@ -125,7 +125,7 @@ DEF FERB RecolectorUCAB {
   translation 0.5 -0.25 0
   rotation 0 0 1 3.14159
   name "Ferb"
-  controller "<extern>"
+  controller "<none>"
   controllerArgs [ "--colors=green,blue,purple" ]
   marcadorUrl [ "textures/aruco_ferb_id2.png" ]
   colorChasis 0.1 0.12 0.25

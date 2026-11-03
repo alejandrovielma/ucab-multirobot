@@ -14,7 +14,7 @@ from mobile_base.mathutil import clamp
 from mobile_base.states import State
 
 # --- Defaults (the real values live in config/collector.yaml) -----------------
-DEFAULT_TARGET_COLORS = ("red", "orange", "yellow")
+DEFAULT_TARGET_COLORS = ("orange", "yellow", "green", "blue", "purple")
 # Stops when the cube is this far from the camera.
 DEFAULT_STOP_DISTANCE_M = 0.17
 # If the cube moves further than stop + margin, approach again.

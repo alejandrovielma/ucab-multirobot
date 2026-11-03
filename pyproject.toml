@@ -3,44 +3,7 @@
 # 80 columns so the code stays readable on small screens and side by side.
 line-length = 80
 target-version = "py312"
-extend-exclude = [
-    "build",
-    "install",
-    "log",
-    # Phineas code merged from ucab-multirobot (Ferb integration). It predates
-    # this ruff configuration: clean it module by module and delete its line.
-    "src/coordinator",
-    "src/overhead_localization",
-    "src/multirobot_sim",
-    "hardware",
-    "src/mobile_base/mobile_base/core",
-    "src/mobile_base/mobile_base/nodes",
-    "src/mobile_base/mobile_base/gpio.py",
-    "src/mobile_base/mobile_base/vision.py",
-    "src/bringup/launch/phineas_*.py",
-    "src/bringup/test",
-    "tools/lab",
-    "tools/sim",
-    "tools/sim_monitor.py",
-    "src/mobile_base/test/test_adapters.py",
-    "src/mobile_base/test/test_behavior.py",
-    "src/mobile_base/test/test_body_geofence.py",
-    "src/mobile_base/test/test_colors.py",
-    "src/mobile_base/test/test_config.py",
-    "src/mobile_base/test/test_core_kinematics.py",
-    "src/mobile_base/test/test_delivery.py",
-    "src/mobile_base/test/test_fusion_hat.py",
-    "src/mobile_base/test/test_gate.py",
-    "src/mobile_base/test/test_geometry.py",
-    "src/mobile_base/test/test_localization.py",
-    "src/mobile_base/test/test_motor_safety.py",
-    "src/mobile_base/test/test_planner.py",
-    "src/mobile_base/test/test_safety.py",
-    "src/mobile_base/test/test_scoop.py",
-    "src/mobile_base/test/test_stall_fixes.py",
-    "src/mobile_base/test/test_track.py",
-    "src/mobile_base/test/test_vision.py",
-]
+extend-exclude = ["build", "install", "log"]
 
 [tool.ruff.lint]
 select = [

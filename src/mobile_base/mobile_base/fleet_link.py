@@ -1,6 +1,6 @@
 """
-fleet_link node: bridges Ferb's internal topics with Perry's zone arbiter and
-the shared multi-robot state topic.
+fleet_link node: bridges Phineas's internal topics with Perry's zone arbiter
+and the shared multi-robot state topic.
 """
 
 import json
