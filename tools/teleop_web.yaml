@@ -396,6 +396,14 @@ detection:
   # Farther blobs were objects in the room beyond the table.
   max_distance_m: 1.2
 
+# Overhead view in the page: the phone's DroidCam MJPEG stream (its IP changes: check the DroidCam app).
+# DroidCam serves ONE client: close the DroidCam client on the PC. null = no overhead view.
+overhead:
+  url: http://10.76.16.16:4747/video
+  width_px: 640
+  jpeg_quality: 60
+  fps: 15
+
 server:
   host: 0.0.0.0
   port: 8081  # 8080 is used by web_viewer

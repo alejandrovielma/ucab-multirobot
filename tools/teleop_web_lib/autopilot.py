@@ -18,11 +18,14 @@ Axes: on the physical robot, `DriveCommand` maps to:
 can think in plain directions.
 """
 
+import logging
 import time
 from typing import NamedTuple, Protocol
 
 from teleop_web_lib.config import AutoConfig
 from teleop_web_lib.kinematics import clamp
+
+log = logging.getLogger("teleop_web")
 
 # --- Machine states -----------------------------------------------------------
 STATE_PAUSED = "PAUSED"
@@ -456,6 +459,7 @@ class AutoPilot:
             # outside. Only then: checked while turning, any other cube on
             # the table near the area undid deliveries that were fine.
             self.delivered_count -= 1
+            log.info("delivery: cube left outside, not counted")
             self._end_drop(now)
             return None
         if now < backup_until + cfg.deliver_turn_s:
@@ -489,6 +493,10 @@ class AutoPilot:
             if far_m is not None and cfg.deliver_far_stop_m > 0:
                 self._drop_far_last = (now, far_m)
                 if far_m <= cfg.deliver_far_stop_m:
+                    log.info(
+                        "delivery: far edge %.3f m <= %.3f m, stop pushing (near %.3f m)",
+                        far_m, cfg.deliver_far_stop_m, zone.distance_m,
+                    )
                     self._drop_blind = True
                     self._phase_until = now  # there: stop pushing
                     return
@@ -511,6 +519,10 @@ class AutoPilot:
         self._drop_blind = True
         self.state = STATE_DROP_BLIND
         self._phase_until = now + blind_m / speed
+        log.info(
+            "delivery: blind push, near edge %.3f m, speed %.2f m/s, %.3f m = %.2f s",
+            edge_m, speed, blind_m, blind_m / speed,
+        )
 
     def _usable_far_m(self, zone, far_m):
         """

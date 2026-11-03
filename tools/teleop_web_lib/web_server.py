@@ -6,6 +6,7 @@ the /cmd endpoint the page polls. No hardware or ROS: it only talks to the
 
 import json
 import logging
+import socket
 import time
 from collections.abc import Callable
 from http import HTTPStatus
@@ -18,6 +19,7 @@ PAGE_PATH = Path(__file__).with_name("web") / "index.html"
 
 PATH_INDEX = "/"
 PATH_STREAM = "/stream.mjpg"
+PATH_OVERHEAD = "/overhead.mjpg"
 PATH_CMD = "/cmd"
 
 CONTENT_HTML = "text/html; charset=utf-8"
@@ -53,6 +55,7 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
 
     drive: object
     camera: object
+    overhead: object | None
     motors_label: str
     page: bytes
     is_running: Callable[[], bool]
@@ -71,11 +74,13 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         if self.path == PATH_INDEX:
             self._send(HTTPStatus.OK, self.page, CONTENT_HTML)
         elif self.path == PATH_STREAM:
-            self._stream()
+            self._stream(self.camera)
+        elif self.path == PATH_OVERHEAD and self.overhead is not None:
+            self._stream(self.overhead)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
-    def _stream(self):
+    def _stream(self, camera):
         """
         Stream frames as multipart MJPEG until the client leaves.
         """
@@ -86,10 +91,10 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         seq = ANY_FRAME_SEQ
         try:
             while self.is_running():
-                seq, jpeg = self.camera.wait_frame(seq)
+                seq, jpeg = camera.wait_frame(seq)
                 if jpeg is not None:
                     self._write_mjpeg_part(jpeg)
-                elif not self.camera.ok:
+                elif not camera.ok:
                     time.sleep(NO_CAMERA_RETRY_S)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -188,6 +193,7 @@ def make_handler(
     motors_label: str,
     page: bytes,
     is_running: Callable[[], bool] = lambda: True,
+    overhead=None,
 ) -> type[ControlRequestHandler]:
     """
     Handler class bound to the drive, the camera, the label of the motor
@@ -200,6 +206,7 @@ def make_handler(
         {
             "drive": drive,
             "camera": camera,
+            "overhead": overhead,
             "motors_label": motors_label,
             "page": page,
             "is_running": staticmethod(is_running),

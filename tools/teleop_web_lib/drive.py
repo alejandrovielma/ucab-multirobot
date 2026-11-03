@@ -64,6 +64,7 @@ class Drive:
         self.line_raw: int | None = None
         self.line_counts: int | None = None  # AO through the ADC, if wired
         self._was_black = False
+        self._logged_state = None
         self._lock = threading.Lock()
         self._cmd = DriveCommand()  # last manual command
         self._stamp = 0.0
@@ -153,6 +154,10 @@ class Drive:
             command = self._next_command(now)
             with self._lock:
                 self._pilot.note_motion(now, command)
+                state = self._pilot.state
+            if state != self._logged_state:
+                log.info("state %s -> %s", self._logged_state, state)
+                self._logged_state = state
             scale = command.speed * self._max_duty
             # DriveCommand: vy forward, vx strafe right; the kinematics take
             # (forward, left, ccw), so the wheel names in the config are the
