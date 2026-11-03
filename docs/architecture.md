@@ -98,11 +98,16 @@ Unless noted with a leading `/`, all names are local to the robot namespace (`/f
 | `zone/delivered` | `std_msgs/String` | `behavior_fsm` → `fleet_link` | Colour name of the cube delivered inside the area |
 | `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Ferb currently holds the delivery area lease |
 | `state` | `multirobot_interfaces/RobotState` | `fleet_link` → fleet | Standardized fleet state published at 2 Hz (`/ferb/state`) |
+| `/perry/state` | `multirobot_interfaces/RobotState` | Perry → `fleet_link` | Perry's state; `gate_closed` true = Perry does not want more cubes for now (zone full or paused). `fleet_link` then does not request the zone. TODO confirm the topic and meaning with the Perry team |
 | `/zone/occupant` | `std_msgs/String` | Perry `zone_arbiter` → `fleet_link` | Current lease occupant (2 Hz, reliable, transient_local) |
 | `/zone/request` | `multirobot_interfaces/RequestZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to request delivery square lease |
 | `/zone/release` | `multirobot_interfaces/ReleaseZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to release delivery square lease |
 | `/ferb/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Own pose in table frame (meters, radians) |
 | `/phineas/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Peer pose used for `PeerAvoidance` |
+
+### Browser tool on the fleet
+
+`tools/teleop_web.py` (the calibrated Auto mode) is not a ROS node. With `fleet.enabled: true` in `tools/teleop_web.yaml` it publishes `behavior/state`, `scoop/has_cube`, `zone/want` and `zone/delivered`, and reads `zone/granted`, all under `/ferb`, and `fleet_link` runs next to it (the same `zone/*` topics as `behavior_fsm`). Auto asks for the turn `zone_request_distance_m` from the area and, without it, waits `zone_wait_distance_m` away (`CARRY (wait zone)`). The turn is held through the push and the back up, and released when the sequence ends. A `zone/granted` older than `granted_timeout_s` counts as not granted.
 
 ## Messages
 

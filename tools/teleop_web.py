@@ -34,13 +34,16 @@ from teleop_web_lib.config import (
     SECTION_AUTO,
     SECTION_CAMERA,
     SECTION_DETECTION,
+    SECTION_FLEET,
     SECTION_LINE_SENSOR,
     SECTION_MOTORS,
     SECTION_SERVER,
     AutoConfig,
+    FleetConfig,
     load_config,
 )
 from teleop_web_lib.drive import Drive
+from teleop_web_lib.fleet import build_fleet
 from teleop_web_lib.line_sensor import build_line_sensor
 from teleop_web_lib.motors import build_motors
 from teleop_web_lib.web_server import make_handler, read_page
@@ -106,6 +109,11 @@ def main() -> None:
         detection_overrides=cfg.get(SECTION_DETECTION),
     )
     drive.set_vision(camera)
+    fleet = None  # --fake runs on the laptop, where there is no ROS 2
+    if not args.fake:
+        fleet = build_fleet(FleetConfig.from_dict(cfg.get(SECTION_FLEET)))
+    if fleet is not None:
+        drive.set_fleet(fleet)
 
     host = args.host or server_cfg["host"]
     port = args.port or server_cfg["port"]
@@ -123,6 +131,8 @@ def main() -> None:
         server.server_close()
         camera.close()
         drive.close()
+        if fleet is not None:
+            fleet.close()
         if line is not None:
             line.close()
 

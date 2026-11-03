@@ -97,6 +97,8 @@ class ZoneClient:
         self.renew_period_s = renew_period_s
         self.want = False
         self.occupant = ""
+        # Perry does not want more cubes for now: do not ask for the zone.
+        self.gate_closed = False
         self.delivered = False
         self.color = ""
         self._was_wanting = False
@@ -114,12 +116,15 @@ class ZoneClient:
         self,
         want: bool | None = None,
         occupant: str | None = None,
+        gate_closed: bool | None = None,
     ) -> None:
         """
         Apply new information from the node; `None` leaves a field as is.
         """
         if occupant is not None:
             self.occupant = occupant
+        if gate_closed is not None:
+            self.gate_closed = gate_closed
         if want is not None:
             if self._was_wanting and not want and self.holds:
                 self._pending_release = True
@@ -138,6 +143,8 @@ class ZoneClient:
         True when the zone must be requested (or its lease renewed).
         """
         if not self.want:
+            return False
+        if self.gate_closed and not self.holds:
             return False
         if not self.holds or self._last_request_s is None:
             return True

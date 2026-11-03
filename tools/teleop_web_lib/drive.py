@@ -15,6 +15,7 @@ from teleop_web_lib.autopilot import (
     STOP,
     AutoPilot,
     DriveCommand,
+    Fleet,
     Vision,
 )
 from teleop_web_lib.config import AutoConfig
@@ -78,6 +79,13 @@ class Drive:
         """
         with self._lock:
             self._pilot.vision = vision
+
+    def set_fleet(self, fleet: Fleet) -> None:
+        """
+        Give the autopilot its link to the other robots.
+        """
+        with self._lock:
+            self._pilot.fleet = fleet
 
     def set_auto(
         self,

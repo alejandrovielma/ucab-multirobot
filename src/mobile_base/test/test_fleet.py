@@ -61,3 +61,19 @@ def test_zone_client_request_renew_release():
     assert color == "blue"
     zc.update(occupant="")
     assert not zc.should_release()
+
+
+def test_zone_client_does_not_request_while_perry_gate_is_closed():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, gate_closed=True)
+    assert not zc.should_request(0.0)
+    zc.update(gate_closed=False)
+    assert zc.should_request(0.1)
+
+
+def test_zone_client_keeps_renewing_a_held_turn_when_gate_closes():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, occupant="ferb")
+    zc.note_requested(0.0)
+    zc.update(gate_closed=True)
+    assert zc.holds and zc.should_request(20.0)

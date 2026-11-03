@@ -30,6 +30,8 @@ TOPIC_ROBOT_STATE = "state"
 TOPIC_ZONE_OCCUPANT = "/zone/occupant"
 # Overhead pose of the OTHER collector (Phineas); we are Ferb.
 TOPIC_PEER_POSE = "/phineas/pose"
+# Perry's own state: gate_closed = no more cubes for now. TODO confirm.
+TOPIC_PERRY_STATE = "/perry/state"
 SERVICE_ZONE_REQUEST = "/zone/request"
 SERVICE_ZONE_RELEASE = "/zone/release"
 

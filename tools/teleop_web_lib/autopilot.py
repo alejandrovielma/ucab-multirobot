@@ -63,11 +63,14 @@ SUFFIX_ALIGN = " (align)"
 STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
 STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
 STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no entry line)"
+# Stopped short of the area until the fleet grants the delivery turn.
+STATE_CARRY_WAIT_ZONE = f"{STATE_CARRY} (wait zone)"
 # Squaring up at the paper: committed to delivering from there.
 COMMITTED_CARRY_STATES = (
     STATE_CARRY_SQUARE,
     STATE_CARRY_CENTER,
     STATE_CARRY_NO_ENTRY,
+    STATE_CARRY_WAIT_ZONE,
 )
 
 # --- Direction helpers --------------------------------------------------------
@@ -114,6 +117,27 @@ class Vision(Protocol):
     def latest_zone(self, now: float, timeout_s: float):
         """
         The delivery gate seen less than `timeout_s` ago, or None.
+        """
+
+
+class Fleet(Protocol):
+    """
+    What the autopilot needs from the fleet link (teleop_web_lib/fleet.py).
+    """
+
+    def update(self, state: str, want: bool, carrying: bool) -> None:
+        """
+        Tell the fleet our state and whether we want the delivery turn.
+        """
+
+    def granted(self) -> bool:
+        """
+        True while we hold the delivery turn.
+        """
+
+    def delivered(self, color: str) -> None:
+        """
+        A cube of `color` was left in the area.
         """
 
 
@@ -165,6 +189,12 @@ class AutoPilot:
         """
         self.cfg = cfg
         self.vision = vision
+        # Link to the other robots; None = alone on the track (no turns).
+        self.fleet: Fleet | None = None
+        # Colour of the last cube chased, reported when it is delivered.
+        self._cube_color = ""
+        # The area is close enough to ask for the turn (set while carrying).
+        self._near_zone = False
         self.enabled = cfg.enabled
         self.state = STATE_PAUSED
         self.target_info: str | None = None
@@ -250,6 +280,28 @@ class AutoPilot:
     def step(self, now: float, line_black: bool = False) -> DriveCommand:
         """
         The command for time `now`; `line_black` is the line sensor reading.
+        """
+        self._near_zone = False
+        command = self._decide(now, line_black)
+        self._sync_fleet()
+        return command
+
+    def _sync_fleet(self) -> None:
+        """
+        Tell the fleet what we want. The turn is asked for while carrying
+        close to the area and kept through the push and the back up, so the
+        other robot and the arm stay out until we are clear.
+        """
+        if self.fleet is None:
+            return
+        want = self.state.startswith(PREFIX_DROP) or (
+            self.carrying and self._near_zone
+        )
+        self.fleet.update(self.state, want, self.carrying)
+
+    def _decide(self, now: float, line_black: bool) -> DriveCommand:
+        """
+        The command for time `now`, without telling the fleet.
         """
         if self.state.startswith((PREFIX_DONE, PREFIX_NO_CUBES)):
             return STOP
@@ -340,6 +392,10 @@ class AutoPilot:
         if self.carrying:
             self.carrying = False
             self.delivered_count += 1
+            if self.fleet is not None:
+                # ponytail: also reported when the back up later finds the
+                # cube outside; Perry counts what it sees, this is only a hint.
+                self.fleet.delivered(self._cube_color)
 
     def note_motion(self, now: float, command: DriveCommand) -> None:
         """
@@ -575,6 +631,7 @@ class AutoPilot:
 
         self.target_info = f"{det.color} {det.distance_m * CM_PER_M:.0f}cm"
         self._last_seen_s = now
+        self._cube_color = det.color
         self._last_bearing_rad = det.bearing_rad
         self._reveal_pending = det.distance_m <= cfg.reveal_max_distance_m
         self._search_start_s = now
@@ -713,6 +770,7 @@ class AutoPilot:
             self._last_paper_s = now
             self._last_paper_bearing_rad = zone.bearing_rad
         elif committed:
+            self._near_zone = True  # keep the turn through a flicker
             lost_s = now - self._last_paper_s
             if lost_s < cfg.carry_paper_hold_s:
                 # The paper flickered out: wait for it, do not turn away.
@@ -738,6 +796,9 @@ class AutoPilot:
         )
         self._search_start_s = now
         self._search_dir = _side_of(zone.bearing_rad)
+        if self._must_wait_for_turn(zone):
+            self.state = STATE_CARRY_WAIT_ZONE
+            return STOP
         # The landmarks only lead there (slowing down near them): the push
         # starts once the paper is in view, from in front of the entry line.
         commit_m = cfg.deliver_commit_distance_m
@@ -757,6 +818,19 @@ class AutoPilot:
             stop_distance_m,
             STATE_CARRY,
         )
+
+    def _must_wait_for_turn(self, zone) -> bool:
+        """
+        True when the area is in the waiting range and the fleet has not
+        granted us the turn. Within the asking range it also marks that the
+        turn is wanted. Alone on the track there is nothing to wait for.
+        """
+        cfg = self.cfg
+        if self.fleet is None or zone.distance_m > cfg.zone_request_distance_m:
+            return False
+        self._near_zone = True
+        in_wait_range = zone.distance_m <= cfg.zone_wait_distance_m
+        return in_wait_range and not self.fleet.granted()
 
     def _square_and_drop(self, now: float, zone) -> DriveCommand:
         """

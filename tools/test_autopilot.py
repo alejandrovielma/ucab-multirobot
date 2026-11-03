@@ -759,3 +759,116 @@ def test_squaring_up_stays_committed_when_the_paper_jitters_or_drops_out():
     # Still no paper after the hold: back to heading for the area.
     pilot.step(0.25 + cfg.carry_paper_hold_s + 0.1)
     assert pilot.state.startswith("CARRY") and pilot.state != "CARRY (square)"
+
+
+class StubFleet:
+    """
+    Records what Auto tells the fleet; `ok` is whether the turn is granted.
+    """
+
+    def __init__(self, ok=False):
+        self.ok = ok
+        self.want = False
+        self.sent = []
+        self.delivered_colors = []
+
+    def update(self, state, want, carrying):
+        self.want = want
+        self.sent.append((state, want, carrying))
+
+    def granted(self):
+        return self.ok
+
+    def delivered(self, color):
+        self.delivered_colors.append(color)
+
+
+def make_fleet_pilot(ok=False):
+    pilot, vision = make_pilot()
+    fleet = StubFleet(ok)
+    pilot.fleet = fleet
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    return pilot, vision, fleet
+
+
+def test_asks_for_the_turn_near_the_area_but_keeps_driving():
+    pilot, vision, fleet = make_fleet_pilot()
+    vision.zone = Seen("floor", 0.40)
+    assert pilot.step(0.0).vy == 1.0
+    assert fleet.want
+    vision.zone = Seen("floor", 0.60)
+    pilot.step(0.1)
+    assert not fleet.want
+
+
+def test_waits_outside_the_area_until_the_turn_is_granted():
+    pilot, vision, fleet = make_fleet_pilot()
+    vision.zone = Seen("floor", 0.28)
+    assert pilot.step(0.0).speed == 0.0
+    assert pilot.state == "CARRY (wait zone)" and fleet.want
+    for step in range(1, 40):
+        assert pilot.step(step * 0.1).speed == 0.0  # never gives up waiting
+    assert pilot.carrying
+    fleet.ok = True
+    pilot.step(4.0)
+    assert pilot.state != "CARRY (wait zone)"
+
+
+def test_keeps_the_turn_through_the_push_and_releases_it_after_backing_up():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(0.0)
+    assert pilot.state == "DROP" and fleet.want
+    vision.zone = None
+    pilot.step(0.05)
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)
+    assert pilot.state == "DROP (back up)" and fleet.want
+    pilot.step(end_s + 0.6)
+    assert pilot.state == "DROP (turn)" and fleet.want
+    pilot.step(end_s + 1.2)
+    assert pilot.state.startswith("EXPLORE") and not fleet.want
+
+
+def test_reports_the_delivered_cube_colour_to_the_fleet():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    pilot.carrying = False
+    pilot.state = "SEARCH"
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    pilot.step(0.0)
+    vision.det = None
+    pilot.step(1.0)
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(1.1)
+    vision.zone = None
+    pilot.step(1.15)
+    pilot.step(blind_push_end_s(pilot.cfg, 0.11, 1.1, 1.15) + 0.1)
+    assert fleet.delivered_colors == ["yellow"]
+
+
+def test_without_a_fleet_it_never_waits():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.28)
+    pilot.step(0.0)
+    assert pilot.state != "CARRY (wait zone)"
+
+
+def test_fleet_state_names_match_what_fleet_link_reads():
+    from teleop_web_lib.fleet import behavior_state_name
+
+    assert behavior_state_name("CARRY (align)") == "CARRY"
+    assert behavior_state_name("CARRY (wait zone)") == "WAIT_ZONE"
+    assert behavior_state_name("DROP (blind)") == "DELIVER"
+    assert behavior_state_name("EXPLORE (turn)") == "SEARCH"
+    assert behavior_state_name("LINE (stop)") == "PAUSED"
+
+
+def test_fleet_settings_reject_unknown_keys():
+    from teleop_web_lib.config import FleetConfig
+
+    assert not FleetConfig.from_dict(None).enabled
+    with pytest.raises(ValueError):
+        FleetConfig.from_dict({"enable": True})
