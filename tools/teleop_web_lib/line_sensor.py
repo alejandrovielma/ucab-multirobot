@@ -128,10 +128,7 @@ class LineSensor:
                 ao_mv = counts_to_millivolts(counts)
         return self._confirm.update(
             reads_black(
-                self._dev.value,
-                self._black_value,
-                ao_mv,
-                self._black_mv,
+                self._dev.value, self._black_value, ao_mv, self._black_mv
             ),
         )
 

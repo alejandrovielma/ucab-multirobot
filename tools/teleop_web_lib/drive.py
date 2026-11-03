@@ -52,7 +52,6 @@ class Drive:
         cmd_timeout_s: float,
         auto_cfg: AutoConfig | None = None,
         line_sensor=None,
-        fleet: Fleet | None = None,
     ):
         """
         Start the control thread.
@@ -61,7 +60,7 @@ class Drive:
         self._max_duty = max_duty_ratio
         self._timeout_s = cmd_timeout_s
         self._line = line_sensor  # None = no line sensor
-        self._pilot = AutoPilot(auto_cfg or AutoConfig(), fleet=fleet)
+        self._pilot = AutoPilot(auto_cfg or AutoConfig())
         self.line_black = False
         self.line_raw: int | None = None
         self.line_counts: int | None = None  # AO through the ADC, if wired
@@ -80,6 +79,13 @@ class Drive:
         """
         with self._lock:
             self._pilot.vision = vision
+
+    def set_fleet(self, fleet: Fleet) -> None:
+        """
+        Give the autopilot its link to the other robots.
+        """
+        with self._lock:
+            self._pilot.fleet = fleet
 
     def set_auto(
         self,

@@ -4,6 +4,7 @@ pytest tools). The autopilot is pure logic, so no thread or hardware is
 involved.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -37,10 +38,14 @@ class StubVision:
 
     def __init__(self):
         self.det = None
+        self.foreign = None
         self.zone = None
 
     def latest_detection(self, now, timeout_s):
         return self.det
+
+    def latest_foreign(self, now, timeout_s):
+        return self.foreign
 
     def latest_zone(self, now, timeout_s):
         return self.zone
@@ -735,9 +740,7 @@ def test_a_blind_rest_never_goes_past_the_far_edge_last_seen():
     pilot.state = "CARRY"
     cfg = pilot.cfg
     vision.zone = Seen(
-        "floor",
-        0.20,
-        far_distance_m=cfg.deliver_far_stop_m + 0.02,
+        "floor", 0.20, far_distance_m=cfg.deliver_far_stop_m + 0.02
     )
     pilot.step(0.0)
     vision.zone = None  # area lost: blind rest
@@ -767,3 +770,267 @@ def test_squaring_up_stays_committed_when_the_paper_jitters_or_drops_out():
     # Still no paper after the hold: back to heading for the area.
     pilot.step(0.25 + cfg.carry_paper_hold_s + 0.1)
     assert pilot.state.startswith("CARRY") and pilot.state != "CARRY (square)"
+
+
+class StubFleet:
+    """
+    Records what Auto tells the fleet; `ok` is whether the turn is granted.
+    """
+
+    def __init__(self, ok=False):
+        self.ok = ok
+        self.want = False
+        self.sent = []
+        self.delivered_colors = []
+
+    def update(self, state, want, carrying):
+        self.want = want
+        self.sent.append((state, want, carrying))
+
+    def granted(self):
+        return self.ok
+
+    def delivered(self, color):
+        self.delivered_colors.append(color)
+
+
+def make_fleet_pilot(ok=False):
+    pilot, vision = make_pilot()
+    fleet = StubFleet(ok)
+    pilot.fleet = fleet
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    return pilot, vision, fleet
+
+
+def test_asks_for_the_turn_near_the_area_but_keeps_driving():
+    pilot, vision, fleet = make_fleet_pilot()
+    vision.zone = Seen("floor", 0.40)
+    assert pilot.step(0.0).vy == 1.0
+    assert fleet.want
+    vision.zone = Seen("floor", 0.60)
+    pilot.step(0.1)
+    assert not fleet.want
+
+
+def test_waits_outside_the_area_until_the_turn_is_granted():
+    pilot, vision, fleet = make_fleet_pilot()
+    vision.zone = Seen("floor", 0.28)
+    assert pilot.step(0.0).speed == 0.0
+    assert pilot.state == "CARRY (wait zone)" and fleet.want
+    for step in range(1, 40):
+        assert pilot.step(step * 0.1).speed == 0.0  # never gives up waiting
+    assert pilot.carrying
+    fleet.ok = True
+    pilot.step(4.0)
+    assert pilot.state != "CARRY (wait zone)"
+
+
+def test_keeps_the_turn_through_the_push_and_releases_it_after_backing_up():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(0.0)
+    assert pilot.state == "DROP" and fleet.want
+    vision.zone = None
+    pilot.step(0.05)
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)
+    assert pilot.state == "DROP (back up)" and fleet.want
+    pilot.step(end_s + 0.6)
+    assert pilot.state == "DROP (turn)" and fleet.want
+    pilot.step(end_s + 1.2)
+    assert pilot.state.startswith("EXPLORE") and not fleet.want
+
+
+def test_reports_the_delivered_cube_colour_to_the_fleet():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    pilot.carrying = False
+    pilot.state = "SEARCH"
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    pilot.step(0.0)
+    vision.det = None
+    pilot.step(1.0)
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(1.1)
+    vision.zone = None
+    pilot.step(1.15)
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 1.1, 1.15)
+    pilot.step(end_s + 0.1)
+    assert fleet.delivered_colors == []  # not before the back up checks it
+    pilot.step(end_s + 0.1 + pilot.cfg.floor_deliver_backup_s)
+    assert pilot.state == "DROP (turn)"
+    assert fleet.delivered_colors == ["yellow"]
+    pilot.step(end_s + 0.2 + pilot.cfg.floor_deliver_backup_s)
+    assert fleet.delivered_colors == ["yellow"]  # only once
+
+
+def test_a_cube_left_outside_is_not_reported_as_delivered():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    cfg = pilot.cfg
+    pilot._cube_color = "yellow"
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(0.0)
+    vision.zone = None
+    pilot.step(0.05)
+    end_s = blind_push_end_s(cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)  # backing up
+    vision.det = Seen("yellow", cfg.drop_verify_distance_m - 0.05)
+    pilot.step(end_s + 0.1 + cfg.floor_deliver_backup_s)
+    assert pilot.delivered_count == 0
+    assert fleet.delivered_colors == [] and not fleet.want
+
+
+def test_a_line_hit_during_the_push_still_reports_the_delivery():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    pilot._cube_color = "yellow"
+    vision.zone = Seen("floor", 0.18)
+    pilot.step(0.0)
+    assert pilot.state == "DROP"
+    pilot.step(0.2, line_black=True)
+    assert fleet.delivered_colors == ["yellow"]
+
+
+def test_waiting_for_the_turn_never_slides_when_the_paper_flickers_out():
+    pilot, vision, fleet = make_fleet_pilot()
+    cfg = pilot.cfg
+    vision.zone = Seen("floor", 0.28, bearing_rad=0.3)
+    pilot.step(0.0)
+    assert pilot.state == "CARRY (wait zone)"
+    vision.zone = None
+    for step in range(1, 200):
+        command = pilot.step(step * 0.1)
+        if step * 0.1 < cfg.carry_zone_timeout_s:
+            assert command.speed == 0.0
+            assert pilot.state == "CARRY (wait zone)"
+    assert not pilot.carrying  # long enough: the cube is taken as lost
+
+
+def test_without_a_fleet_it_never_waits():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.28)
+    pilot.step(0.0)
+    assert pilot.state != "CARRY (wait zone)"
+
+
+def test_fleet_state_names_match_what_fleet_link_reads():
+    from teleop_web_lib.fleet import behavior_state_name
+
+    assert behavior_state_name("CARRY (align)") == "CARRY"
+    assert behavior_state_name("CARRY (wait zone)") == "WAIT_ZONE"
+    assert behavior_state_name("DROP (blind)") == "DELIVER"
+    assert behavior_state_name("EXPLORE (turn)") == "SEARCH"
+    assert behavior_state_name("LINE (stop)") == "PAUSED"
+
+
+def test_fleet_settings_reject_unknown_keys():
+    from teleop_web_lib.config import FleetConfig
+
+    assert not FleetConfig.from_dict(None).enabled
+    with pytest.raises(ValueError):
+        FleetConfig.from_dict({"enable": True})
+
+
+def test_a_foreign_cube_in_the_way_is_slid_around_while_carrying():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)  # straight ahead: would drive on
+    vision.foreign = Seen("blue", 0.25, bearing_rad=0.1)  # a bit to the left
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and command.speed > 0  # right
+    assert pilot.carrying and pilot.state.startswith("CARRY")
+    assert "avoiding blue" in pilot.target_info
+
+
+def test_a_foreign_cube_off_the_path_or_far_is_ignored():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("blue", 0.25, bearing_rad=0.8)  # far to the side
+    assert pilot.step(0.0).vy == 1.0
+    vision.foreign = Seen("blue", 0.60, bearing_rad=0.0)  # still far ahead
+    assert pilot.step(0.1).vy == 1.0
+
+
+def test_the_slide_around_a_foreign_cube_keeps_its_side_until_clear():
+    pilot, vision = make_pilot()
+    cfg = pilot.cfg
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("blue", 0.25, bearing_rad=-0.1)  # to the right
+    assert pilot.step(0.0).vx < 0  # slides left
+    # Just past the clearance but inside the exit margin: same side.
+    lateral_m = cfg.foreign_clearance_m + cfg.foreign_exit_margin_m / 2
+    vision.foreign = Seen("blue", 0.25, -math.asin(lateral_m / 0.25))
+    assert pilot.step(0.1).vx < 0
+    vision.foreign = Seen("blue", 0.25, bearing_rad=-0.8)  # clear: drive on
+    assert pilot.step(0.2).vy == 1.0
+
+
+def test_a_foreign_cube_is_also_avoided_when_searching_for_ours():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", 0.40)  # ahead: approach drives straight
+    vision.foreign = Seen("blue", 0.22, bearing_rad=-0.05)
+    command = pilot.step(0.0)
+    assert command.vx < 0 and command.vy == 0
+
+
+def test_the_blind_catch_push_is_not_interrupted_by_a_foreign_cube():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    assert pilot.step(0.0).vy == 1.0 and pilot.state == "CATCH"
+    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "CATCH"
+
+
+def test_catch_does_not_start_with_a_foreign_cube_in_the_way():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    vision.foreign = Seen("blue", 0.11, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and pilot.state == "APPROACH"
+
+
+def test_drop_does_not_start_with_a_foreign_cube_in_front_of_the_zone():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.0, entry_angle_rad=0.0)
+    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0
+    assert pilot.state.startswith("CARRY")
+    # Slid right past the foreign cube: push straight in without sliding back
+    # left toward the area's centre (which is behind the foreign cube).
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.25, entry_angle_rad=0.0)
+    vision.foreign = Seen("blue", 0.18, bearing_rad=1.05)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
+
+
+def test_without_foreign_cubes_nothing_changes():
+    pilot, vision = make_pilot()
+    vision.zone = Seen("green", 0.60)
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    assert pilot.step(0.0).vy == 1.0
+
+
+def test_cubes_of_the_other_robot_are_never_the_target():
+    from teleop_web_lib.detection import split_cubes
+
+    blue_near = Seen("blue", 0.2)
+    yellow = Seen("yellow", 0.4)
+    blue_far = Seen("blue", 0.5)
+    avoid = frozenset({"blue"})
+    # Nearest first: the blue one is closer but is not what we go for.
+    assert split_cubes([blue_near, yellow, blue_far], avoid) == (
+        yellow,
+        blue_near,
+    )
+    assert split_cubes([yellow], avoid) == (yellow, None)
+    assert split_cubes([blue_far], avoid) == (None, blue_far)
+    assert split_cubes([], avoid) == (None, None)

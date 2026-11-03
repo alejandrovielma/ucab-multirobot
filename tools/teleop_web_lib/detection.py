@@ -36,6 +36,8 @@ BORDER_SECTION = "border"
 SUPPORT_SECTION = "support"
 # Key of the camera section with extra HSV ranges for the area paper.
 AREA_HSV_KEY = "area_hsv"
+# Key of the camera section with the colours of the other robot's cubes.
+AVOID_COLORS_KEY = "avoid_colors"
 
 
 class DetectionPipeline:
@@ -50,11 +52,14 @@ class DetectionPipeline:
         zone_locator,
         border: BorderParams | None = None,
         support: SupportParams | None = None,
+        avoid_colors: frozenset[str] = frozenset(),
     ):
         """
         Keep the cube detector, the area locator (vision/zone.py) and the
-        border filter settings (off when not given).
+        border filter settings (off when not given). Cubes of `avoid_colors`
+        are never targets: they are only reported by `latest_foreign`.
         """
+        self._avoid_colors = avoid_colors
         self._detector = detector
         self._zone_locator = zone_locator
         self._border = border or BorderParams()
@@ -62,6 +67,8 @@ class DetectionPipeline:
         self._lock = threading.Lock()
         self._det = None
         self._det_stamp_s = 0.0
+        self._foreign = None
+        self._foreign_stamp_s = 0.0
         self._zone = None
         self._zone_stamp_s = 0.0
 
@@ -73,6 +80,15 @@ class DetectionPipeline:
             if self._det is not None and (now - self._det_stamp_s) <= timeout_s:
                 return self._det
             return None
+
+    def latest_foreign(self, now: float, timeout_s: float):
+        """
+        The nearest cube of the other robot seen less than `timeout_s` ago,
+        or None.
+        """
+        with self._lock:
+            fresh = (now - self._foreign_stamp_s) <= timeout_s
+            return self._foreign if fresh else None
 
     def latest_zone(self, now: float, timeout_s: float):
         """
@@ -105,15 +121,15 @@ class DetectionPipeline:
         )
         detections = without_cubes_near_border(frame, detections, self._border)
         detections = without_cubes_off_table(frame, detections, self._support)
-        best = detections[0] if detections else None
-        self._remember(best, zone)
+        best, foreign = split_cubes(detections, self._avoid_colors)
+        self._remember(best, foreign, zone)
 
         annotated = draw_detections(frame, detections, best)
         if zone is not None:
             draw_region(annotated, zone)
         return annotated
 
-    def _remember(self, best, zone) -> None:
+    def _remember(self, best, foreign, zone) -> None:
         """
         Store the latest detections with the time they were seen.
         """
@@ -122,9 +138,22 @@ class DetectionPipeline:
             self._det = best
             if best is not None:
                 self._det_stamp_s = now
+            self._foreign = foreign
+            if foreign is not None:
+                self._foreign_stamp_s = now
             self._zone = zone
             if zone is not None:
                 self._zone_stamp_s = now
+
+
+def split_cubes(detections: list, avoid_colors: frozenset[str]):
+    """
+    The nearest cube to go for and the nearest cube of the other robot, from
+    detections sorted nearest first; None where there is none.
+    """
+    ours = [d for d in detections if d.color not in avoid_colors]
+    foreign = [d for d in detections if d.color in avoid_colors]
+    return (ours[0] if ours else None), (foreign[0] if foreign else None)
 
 
 def build_pipeline(
@@ -142,7 +171,11 @@ def build_pipeline(
     if not colors:
         return None
     try:
-        return _build_pipeline(camera_cfg, colors, detection_overrides or {})
+        return _build_pipeline(
+            camera_cfg,
+            colors,
+            detection_overrides or {},
+        )
     except Exception as exc:
         log.warning("no colour detector: %s", exc)
         return None
@@ -182,8 +215,15 @@ def _build_pipeline(
         cube_size_m=hsv_cfg["filter"]["cube_size_m"],
         **{**DEFAULT_DETECTION_FILTER, **detection_overrides},
     )
+    avoid = frozenset(camera_cfg.get(AVOID_COLORS_KEY) or [])
+    if avoid & set(colors):
+        both = sorted(avoid & set(colors))
+        raise ValueError(f"colours both target and avoided: {both}")
+    missing = sorted(avoid - set(ranges))
+    if missing:
+        raise ValueError(f"no HSV ranges for avoid_colors: {missing}")
     detector = ColorDetector(
-        {c: ranges[c] for c in colors if c in ranges},
+        {c: ranges[c] for c in [*colors, *avoid] if c in ranges},
         camera_model,
         filters,
     )
@@ -197,4 +237,5 @@ def _build_pipeline(
         ZoneLocator(ranges, camera_model, zone_params),
         BorderParams(**camera_cfg.get(BORDER_SECTION, {})),
         SupportParams(**camera_cfg.get(SUPPORT_SECTION, {})),
+        avoid,
     )

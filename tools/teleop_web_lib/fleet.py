@@ -1,320 +1,155 @@
 """
-Optional ROS 2 bridge between `tools/teleop_web.py` and the `fleet_link` node.
+Link between the browser tool's Auto mode and the fleet (Perry's zone
+arbiter). Auto only knows the `Fleet` protocol (autopilot.py); `FleetBridge`
+is the ROS 2 side: it publishes what `fleet_link` listens to and reads
+`zone/granted` back. `fleet_link` runs next to the tool and does the rest.
 
-Pure state mapping and grant-freshness tracking live in `to_behavior_state` and
-`BridgeTracker` (no `rclpy`, testable with `pytest`). `RosFleetBridge` imports
-`rclpy` lazily only when `fleet.enabled` is true.
+Only the bridge needs rclpy, imported when it is built, so the tool still
+runs on the laptop without ROS.
 """
 
 import logging
+import sys
 import threading
 import time
 
-from teleop_web_lib.autopilot import (
-    PREFIX_DONE,
-    PREFIX_DROP,
-    PREFIX_LINE,
-    PREFIX_NO_CUBES,
-    STATE_ALIGN,
-    STATE_APPROACH,
-    STATE_CARRY,
-    STATE_CARRY_WAIT_ZONE,
-    STATE_CATCH,
-    STATE_CATCH_CHECK,
-    STATE_DROP_BACKUP,
-    STATE_DROP_TURN,
-    STATE_EXPLORE,
-    STATE_MANUAL,
-    STATE_PAUSED,
-    STATE_SEARCH,
-)
-from teleop_web_lib.config import FleetConfig
+from teleop_web_lib.config import MOBILE_BASE_PACKAGE_DIR, FleetConfig
 
 log = logging.getLogger("teleop_web")
 
-# Relative topics inside the robot namespace (must match mobile_base/topics.py).
-TOPIC_BEHAVIOR_STATE = "behavior/state"
-TOPIC_SCOOP_HAS_CUBE = "scoop/has_cube"
-TOPIC_ZONE_WANT = "zone/want"
-TOPIC_ZONE_DELIVERED = "zone/delivered"
-TOPIC_ZONE_GRANTED = "zone/granted"
-
-NODE_NAME = "teleop_fleet_bridge"
-QOS_DEPTH = 10
-SPIN_TIMEOUT_S = 0.05
+# Auto state prefix -> the `behavior/state` name `fleet_link` understands
+# (mobile_base.states.State). The first prefix that matches wins; anything
+# else is reported as paused (the fleet sees it as stopped).
+_STATE_NAMES = (
+    ("SEARCH", "SEARCH"),
+    ("EXPLORE", "SEARCH"),
+    ("APPROACH", "APPROACH"),
+    ("ALIGN", "APPROACH"),
+    ("CATCH", "CATCH"),
+    ("CARRY (wait zone)", "WAIT_ZONE"),
+    ("CARRY", "CARRY"),
+    ("DROP", "DELIVER"),
+)
+STATE_PAUSED = "PAUSED"
+NODE_NAME = "teleop_web_fleet"
+# How long close() waits for the spin thread to finish.
 JOIN_TIMEOUT_S = 1.0
 
-# mobile_base local State names consumed by fleet_link.
-LOCAL_PAUSED = "PAUSED"
-LOCAL_MANUAL = "MANUAL"
-LOCAL_SEARCH = "SEARCH"
-LOCAL_APPROACH = "APPROACH"
-LOCAL_CATCH = "CATCH"
-LOCAL_CARRY = "CARRY"
-LOCAL_WAIT_ZONE = "WAIT_ZONE"
-LOCAL_DELIVER = "DELIVER"
-LOCAL_RELEASE = "RELEASE"
-LOCAL_LINE_ESCAPE = "LINE_ESCAPE"
 
-_EXACT_STATE_MAP = {
-    STATE_PAUSED: LOCAL_PAUSED,
-    STATE_MANUAL: LOCAL_MANUAL,
-    STATE_SEARCH: LOCAL_SEARCH,
-    STATE_APPROACH: LOCAL_APPROACH,
-    STATE_ALIGN: LOCAL_APPROACH,
-    STATE_CATCH: LOCAL_CATCH,
-    STATE_CATCH_CHECK: LOCAL_CATCH,
-    STATE_CARRY_WAIT_ZONE: LOCAL_WAIT_ZONE,
-    STATE_DROP_BACKUP: LOCAL_RELEASE,
-    STATE_DROP_TURN: LOCAL_RELEASE,
-}
-
-
-def to_behavior_state(pilot_state: str) -> str:
+def behavior_state_name(state: str) -> str:
     """
-    Map an `AutoPilot` state label to the `mobile_base` local `State` name
-    expected by `fleet_link`.
+    The `behavior/state` name for an Auto state such as "CARRY (align)".
     """
-    exact = _EXACT_STATE_MAP.get(pilot_state)
-    if exact is not None:
-        return exact
-    if pilot_state.startswith((PREFIX_DONE, PREFIX_NO_CUBES)):
-        return LOCAL_PAUSED
-    if pilot_state.startswith(PREFIX_LINE):
-        return LOCAL_LINE_ESCAPE
-    if pilot_state.startswith(STATE_EXPLORE):
-        return LOCAL_SEARCH
-    if pilot_state.startswith(STATE_CARRY):
-        return LOCAL_CARRY
-    if pilot_state.startswith(PREFIX_DROP):
-        return LOCAL_DELIVER
-    return LOCAL_PAUSED
+    for prefix, name in _STATE_NAMES:
+        if state.startswith(prefix):
+            return name
+    return STATE_PAUSED
 
 
-class BridgeTracker:
+def build_fleet(cfg: FleetConfig) -> "FleetBridge | None":
     """
-    Pure-logic state of the fleet bridge: grant freshness and change/periodic
-    publishing decisions.
+    The bridge, or None when the fleet link is off in the YAML. Needs ROS 2
+    sourced when on: failing here beats driving without turns.
     """
-
-    def __init__(
-        self,
-        grant_timeout_s: float = 1.0,
-        republish_period_s: float = 0.5,
-    ):
-        """
-        Start with no zone grant received and nothing published yet.
-        """
-        self.grant_timeout_s = grant_timeout_s
-        self.republish_period_s = republish_period_s
-        self._granted = False
-        self._grant_stamp_s: float | None = None
-        self._last_state: str | None = None
-        self._last_carrying: bool | None = None
-        self._last_want: bool | None = None
-        self._last_pub_s: float | None = None
-
-    def on_granted(self, granted: bool, now: float) -> None:
-        """
-        Record a `zone/granted` message received at `now`.
-        """
-        self._granted = bool(granted)
-        self._grant_stamp_s = now
-
-    def is_granted(self, now: float) -> bool:
-        """
-        True when `zone/granted` was true within `grant_timeout_s`.
-        """
-        if not self._granted or self._grant_stamp_s is None:
-            return False
-        return (now - self._grant_stamp_s) <= self.grant_timeout_s
-
-    def outgoing(
-        self,
-        pilot_state: str,
-        carrying: bool,
-        want: bool,
-        now: float,
-    ) -> tuple[str | None, bool | None, bool | None]:
-        """
-        Values `(state, carrying, want)` that must be published at `now`;
-        unchanged fields are `None` until `republish_period_s` elapses.
-        """
-        mapped = to_behavior_state(pilot_state)
-        due = (
-            self._last_pub_s is None
-            or (now - self._last_pub_s) >= self.republish_period_s
-        )
-        out_state = mapped if due or mapped != self._last_state else None
-        out_carry = carrying if due or carrying != self._last_carrying else None
-        out_want = want if due or want != self._last_want else None
-        if any(v is not None for v in (out_state, out_carry, out_want)):
-            self._last_state = mapped
-            self._last_carrying = carrying
-            self._last_want = want
-            self._last_pub_s = now
-        return out_state, out_carry, out_want
+    return FleetBridge(cfg) if cfg.enabled else None
 
 
-class NullFleetBridge:
+class FleetBridge:
     """
-    No-op fleet bridge used when standalone mode (`fleet.enabled: false`) is
-    active: the zone is always treated as granted.
-    """
-
-    def granted(self) -> bool:
-        """
-        Always True when running without a fleet arbiter.
-        """
-        return True
-
-    def sync(self, state: str, carrying: bool, want: bool) -> None:
-        """
-        Ignore state updates in standalone mode.
-        """
-
-    def delivered(self, color: str) -> None:
-        """
-        Ignore delivery reports in standalone mode.
-        """
-
-    def close(self) -> None:
-        """
-        Nothing to release in standalone mode.
-        """
-
-
-class RosFleetBridge:
-    """
-    ROS 2 bridge publishing `behavior/state`, `scoop/has_cube`, `zone/want`
-    and `zone/delivered` to `fleet_link`, and subscribing to `zone/granted`.
+    Publishes Auto's zone wishes to `fleet_link` and reports whether the
+    turn was granted. Thread-safe: Auto calls it from the control thread
+    while rclpy spins in its own.
     """
 
     def __init__(self, cfg: FleetConfig):
         """
-        Initialise `rclpy` if needed, create the namespaced node and spin it
-        on a background daemon thread.
+        Start the ROS node and its spin thread.
         """
+        # Imported here: neither rclpy nor the ROS packages exist on the
+        # laptop.
         import rclpy
-        from rclpy.executors import SingleThreadedExecutor
-        from rclpy.node import Node
         from std_msgs.msg import Bool, String
 
-        self._rclpy = rclpy
-        self._bool_cls = Bool
-        self._str_cls = String
-        self._owns_rclpy = not rclpy.ok()
-        if self._owns_rclpy:
-            rclpy.init()
+        sys.path.insert(0, str(MOBILE_BASE_PACKAGE_DIR))
+        from mobile_base import topics
 
-        ns = f"/{cfg.namespace.strip('/')}" if cfg.namespace.strip("/") else ""
-        self._node = Node(NODE_NAME, namespace=ns)
-        self._tracker = BridgeTracker(
-            cfg.grant_timeout_s,
-            cfg.republish_period_s,
-        )
+        self._cfg = cfg
+        self._msg_bool, self._msg_string = Bool, String
         self._lock = threading.Lock()
-        self._pub_state = self._node.create_publisher(
-            String,
-            TOPIC_BEHAVIOR_STATE,
-            QOS_DEPTH,
-        )
-        self._pub_carry = self._node.create_publisher(
-            Bool,
-            TOPIC_SCOOP_HAS_CUBE,
-            QOS_DEPTH,
-        )
-        self._pub_want = self._node.create_publisher(
-            Bool,
-            TOPIC_ZONE_WANT,
-            QOS_DEPTH,
-        )
-        self._pub_delivered = self._node.create_publisher(
-            String,
-            TOPIC_ZONE_DELIVERED,
-            QOS_DEPTH,
-        )
+        self._granted = False
+        self._granted_s = float("-inf")
+        self._sent: tuple | None = None
+        self._sent_s = float("-inf")
+
+        rclpy.init()
+        self._rclpy = rclpy
+        self._node = rclpy.create_node(NODE_NAME, namespace=cfg.namespace)
+        make = self._node.create_publisher
+        depth = topics.DEFAULT_QOS_DEPTH
+        self._pub_want = make(Bool, topics.TOPIC_ZONE_WANT, depth)
+        self._pub_delivered = make(String, topics.TOPIC_ZONE_DELIVERED, depth)
+        self._pub_state = make(String, topics.TOPIC_BEHAVIOR_STATE, depth)
+        self._pub_cube = make(Bool, topics.TOPIC_SCOOP_HAS_CUBE, depth)
         self._node.create_subscription(
             Bool,
-            TOPIC_ZONE_GRANTED,
+            topics.TOPIC_ZONE_GRANTED,
             self._on_granted,
-            QOS_DEPTH,
+            depth,
         )
-
-        self._executor = SingleThreadedExecutor()
-        self._executor.add_node(self._node)
-        self._running = True
-        self._thread = threading.Thread(target=self._spin_loop, daemon=True)
+        self._thread = threading.Thread(
+            target=rclpy.spin,
+            args=(self._node,),
+            daemon=True,
+        )
         self._thread.start()
-        log.info("fleet bridge active under namespace %s", ns or "/")
+        log.info("fleet bridge up under /%s", cfg.namespace)
 
     def _on_granted(self, msg) -> None:
         """
-        Store the latest `zone/granted` boolean from `fleet_link`.
+        `fleet_link` says whether we hold the zone.
         """
-        now = time.monotonic()
         with self._lock:
-            self._tracker.on_granted(bool(msg.data), now)
-
-    def _spin_loop(self) -> None:
-        """
-        Process incoming ROS callbacks until `close()` is called.
-        """
-        while self._running and self._rclpy.ok():
-            self._executor.spin_once(timeout_sec=SPIN_TIMEOUT_S)
+            self._granted = bool(msg.data)
+            self._granted_s = time.monotonic()
 
     def granted(self) -> bool:
         """
-        True when `fleet_link` recently reported `zone/granted = True`.
+        True while `fleet_link` reported the zone as ours recently. Silence
+        counts as not granted: a dead link must not leave us inside.
         """
-        now = time.monotonic()
         with self._lock:
-            return self._tracker.is_granted(now)
+            fresh = (
+                time.monotonic() - self._granted_s
+            ) <= self._cfg.granted_timeout_s
+            return self._granted and fresh
 
-    def sync(self, state: str, carrying: bool, want: bool) -> None:
+    def update(self, state: str, want: bool, carrying: bool) -> None:
         """
-        Publish changed (or periodically refreshed) state, carry and want
-        topics to `fleet_link`.
+        Publish the current Auto state, wish and cube flag when they change
+        and, otherwise, once per `republish_period_s` (a restarted
+        `fleet_link` must learn them again).
         """
         now = time.monotonic()
-        with self._lock:
-            out_state, out_carry, out_want = self._tracker.outgoing(
-                state,
-                carrying,
-                want,
-                now,
-            )
-        if out_state is not None:
-            self._pub_state.publish(self._str_cls(data=out_state))
-        if out_carry is not None:
-            self._pub_carry.publish(self._bool_cls(data=out_carry))
-        if out_want is not None:
-            self._pub_want.publish(self._bool_cls(data=out_want))
+        current = (behavior_state_name(state), want, carrying)
+        due = now - self._sent_s >= self._cfg.republish_period_s
+        if current == self._sent and not due:
+            return
+        self._sent, self._sent_s = current, now
+        name, want, carrying = current
+        self._pub_state.publish(self._msg_string(data=name))
+        self._pub_want.publish(self._msg_bool(data=want))
+        self._pub_cube.publish(self._msg_bool(data=carrying))
 
     def delivered(self, color: str) -> None:
         """
-        Publish the verified delivered cube colour on `zone/delivered`.
+        A cube of `color` was left in the area.
         """
-        if color:
-            self._pub_delivered.publish(self._str_cls(data=color))
+        self._pub_delivered.publish(self._msg_string(data=color))
 
     def close(self) -> None:
         """
-        Stop spinning, destroy the node and shut down `rclpy` if owned.
+        Let go of the zone and stop the ROS node.
         """
-        self._running = False
+        self.update(STATE_PAUSED, want=False, carrying=False)
+        self._rclpy.shutdown()
         self._thread.join(timeout=JOIN_TIMEOUT_S)
-        self._executor.remove_node(self._node)
-        self._node.destroy_node()
-        if self._owns_rclpy and self._rclpy.ok():
-            self._rclpy.shutdown()
-
-
-def build_fleet_bridge(cfg: FleetConfig, fake: bool = False):
-    """
-    Build `RosFleetBridge` when `cfg.enabled` is true (and not `fake`), else
-    `NullFleetBridge`.
-    """
-    if not cfg.enabled or fake:
-        return NullFleetBridge()
-    return RosFleetBridge(cfg)

@@ -66,6 +66,7 @@ then resume.
 | No cube seen for `no_cubes_stop_s` (since the start, the last cube or the last delivery) | Stop: `DONE (n delivered)` or `NO CUBES (stopped)` | |
 | The area or its legos closer than `gate_avoid_distance_m` | Turn away from it, keep the scan turning that way | Roaming there ran the robot over the legos |
 | A cube seen, then lost | Wait `lost_timeout_s`; keep heading where it was for `reacquire_s`; if it was close, back up `reveal_backup_s` (it may be under the scoop) | |
+| A cube of `camera.avoid_colors` (the other robot's) closer than `foreign_avoid_distance_m` and within `foreign_clearance_m` of the straight path, while driving forward (searching or carrying) | Slide sideways away from it (Mecanum keeps the heading) until it is `foreign_exit_margin_m` farther out | It is never a target and never delivered, but a forward move would push it. The blind catch push and the delivery push are not interrupted |
 | **Carrying** | | |
 | Only the legos in view | Drive toward their midpoint, slowing below `zone_stop_distance_m`; never push from there | A push started from the legos left the cube 20 cm short |
 | The paper in view, far | Steer toward the paper's centre | |

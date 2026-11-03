@@ -26,7 +26,6 @@ The code lives in tools/teleop_web_lib/; this file only wires it together.
 import argparse
 import logging
 import signal
-from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -44,7 +43,7 @@ from teleop_web_lib.config import (
     load_config,
 )
 from teleop_web_lib.drive import Drive
-from teleop_web_lib.fleet import build_fleet_bridge
+from teleop_web_lib.fleet import build_fleet
 from teleop_web_lib.line_sensor import build_line_sensor
 from teleop_web_lib.motors import build_motors
 from teleop_web_lib.web_server import make_handler, read_page
@@ -67,11 +66,6 @@ def parse_args() -> argparse.Namespace:
         "--fake",
         action="store_true",
         help="fake motors and test camera",
-    )
-    parser.add_argument(
-        "--fleet",
-        action="store_true",
-        help="enable the ROS 2 FleetBridge to fleet_link",
     )
     parser.add_argument(
         "--host",
@@ -101,10 +95,6 @@ def main() -> None:
     line = build_line_sensor(
         cfg.get(SECTION_LINE_SENSOR), args.fake, args.config
     )
-    fleet_cfg = FleetConfig.from_dict(cfg.get(SECTION_FLEET))
-    if args.fleet:
-        fleet_cfg = replace(fleet_cfg, enabled=True)
-    fleet = build_fleet_bridge(fleet_cfg, fake=args.fake)
 
     drive = Drive(
         motors,
@@ -112,7 +102,6 @@ def main() -> None:
         motor_cfg["cmd_timeout_s"],
         AutoConfig.from_dict(cfg.get(SECTION_AUTO)),
         line_sensor=line,
-        fleet=fleet,
     )
     camera = Camera(
         camera_cfg,
@@ -120,6 +109,11 @@ def main() -> None:
         detection_overrides=cfg.get(SECTION_DETECTION),
     )
     drive.set_vision(camera)
+    fleet = None  # --fake runs on the laptop, where there is no ROS 2
+    if not args.fake:
+        fleet = build_fleet(FleetConfig.from_dict(cfg.get(SECTION_FLEET)))
+    if fleet is not None:
+        drive.set_fleet(fleet)
 
     host = args.host or server_cfg["host"]
     port = args.port or server_cfg["port"]
@@ -137,7 +131,8 @@ def main() -> None:
         server.server_close()
         camera.close()
         drive.close()
-        fleet.close()
+        if fleet is not None:
+            fleet.close()
         if line is not None:
             line.close()
 
