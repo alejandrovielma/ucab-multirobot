@@ -340,36 +340,43 @@ class AutoPilot:
         """
         Never push a cube of the other robot, with or without a cube of our
         own in the scoop: a plain forward move toward one that is in the way
-        becomes a slide away from it. The blind catch push and the delivery
-        keep their own motion; turns and slides do not run it over.
+        becomes a slide away from it, including right before a catch or
+        delivery push starts. Once a catch or delivery push has started, it
+        runs in its own phase above; turns and slides do not run it over.
         """
-        cfg = self.cfg
-        pure_forward = command.vy > 0 and not (command.vx or command.wz)
-        pushing = self.state == STATE_CATCH or self.state.startswith(
-            PREFIX_DROP
-        )
-        cube = None
-        if self.vision is not None and pure_forward and not pushing:
-            cube = self.vision.latest_foreign(now, cfg.lost_timeout_s)
+        cube = self._foreign_in_way(now, command)
         if cube is None:
-            self._dodge_dir = None
-            return command
-        lateral_m = cube.distance_m * math.sin(abs(cube.bearing_rad))
-        limit_m = cfg.foreign_clearance_m
-        if self._dodge_dir is not None:
-            limit_m += cfg.foreign_exit_margin_m
-        if (
-            cube.distance_m > cfg.foreign_avoid_distance_m
-            or lateral_m > limit_m
-        ):
             self._dodge_dir = None
             return command
         if self._dodge_dir is None:
             self._dodge_dir = -_side_of(cube.bearing_rad)
+        if self.state == STATE_CATCH:
+            self.state = STATE_APPROACH
+        elif self.state.startswith(PREFIX_DROP):
+            self.state = STATE_CARRY_CENTER
         self.target_info = (
             f"avoiding {cube.color} {cube.distance_m * CM_PER_M:.0f}cm"
         )
-        return _strafe(self._dodge_dir, cfg.strafe_speed)
+        return _strafe(self._dodge_dir, self.cfg.strafe_speed)
+
+    def _foreign_in_way(self, now: float, command: DriveCommand):
+        """
+        The foreign cube blocking a plain forward move, or None when the
+        path ahead is clear or the command is a turn/slide.
+        """
+        cfg = self.cfg
+        if self.vision is None or command.vy <= 0:
+            return None
+        if command.vx or command.wz:
+            return None
+        cube = self.vision.latest_foreign(now, cfg.lost_timeout_s)
+        if cube is None or cube.distance_m > cfg.foreign_avoid_distance_m:
+            return None
+        lateral_m = cube.distance_m * math.sin(abs(cube.bearing_rad))
+        limit_m = cfg.foreign_clearance_m
+        if self._dodge_dir is not None:
+            limit_m += cfg.foreign_exit_margin_m
+        return cube if lateral_m <= limit_m else None
 
     def _resume_after_pause(self, now: float) -> None:
         """
@@ -946,9 +953,7 @@ class AutoPilot:
         if abs(entry_angle_rad) > square_tol:
             self.state = STATE_CARRY_SQUARE
             return _turn(_side_of(entry_angle_rad), cfg.search_turn_speed)
-        center_tol = cfg.drop_align_tolerance_rad
-        if self.state == STATE_CARRY_CENTER:
-            center_tol *= cfg.align_exit_fraction
+        center_tol = self._drop_center_tolerance(now, zone.bearing_rad)
         if abs(zone.bearing_rad) > center_tol:
             self.state = STATE_CARRY_CENTER
             return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
@@ -961,6 +966,41 @@ class AutoPilot:
         self._phase_until = now + cfg.deliver_push_max_s
         self._drop_blind = False
         return _forward(cfg.forward_speed)
+
+    def _drop_center_tolerance(
+        self,
+        now: float,
+        zone_bearing_rad: float,
+    ) -> float:
+        """
+        How close to the area's centre the robot must slide before pushing:
+        wider when sliding toward the centre would move into or back behind a
+        foreign cube in front of the entry line.
+        """
+        cfg = self.cfg
+        if self._center_blocked_by_foreign(now, zone_bearing_rad):
+            return cfg.square_max_bearing_rad
+        if self.state == STATE_CARRY_CENTER:
+            return cfg.drop_align_tolerance_rad * cfg.align_exit_fraction
+        return cfg.drop_align_tolerance_rad
+
+    def _center_blocked_by_foreign(
+        self,
+        now: float,
+        zone_bearing_rad: float,
+    ) -> bool:
+        """
+        True when sliding toward the area's centre would move into or back
+        behind a foreign cube in front of the robot.
+        """
+        if self.vision is None:
+            return False
+        cube = self.vision.latest_foreign(now, self.cfg.lost_timeout_s)
+        if cube is None or cube.distance_m > self.cfg.foreign_avoid_distance_m:
+            return False
+        return self._dodge_dir is not None or _side_of(
+            cube.bearing_rad
+        ) == _side_of(zone_bearing_rad)
 
     def _give_up_carrying(self, now: float) -> DriveCommand:
         """

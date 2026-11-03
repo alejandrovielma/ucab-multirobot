@@ -982,8 +982,33 @@ def test_a_foreign_cube_is_also_avoided_when_searching_for_ours():
 def test_the_blind_catch_push_is_not_interrupted_by_a_foreign_cube():
     pilot, vision = make_pilot()
     vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
-    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
     assert pilot.step(0.0).vy == 1.0 and pilot.state == "CATCH"
+    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "CATCH"
+
+
+def test_catch_does_not_start_with_a_foreign_cube_in_the_way():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    vision.foreign = Seen("blue", 0.11, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and pilot.state == "APPROACH"
+
+
+def test_drop_does_not_start_with_a_foreign_cube_in_front_of_the_zone():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.0, entry_angle_rad=0.0)
+    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0
+    assert pilot.state.startswith("CARRY")
+    # Slid right past the foreign cube: push straight in without sliding back
+    # left toward the area's centre (which is behind the foreign cube).
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.25, entry_angle_rad=0.0)
+    vision.foreign = Seen("blue", 0.18, bearing_rad=1.05)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "DROP"
 
 
 def test_without_foreign_cubes_nothing_changes():
