@@ -8,6 +8,7 @@ they only exist on the Pi.
 """
 
 import logging
+import math
 from pathlib import Path
 
 from teleop_web_lib.kinematics import WHEELS, clamp
@@ -16,11 +17,15 @@ log = logging.getLogger("teleop_web")
 
 # --- Config values ---------------------------------------------------------
 DRIVER_FUSION_HAT = "fusion_hat"
+# Phineas: Fusion HAT+ through the `fusion_hat` library (raw I2C fails on
+# this Pi).
+DRIVER_FUSION_HAT_LIB = "fusion_hat_lib"
 DRIVER_GPIO = "gpio"
 
 LABEL_FAKE = "fake"
 LABEL_FAKE_MISSING_PINS = "fake (missing pins)"
 LABEL_FUSION_HAT = "Fusion HAT+"
+LABEL_FUSION_HAT_LIB = "Fusion HAT+ (library)"
 LABEL_GPIO_HAT = "HAT"
 
 # nSLEEP pins of both DRV8833 (must be HIGH to enable the H-bridges).
@@ -46,6 +51,13 @@ FUSION_CHANNELS_PER_TIMER = 4
 WORD_MASK = 0xFFFF
 BYTE_MASK = 0xFF
 BYTE_BITS = 8
+
+# Phineas: PWM channel pair (a, b) of each motor port of the fusion_hat
+# library.
+FUSION_PORTS = {(11, 10): "M0", (9, 8): "M1", (6, 7): "M2", (4, 5): "M3"}
+FUSION_MAX_POWER = 100
+# Below this many percent the command is noise, not a move.
+FUSION_DEADZONE_PCT = 2.0
 
 
 class FakeMotors:
@@ -188,11 +200,69 @@ class FusionHatMotors:
         self._bus.close()
 
 
+def with_start_power(
+    power: float, start_power: float, deadzone: float = FUSION_DEADZONE_PCT
+) -> float:
+    """
+    Phineas: the power (percent) raised to start_power when it is too weak to
+    turn the wheel (TT motors do not turn below ~20 %), keeping its sign.
+
+    start_power 0 = off; a power under the dead zone is noise and becomes 0.
+    """
+    if not start_power:
+        return power
+    if abs(power) < deadzone:
+        return 0.0
+    return math.copysign(max(abs(power), start_power), power)
+
+
+class FusionHatLibMotors:
+    """
+    Phineas: 4 motors on the Fusion HAT+ through the `fusion_hat` library.
+
+    Each wheel is the motor port that matches its (a, b) PWM channel pair.
+    """
+
+    def __init__(self, cfg: dict):
+        """
+        Open the four motor ports, flipping the inverted wheels.
+        """
+        # Only available on the Pi.
+        from fusion_hat.motor import Motor
+
+        self._motors = {}
+        for wheel in WHEELS:
+            motor = Motor(FUSION_PORTS[tuple(cfg["fusion_channels"][wheel])])
+            motor.set_is_reverse(bool(cfg[f"{wheel}_inverted"]))
+            self._motors[wheel] = motor
+        self._start_power = float(cfg.get("start_power_pct", 0.0))
+        self._last = dict.fromkeys(WHEELS)
+        self.set(dict.fromkeys(WHEELS, 0.0))
+
+    def set(self, ratios: dict[str, float]) -> None:
+        """
+        Apply the wheel ratios, writing only the wheels that changed.
+        """
+        for wheel, motor in self._motors.items():
+            value = clamp(round(ratios[wheel], RATIO_DECIMALS))
+            if value == self._last[wheel]:
+                continue
+            self._last[wheel] = value
+            power = value * FUSION_MAX_POWER
+            motor.power(with_start_power(power, self._start_power))
+
+    def close(self) -> None:
+        """
+        Stop the motors.
+        """
+        self.set(dict.fromkeys(WHEELS, 0.0))
+
+
 def pins_configured(cfg: dict) -> bool:
     """
     True when the selected driver has everything it needs to run.
     """
-    if cfg.get("driver") == DRIVER_FUSION_HAT:
+    if cfg.get("driver") in (DRIVER_FUSION_HAT, DRIVER_FUSION_HAT_LIB):
         return True
     return all(p is not None for w in WHEELS for p in cfg[f"{w}_pins"])
 
@@ -201,7 +271,7 @@ def build_motors(
     cfg: dict,
     fake: bool,
     config_path: Path,
-) -> tuple[FakeMotors | HatMotors | FusionHatMotors, str]:
+) -> tuple[FakeMotors | HatMotors | FusionHatMotors | FusionHatLibMotors, str]:
     """
     Pick the motor driver; returns (driver, label shown in the page).
 
@@ -215,4 +285,6 @@ def build_motors(
         return FakeMotors(), LABEL_FAKE_MISSING_PINS
     if cfg.get("driver") == DRIVER_FUSION_HAT:
         return FusionHatMotors(cfg), LABEL_FUSION_HAT
+    if cfg.get("driver") == DRIVER_FUSION_HAT_LIB:
+        return FusionHatLibMotors(cfg), LABEL_FUSION_HAT_LIB
     return HatMotors(cfg), LABEL_GPIO_HAT

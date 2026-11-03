@@ -2,8 +2,10 @@
 # Pins come from docs/hardware.md; while they are null, the motors run in fake mode.
 
 motors:
-  # "fusion_hat" (SunFounder Fusion HAT+, I2C 0x17) or "gpio" (Cokoino HAT with BCM pins).
-  driver: fusion_hat
+  # "fusion_hat" (SunFounder Fusion HAT+, raw I2C 0x17), "fusion_hat_lib" (same HAT through
+  # the fusion_hat library) or "gpio" (Cokoino HAT with BCM pins).
+  # Phineas: fusion_hat_lib, because raw I2C (smbus2) fails on this Pi; the other drivers stay.
+  driver: fusion_hat_lib
   # PWM channels (a, b) per wheel: M0=(11,10) M1=(9,8) M2=(6,7) M3=(4,5).
   # Verified on Phineas floor (2026-10-27): FL=M3, FR=M0, RL=M2, RR=M1.
   fusion_channels:
@@ -24,6 +26,10 @@ motors:
   rl_inverted: false
   rr_inverted: true
   pwm_frequency_hz: 200
+  # Phineas, fusion_hat_lib only: the TT motors do not turn below ~20 % power (lab 2026-10-27:
+  # moved at 21-28 %, did not at 10-17 %). Smaller commands are raised to this; 0 = off.
+  # PROVISIONAL: measure.
+  start_power_pct: 20
   # Duty cycle cap: 6.0 V motor rating / 8.4 V full 2S battery = 0.71.
   max_duty_ratio: 0.71
   # If no command arrives within this time, the motors brake.
@@ -205,7 +211,8 @@ line_sensor:
   # to see how much light each surface reflects while the potentiometer is
   # set. null = AO not wired. AO goes to the HAT's signal pin only: keep the
   # module's VCC on 3V3 (the output must stay under 3.3 V).
-  adc_channel: 0
+  # Phineas: null for now: raw I2C (smbus2) fails on this Pi and black_mv is off anyway.
+  adc_channel: null
   # Also black when AO reads at least this (mV); null = DO only. On Ferb, 900 fixed the border
   # tape (1610-2400 mV) being missed by the DO threshold; white reads ~120-200 mV.
   # TODO measure: set to 900 once AO wiring to A0 is confirmed on Phineas.
