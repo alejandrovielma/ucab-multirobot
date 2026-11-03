@@ -238,7 +238,8 @@ auto:
   lost_timeout_s: 0.6
   # Longest time searching without seeing any cube before stopping for good.
   # Counted from the last thing it did (start, a cube seen, a delivery); meanwhile it roams.
-  no_cubes_stop_s: 60.0
+  # Phineas: 0 = never stop by itself, it keeps searching until the operator turns Auto off.
+  no_cubes_stop_s: 0
   # Time (s) driving straight blind to push the cube into the scoop. The cube's near face is
   # 8.5 cm from the scoop's deepest point (12.5 - 4) when the push starts. 0.35 s fell short on
   # the robot (11.2026): the cube was still 8 cm ahead of the lens afterwards and the robot

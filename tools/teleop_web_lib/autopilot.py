@@ -788,7 +788,11 @@ class AutoPilot:
         if recently_seen:
             return STOP
         # Hard limit: searching this long without seeing any cube, stop.
-        if (now - self._idle_start_s) >= cfg.no_cubes_stop_s:
+        # Phineas: no_cubes_stop_s == 0 never gives up (keeps searching).
+        if (
+            cfg.no_cubes_stop_s
+            and (now - self._idle_start_s) >= cfg.no_cubes_stop_s
+        ):
             return self._give_up()
         return self._scan_step(now)
 
