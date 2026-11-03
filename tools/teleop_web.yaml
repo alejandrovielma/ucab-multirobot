@@ -5,13 +5,14 @@ motors:
   # "fusion_hat" (SunFounder Fusion HAT+, I2C 0x17) or "gpio" (Cokoino HAT with BCM pins).
   driver: fusion_hat
   # PWM channels (a, b) per wheel: M0=(11,10) M1=(9,8) M2=(6,7) M3=(4,5).
-  # Mapping checked channel by channel after the robot was rewired (11.2026): M0=FR,
-  # M1=RL, M2=FL, M3=RR. Names are the real wheels (drive.py maps the keys' axes).
+  # PHINEAS wheel map, measured wheel by wheel on 2026-10-27: FL=M3, FR=M0, RL=M2, RR=M1 (Ferb's
+  # differs: FL=M2, RR=M3, RL=M1; with Ferb's map Phineas's front wheels went forward and the rear
+  # ones backward). Names are the real wheels (drive.py maps the keys' axes).
   fusion_channels:
-    fl: [6, 7]
+    fl: [4, 5]
     fr: [11, 10]
-    rr: [4, 5]
-    rl: [9, 8]
+    rl: [6, 7]
+    rr: [9, 8]
   # GPIO (BCM) for IN1 / IN2 of each motor on the Cokoino CKK0018 HAT (2× DRV8833).
   # M3=FL (DRV8833#2 A), M4=FR (DRV8833#2 B), M1=RL (DRV8833#1 A), M2=RR (DRV8833#1 B).
   fl_pins: [24, 25]
@@ -21,9 +22,9 @@ motors:
   # nSLEEP pins of both DRV8833 (must be HIGH to enable the H-bridges).
   nsleep_pins: [12, 13]
   # true if that wheel spins backwards (inverted here, not in the wiring).
-  # Checked with the keys after the rewiring (11.2026): the rear wheels spun backwards.
-  fl_inverted: true
-  fr_inverted: false
+  # Phineas (2026-10-27): the right wheels (fr, rr) turn backward on "forward".
+  fl_inverted: false
+  fr_inverted: true
   rl_inverted: false
   rr_inverted: true
   pwm_frequency_hz: 200
