@@ -57,7 +57,8 @@ camera:
     hfov_rad: 1.1826
     height_m: 0.058
     tilt_rad: 0.1835
-  target_colors: [orange, yellow, green, blue, purple]
+  # Phineas collects blue cubes only (Ferb collects yellow; red is avoided).
+  target_colors: [blue]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
@@ -358,6 +359,17 @@ auto:
   # Stop roaming toward the area / legos this close (m). 0.84 turned the robot away from almost
   # anywhere in the 1.17 m arena; 0.35 leaves a robot length before the pink line.
   gate_avoid_distance_m: 0.35
+  # Multi-robot zone coordination (active when fleet.enabled is true): ask for the turn at ~45 cm
+  # and stop completely >30 cm outside the square ("CARRY (wait zone)") until granted.
+  zone_request_distance_m: 0.45
+  zone_wait_distance_m: 0.30
+
+# Optional ROS 2 bridge to mobile_base/fleet_link (set enabled: true on the track, or pass --fleet).
+fleet:
+  enabled: false
+  namespace: phineas
+  grant_timeout_s: 1.0
+  republish_period_s: 0.5
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:

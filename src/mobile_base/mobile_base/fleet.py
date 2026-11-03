@@ -97,6 +97,7 @@ class ZoneClient:
         self.renew_period_s = renew_period_s
         self.want = False
         self.occupant = ""
+        self.gate_closed = False
         self.delivered = False
         self.color = ""
         self._was_wanting = False
@@ -110,16 +111,26 @@ class ZoneClient:
         """
         return self.occupant == self.robot
 
+    def is_granted(self, heartbeat_ok: bool) -> bool:
+        """
+        True when this robot holds the zone and the arbiter heartbeat is
+        alive.
+        """
+        return self.holds and heartbeat_ok
+
     def update(
         self,
         want: bool | None = None,
         occupant: str | None = None,
+        gate_closed: bool | None = None,
     ) -> None:
         """
         Apply new information from the node; `None` leaves a field as is.
         """
         if occupant is not None:
             self.occupant = occupant
+        if gate_closed is not None:
+            self.gate_closed = gate_closed
         if want is not None:
             if self._was_wanting and not want and self.holds:
                 self._pending_release = True
@@ -136,8 +147,14 @@ class ZoneClient:
     def should_request(self, now: float) -> bool:
         """
         True when the zone must be requested (or its lease renewed).
+
+        While Perry closes the gate (`gate_closed`), new requests are blocked
+        when this robot does not already hold the zone; an active holder keeps
+        its lease so it can finish reversing out and release cleanly.
         """
         if not self.want:
+            return False
+        if self.gate_closed and not self.holds:
             return False
         if not self.holds or self._last_request_s is None:
             return True

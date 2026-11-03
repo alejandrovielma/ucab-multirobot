@@ -7,8 +7,8 @@
   ros__parameters:
     enabled: true
     # colours the robot looks for (changed at runtime from web_viewer);
-    # must also be in cube_detector's color_names
-    target_colors: [orange, yellow, green, blue, purple]
+    # Phineas collects blue only (Ferb collects yellow; red is avoided).
+    target_colors: [blue]
     # stops when the cube is this far from the camera. With the PROTO geometry,
     # 0.17 m leaves the cube about 5 cm in front of the scoop tip. TODO measure.
     stop_distance_m: 0.17
@@ -33,8 +33,10 @@
     require_has_cube: false      # true once the FC-51 is wired
     confirm_color: false         # true once the TCS34725 is calibrated
     # --- delivery area (zone/seen from cube_detector) ---
-    zone_request_margin_m: 0.45  # ask for the turn this far before arriving
+    zone_request_margin_m: 0.45  # ask for the turn this far before arriving (~45 cm)
     zone_wait_margin_m: 0.30     # without the turn, wait this far before arriving (>30 cm rule)
+    zone_request_v_px: 255       # visual row Y (~45 cm) on floor paper to ask for the turn
+    zone_wait_v_px: 300          # visual row Y (~30-35 cm) on floor paper to stop without grant
     floor_stop_distance_m: 0.19  # area paper in view: arrived at its near edge (~blind spot)
     zone_arrive_v_px: 445        # ... or when its near edge reaches this image row
     gate_stop_distance_m: 0.42   # only landmarks in view: arrived this far from them (teleop_web)
@@ -121,7 +123,7 @@
     max_range_m: 2.0
     field_of_view_rad: 0.26
     queue_len: 3
-    fake: false                  # true on the laptop: always "nothing ahead"
+    fake: true                   # no physical HC-SR04 on track: publish max range so obstacle_guard runs
 
 /**/scoop_driver:
   ros__parameters:

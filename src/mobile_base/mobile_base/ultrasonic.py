@@ -52,7 +52,8 @@ class UltrasonicParams:
     max_range_m: float = DEFAULT_MAX_RANGE_M
     field_of_view_rad: float = DEFAULT_FIELD_OF_VIEW_RAD
     queue_len: int = DEFAULT_QUEUE_LEN
-    fake: bool = False
+    # No physical HC-SR04 on the track; true keeps obstacle_guard active.
+    fake: bool = True
 
 
 class UltrasonicNode(Node):
