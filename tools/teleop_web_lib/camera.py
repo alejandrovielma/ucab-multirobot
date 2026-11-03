@@ -54,6 +54,18 @@ class Camera:
             else pipeline.latest_detection(now, timeout_s)
         )
 
+    def latest_foreign(self, now: float, timeout_s: float):
+        """
+        The nearest cube of the other robot seen less than `timeout_s` ago,
+        or None.
+        """
+        pipeline = self._pipeline
+        return (
+            None
+            if pipeline is None
+            else pipeline.latest_foreign(now, timeout_s)
+        )
+
     def latest_zone(self, now: float, timeout_s: float):
         """
         The delivery gate seen less than `timeout_s` ago, or None.

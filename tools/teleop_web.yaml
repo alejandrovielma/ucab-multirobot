@@ -61,6 +61,12 @@ camera:
     height_m: 0.058
     tilt_rad: 0.1835
   target_colors: [yellow]
+  # Colours of the OTHER robot's cubes: never a target, never delivered, and Auto slides around
+  # one that is in the way (auto.foreign_*). Empty = they are not seen at all. Their HSV comes
+  # from hsv_ranges.yaml, where blue is still the Webots one: recalibrate it with
+  # tools/hsv_tuner.py on the real cubes before listing it here (a wrong range makes the robot
+  # dodge things that are not cubes).
+  avoid_colors: []
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
@@ -368,6 +374,12 @@ auto:
   # collector.yaml. TODO measure
   zone_request_distance_m: 0.45
   zone_wait_distance_m: 0.30
+  # Cubes of camera.avoid_colors: slide around one closer than foreign_avoid_distance_m (m) that
+  # is within foreign_clearance_m (m) of the straight path (half the 186 mm chassis + a cube +
+  # margin), until it is foreign_exit_margin_m (m) farther out. TODO measure
+  foreign_avoid_distance_m: 0.30
+  foreign_clearance_m: 0.12
+  foreign_exit_margin_m: 0.03
 
 # Link to Perry's zone arbiter and the other collector. Needs ROS 2 sourced and fleet_link
 # running next to this tool (same ROS_DOMAIN_ID on all Pis). Off: Auto delivers without turns.

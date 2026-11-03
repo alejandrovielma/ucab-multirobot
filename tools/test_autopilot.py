@@ -4,6 +4,7 @@ pytest tools). The autopilot is pure logic, so no thread or hardware is
 involved.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -37,10 +38,14 @@ class StubVision:
 
     def __init__(self):
         self.det = None
+        self.foreign = None
         self.zone = None
 
     def latest_detection(self, now, timeout_s):
         return self.det
+
+    def latest_foreign(self, now, timeout_s):
+        return self.foreign
 
     def latest_zone(self, now, timeout_s):
         return self.zone
@@ -925,3 +930,82 @@ def test_fleet_settings_reject_unknown_keys():
     assert not FleetConfig.from_dict(None).enabled
     with pytest.raises(ValueError):
         FleetConfig.from_dict({"enable": True})
+
+
+def test_a_foreign_cube_in_the_way_is_slid_around_while_carrying():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)  # straight ahead: would drive on
+    vision.foreign = Seen("blue", 0.25, bearing_rad=0.1)  # a bit to the left
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and command.speed > 0  # right
+    assert pilot.carrying and pilot.state.startswith("CARRY")
+    assert "avoiding blue" in pilot.target_info
+
+
+def test_a_foreign_cube_off_the_path_or_far_is_ignored():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("blue", 0.25, bearing_rad=0.8)  # far to the side
+    assert pilot.step(0.0).vy == 1.0
+    vision.foreign = Seen("blue", 0.60, bearing_rad=0.0)  # still far ahead
+    assert pilot.step(0.1).vy == 1.0
+
+
+def test_the_slide_around_a_foreign_cube_keeps_its_side_until_clear():
+    pilot, vision = make_pilot()
+    cfg = pilot.cfg
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("blue", 0.25, bearing_rad=-0.1)  # to the right
+    assert pilot.step(0.0).vx < 0  # slides left
+    # Just past the clearance but inside the exit margin: same side.
+    lateral_m = cfg.foreign_clearance_m + cfg.foreign_exit_margin_m / 2
+    vision.foreign = Seen("blue", 0.25, -math.asin(lateral_m / 0.25))
+    assert pilot.step(0.1).vx < 0
+    vision.foreign = Seen("blue", 0.25, bearing_rad=-0.8)  # clear: drive on
+    assert pilot.step(0.2).vy == 1.0
+
+
+def test_a_foreign_cube_is_also_avoided_when_searching_for_ours():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", 0.40)  # ahead: approach drives straight
+    vision.foreign = Seen("blue", 0.22, bearing_rad=-0.05)
+    command = pilot.step(0.0)
+    assert command.vx < 0 and command.vy == 0
+
+
+def test_the_blind_catch_push_is_not_interrupted_by_a_foreign_cube():
+    pilot, vision = make_pilot()
+    vision.det = Seen("yellow", pilot.cfg.stop_distance_m - 0.01)
+    vision.foreign = Seen("blue", 0.15, bearing_rad=0.05)
+    assert pilot.step(0.0).vy == 1.0 and pilot.state == "CATCH"
+
+
+def test_without_foreign_cubes_nothing_changes():
+    pilot, vision = make_pilot()
+    vision.zone = Seen("green", 0.60)
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    assert pilot.step(0.0).vy == 1.0
+
+
+def test_cubes_of_the_other_robot_are_never_the_target():
+    from teleop_web_lib.detection import split_cubes
+
+    blue_near = Seen("blue", 0.2)
+    yellow = Seen("yellow", 0.4)
+    blue_far = Seen("blue", 0.5)
+    avoid = frozenset({"blue"})
+    # Nearest first: the blue one is closer but is not what we go for.
+    assert split_cubes([blue_near, yellow, blue_far], avoid) == (
+        yellow,
+        blue_near,
+    )
+    assert split_cubes([yellow], avoid) == (yellow, None)
+    assert split_cubes([blue_far], avoid) == (None, blue_far)
+    assert split_cubes([], avoid) == (None, None)

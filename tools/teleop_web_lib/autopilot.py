@@ -18,6 +18,7 @@ Axes: on the physical robot, `DriveCommand` maps to:
 can think in plain directions.
 """
 
+import math
 import time
 from typing import NamedTuple, Protocol
 
@@ -114,6 +115,12 @@ class Vision(Protocol):
         The best cube seen less than `timeout_s` ago, or None.
         """
 
+    def latest_foreign(self, now: float, timeout_s: float):
+        """
+        The nearest cube of the other robot seen less than `timeout_s` ago,
+        or None.
+        """
+
     def latest_zone(self, now: float, timeout_s: float):
         """
         The delivery gate seen less than `timeout_s` ago, or None.
@@ -197,6 +204,9 @@ class AutoPilot:
         self._unreported_color: str | None = None
         # The area is close enough to ask for the turn (set while carrying).
         self._near_zone = False
+        # Direction of the slide around a cube of the other robot; None when
+        # not dodging one.
+        self._dodge_dir: float | None = None
         self.enabled = cfg.enabled
         self.state = STATE_PAUSED
         self.target_info: str | None = None
@@ -321,8 +331,45 @@ class AutoPilot:
             self.state = STATE_PAUSED
             return STOP
         if self.state.startswith(STATE_CARRY):
-            return self._carry_step(now)
-        return self._search_step(now)
+            command = self._carry_step(now)
+        else:
+            command = self._search_step(now)
+        return self._dodge_foreign(now, command)
+
+    def _dodge_foreign(self, now: float, command: DriveCommand) -> DriveCommand:
+        """
+        Never push a cube of the other robot, with or without a cube of our
+        own in the scoop: a plain forward move toward one that is in the way
+        becomes a slide away from it. The blind catch push and the delivery
+        keep their own motion; turns and slides do not run it over.
+        """
+        cfg = self.cfg
+        pure_forward = command.vy > 0 and not (command.vx or command.wz)
+        pushing = self.state == STATE_CATCH or self.state.startswith(
+            PREFIX_DROP
+        )
+        cube = None
+        if self.vision is not None and pure_forward and not pushing:
+            cube = self.vision.latest_foreign(now, cfg.lost_timeout_s)
+        if cube is None:
+            self._dodge_dir = None
+            return command
+        lateral_m = cube.distance_m * math.sin(abs(cube.bearing_rad))
+        limit_m = cfg.foreign_clearance_m
+        if self._dodge_dir is not None:
+            limit_m += cfg.foreign_exit_margin_m
+        if (
+            cube.distance_m > cfg.foreign_avoid_distance_m
+            or lateral_m > limit_m
+        ):
+            self._dodge_dir = None
+            return command
+        if self._dodge_dir is None:
+            self._dodge_dir = -_side_of(cube.bearing_rad)
+        self.target_info = (
+            f"avoiding {cube.color} {cube.distance_m * CM_PER_M:.0f}cm"
+        )
+        return _strafe(self._dodge_dir, cfg.strafe_speed)
 
     def _resume_after_pause(self, now: float) -> None:
         """
