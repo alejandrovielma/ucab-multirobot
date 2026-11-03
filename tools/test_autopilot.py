@@ -843,8 +843,55 @@ def test_reports_the_delivered_cube_colour_to_the_fleet():
     pilot.step(1.1)
     vision.zone = None
     pilot.step(1.15)
-    pilot.step(blind_push_end_s(pilot.cfg, 0.11, 1.1, 1.15) + 0.1)
+    end_s = blind_push_end_s(pilot.cfg, 0.11, 1.1, 1.15)
+    pilot.step(end_s + 0.1)
+    assert fleet.delivered_colors == []  # not before the back up checks it
+    pilot.step(end_s + 0.1 + pilot.cfg.floor_deliver_backup_s)
+    assert pilot.state == "DROP (turn)"
     assert fleet.delivered_colors == ["yellow"]
+    pilot.step(end_s + 0.2 + pilot.cfg.floor_deliver_backup_s)
+    assert fleet.delivered_colors == ["yellow"]  # only once
+
+
+def test_a_cube_left_outside_is_not_reported_as_delivered():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    cfg = pilot.cfg
+    pilot._cube_color = "yellow"
+    vision.zone = Seen("floor", 0.11)
+    pilot.step(0.0)
+    vision.zone = None
+    pilot.step(0.05)
+    end_s = blind_push_end_s(cfg, 0.11, 0.0, 0.05)
+    pilot.step(end_s + 0.1)  # backing up
+    vision.det = Seen("yellow", cfg.drop_verify_distance_m - 0.05)
+    pilot.step(end_s + 0.1 + cfg.floor_deliver_backup_s)
+    assert pilot.delivered_count == 0
+    assert fleet.delivered_colors == [] and not fleet.want
+
+
+def test_a_line_hit_during_the_push_still_reports_the_delivery():
+    pilot, vision, fleet = make_fleet_pilot(ok=True)
+    pilot._cube_color = "yellow"
+    vision.zone = Seen("floor", 0.18)
+    pilot.step(0.0)
+    assert pilot.state == "DROP"
+    pilot.step(0.2, line_black=True)
+    assert fleet.delivered_colors == ["yellow"]
+
+
+def test_waiting_for_the_turn_never_slides_when_the_paper_flickers_out():
+    pilot, vision, fleet = make_fleet_pilot()
+    cfg = pilot.cfg
+    vision.zone = Seen("floor", 0.28, bearing_rad=0.3)
+    pilot.step(0.0)
+    assert pilot.state == "CARRY (wait zone)"
+    vision.zone = None
+    for step in range(1, 200):
+        command = pilot.step(step * 0.1)
+        if step * 0.1 < cfg.carry_zone_timeout_s:
+            assert command.speed == 0.0
+            assert pilot.state == "CARRY (wait zone)"
+    assert not pilot.carrying  # long enough: the cube is taken as lost
 
 
 def test_without_a_fleet_it_never_waits():

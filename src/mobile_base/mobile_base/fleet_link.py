@@ -214,9 +214,11 @@ class FleetLinkNode(Node):
 
     def _publish_granted(self):
         """
-        Publish whether we currently hold the delivery zone.
+        Publish whether we currently hold the delivery zone. Without a fresh
+        arbiter heartbeat the lease cannot be trusted, so it reads as lost.
         """
-        self._pub_granted.publish(Bool(data=self._zone.holds))
+        alive = self._hb.ok(now_s(self))
+        self._pub_granted.publish(Bool(data=self._zone.holds and alive))
 
     def _tick_fleet(self):
         """

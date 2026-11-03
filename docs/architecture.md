@@ -96,7 +96,7 @@ Unless noted with a leading `/`, all names are local to the robot namespace (`/f
 | `fleet/ok` | `std_msgs/Bool` | `fleet_link` → `obstacle_guard` | True if `/zone/occupant` heartbeat is fresh (<2.0 s) |
 | `zone/want` | `std_msgs/Bool` | `behavior_fsm` → `fleet_link` | High when the FSM wants the delivery area (published on change) |
 | `zone/delivered` | `std_msgs/String` | `behavior_fsm` → `fleet_link` | Colour name of the cube delivered inside the area |
-| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Ferb currently holds the delivery area lease |
+| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Ferb holds the delivery area lease and the arbiter heartbeat is fresh |
 | `state` | `multirobot_interfaces/RobotState` | `fleet_link` → fleet | Standardized fleet state published at 2 Hz (`/ferb/state`) |
 | `/perry/state` | `multirobot_interfaces/RobotState` | Perry → `fleet_link` | Perry's state; `gate_closed` true = Perry does not want more cubes for now (zone full or paused). `fleet_link` then does not request the zone. TODO confirm the topic and meaning with the Perry team |
 | `/zone/occupant` | `std_msgs/String` | Perry `zone_arbiter` → `fleet_link` | Current lease occupant (2 Hz, reliable, transient_local) |

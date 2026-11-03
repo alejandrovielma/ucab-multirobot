@@ -193,6 +193,8 @@ class AutoPilot:
         self.fleet: Fleet | None = None
         # Colour of the last cube chased, reported when it is delivered.
         self._cube_color = ""
+        # Colour of a counted delivery not yet reported to the fleet.
+        self._unreported_color: str | None = None
         # The area is close enough to ask for the turn (set while carrying).
         self._near_zone = False
         self.enabled = cfg.enabled
@@ -382,20 +384,27 @@ class AutoPilot:
         """
         if self.state.startswith(PREFIX_DROP):
             self._finish_drop()
+            self._report_delivery()  # no back up check will run now
         else:
             self.carrying = False
 
     def _finish_drop(self) -> None:
         """
-        The cube is on the delivery area: stop carrying it and count it.
+        The cube is on the delivery area: stop carrying it and count it. The
+        fleet hears about it once the back up confirms it stayed there.
         """
         if self.carrying:
             self.carrying = False
             self.delivered_count += 1
-            if self.fleet is not None:
-                # ponytail: also reported when the back up later finds the
-                # cube outside; Perry counts what it sees, this is only a hint.
-                self.fleet.delivered(self._cube_color)
+            self._unreported_color = self._cube_color
+
+    def _report_delivery(self) -> None:
+        """
+        Tell the fleet about the delivery counted by `_finish_drop`, once.
+        """
+        if self.fleet is not None and self._unreported_color is not None:
+            self.fleet.delivered(self._unreported_color)
+        self._unreported_color = None
 
     def note_motion(self, now: float, command: DriveCommand) -> None:
         """
@@ -510,9 +519,11 @@ class AutoPilot:
             # outside. Only then: checked while turning, any other cube on
             # the table near the area undid deliveries that were fine.
             self.delivered_count -= 1
+            self._unreported_color = None  # Perry must not count it
             self._end_drop(now)
             return None
         if now < backup_until + cfg.deliver_turn_s:
+            self._report_delivery()
             self.state = STATE_DROP_TURN
             return _turn(self._search_dir, cfg.turn_speed)
         self._end_drop(now)
@@ -770,21 +781,9 @@ class AutoPilot:
             self._last_paper_s = now
             self._last_paper_bearing_rad = zone.bearing_rad
         elif committed:
-            self._near_zone = True  # keep the turn through a flicker
-            lost_s = now - self._last_paper_s
-            if lost_s < cfg.carry_paper_hold_s:
-                # The paper flickered out: wait for it, do not turn away.
-                return STOP
-            slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
-            off_side = (
-                abs(self._last_paper_bearing_rad)
-                > cfg.drop_align_tolerance_rad
-            )
-            if off_side and lost_s < slide_until_s:
-                # Squaring up pushed it out of view: slide back toward it.
-                self.state = STATE_CARRY_CENTER
-                side = _side_of(self._last_paper_bearing_rad)
-                return _strafe(side, cfg.strafe_speed)
+            command = self._paper_lost_step(now)
+            if command is not None:
+                return command
         if zone is None:
             if now - self._search_start_s >= cfg.carry_zone_timeout_s:
                 return self._give_up_carrying(now)
@@ -818,6 +817,35 @@ class AutoPilot:
             stop_distance_m,
             STATE_CARRY,
         )
+
+    def _paper_lost_step(self, now: float) -> DriveCommand | None:
+        """
+        Committed to the paper but it is out of view: wait for it, or slide
+        back toward where it was. None once neither applies.
+        """
+        cfg = self.cfg
+        self._near_zone = True  # keep the turn through a flicker
+        lost_s = now - self._last_paper_s
+        if lost_s < cfg.carry_paper_hold_s:
+            # The paper flickered out: wait for it, do not turn away.
+            return STOP
+        if (
+            self.state == STATE_CARRY_WAIT_ZONE
+            and lost_s < cfg.carry_zone_timeout_s
+        ):
+            # No turn yet: never slide or roam toward the area. Past the
+            # timeout the cube is taken as lost, as anywhere else.
+            return STOP
+        slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
+        off_side = (
+            abs(self._last_paper_bearing_rad) > cfg.drop_align_tolerance_rad
+        )
+        if off_side and lost_s < slide_until_s:
+            # Squaring up pushed it out of view: slide back toward it.
+            self.state = STATE_CARRY_CENTER
+            side = _side_of(self._last_paper_bearing_rad)
+            return _strafe(side, cfg.strafe_speed)
+        return None
 
     def _must_wait_for_turn(self, zone) -> bool:
         """
