@@ -5,27 +5,30 @@ motors:
   # "fusion_hat" (SunFounder Fusion HAT+, I2C 0x17) or "gpio" (Cokoino HAT with BCM pins).
   driver: fusion_hat
   # PWM channels (a, b) per wheel: M0=(11,10) M1=(9,8) M2=(6,7) M3=(4,5).
-  # Verified on Phineas floor (2026-10-27): FL=M3, FR=M0, RL=M2, RR=M1.
+  # Mapping checked channel by channel after the robot was rewired (11.2026): M0=FR,
+  # M1=RL, M2=FL, M3=RR. Names are the real wheels (drive.py maps the keys' axes).
   fusion_channels:
-    fl: [4, 5]
+    fl: [6, 7]
     fr: [11, 10]
-    rl: [6, 7]
-    rr: [9, 8]
-  # GPIO (BCM) for IN1 / IN2 of each motor on Phineas's Cokoino CKK0018 HAT (2x DRV8833).
-  fl_pins: [17, 27]
-  fr_pins: [24, 25]
-  rl_pins: [22, 23]
-  rr_pins: [26, 16]
+    rr: [4, 5]
+    rl: [9, 8]
+  # GPIO (BCM) for IN1 / IN2 of each motor on the Cokoino CKK0018 HAT (2× DRV8833).
+  # M3=FL (DRV8833#2 A), M4=FR (DRV8833#2 B), M1=RL (DRV8833#1 A), M2=RR (DRV8833#1 B).
+  fl_pins: [24, 25]
+  fr_pins: [26, 16]
+  rl_pins: [17, 27]
+  rr_pins: [22, 23]
   # nSLEEP pins of both DRV8833 (must be HIGH to enable the H-bridges).
   nsleep_pins: [12, 13]
-  # true if that wheel spins backwards (verified on Phineas: right wheels inverted).
-  fl_inverted: false
-  fr_inverted: true
+  # true if that wheel spins backwards (inverted here, not in the wiring).
+  # Checked with the keys after the rewiring (11.2026): the rear wheels spun backwards.
+  fl_inverted: true
+  fr_inverted: false
   rl_inverted: false
   rr_inverted: true
   pwm_frequency_hz: 200
-  # Duty cycle cap: 6.0 V motor rating / 8.4 V full 2S battery = 0.71.
-  max_duty_ratio: 0.71
+  # Duty cycle cap (0–1). Start low and raise it with the wheels off the ground.
+  max_duty_ratio: 0.9
   # If no command arrives within this time, the motors brake.
   cmd_timeout_s: 0.5
 
@@ -40,7 +43,7 @@ camera:
   vflip: true
   hflip: true
   # Part of the camera id that identifies the CSI port of the OV5647 (picamera2 only).
-  picamera_id_hint: imx219
+  picamera_id_hint: i2c@80000
   # Sensor mode to request. 1640x1232 is the full-frame binned mode (whole
   # field of view, about 62 degrees); without it libcamera picks the 640x480
   # mode, a crop of the centre of about 28 degrees. null = let libcamera pick.
@@ -57,15 +60,7 @@ camera:
     hfov_rad: 1.1826
     height_m: 0.058
     tilt_rad: 0.1835
-  # Phineas collects blue cubes only (Ferb collects yellow; red is avoided).
-  target_colors: [blue]
-  # Colours of the OTHER robot's cubes: never a target, never delivered, and Auto slides around
-  # one that is in the way (auto.foreign_*). Empty = they are not seen at all. Phineas avoids
-  # yellow (Ferb's cubes); edit this list to change it (it fails at start-up if a listed colour
-  # has no HSV range or is also a target). Its HSV comes from hsv_ranges.yaml: check the yellow
-  # range on real cubes with tools/hsv_tuner.py (the table renders yellowish, H ~32, so a wrong
-  # range makes the robot dodge the table and not just cubes).
-  avoid_colors: [yellow]
+  target_colors: [yellow]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
@@ -192,8 +187,9 @@ camera:
 
 line_sensor:
   # GPIO (BCM) of the bottom TCRT5000's DO output. null = no sensor (black line not seen).
-  # Phineas: GPIO5 (physical pin 29). Power it from 3.3 V, not 5 V.
-  pin: 5
+  # Power it from 3.3 V, not 5 V. Rewired (11.2026) to the Fusion HAT+ DIGITAL port 27: DO on
+  # its SIG pin (GPIO27), VCC on its 3V3 pin, GND on its - pin. Before it was GPIO5 (pin 29).
+  pin: 27
   # DO value over the black tape (the usual module gives 1 on black, 0 on white).
   black_value: 1
   # Black reads in a row (one per 20 ms loop) before the robot reacts. Single reads while moving
@@ -204,12 +200,12 @@ line_sensor:
   # Fusion HAT+ analog input (0-3 = A0-A3) where the module's AO pin is wired,
   # to see how much light each surface reflects while the potentiometer is
   # set. null = AO not wired. AO goes to the HAT's signal pin only: keep the
-  # module's VCC on 3V3 (the output must stay under 3.3 V).
+  # module's VCC on 3V3 (the output must stay under 3.3 V). Since the rewiring: ADC row 0 SIG.
   adc_channel: 0
-  # Also black when AO reads at least this (mV); null = DO only. On Ferb, 900 fixed the border
-  # tape (1610-2400 mV) being missed by the DO threshold; white reads ~120-200 mV.
-  # TODO measure: set to 900 once AO wiring to A0 is confirmed on Phineas.
-  black_mv: null
+  # Also black when AO reads at least this (mV); null = DO only. The DO threshold (the
+  # potentiometer) flipped at ~1700-1900 mV while the border tape read 1610-2400 mV, and the
+  # robot crossed the border without seeing it (11.2026). White reads ~120-200 mV.
+  black_mv: 900
 
 auto:
   # NEVER start in Auto: the operator turns it on from the page.
@@ -367,27 +363,6 @@ auto:
   # Stop roaming toward the area / legos this close (m). 0.84 turned the robot away from almost
   # anywhere in the 1.17 m arena; 0.35 leaves a robot length before the pink line.
   gate_avoid_distance_m: 0.35
-  # Fleet turns (only with fleet.enabled): ask for the delivery turn this far from the area (m)
-  # and, without it, wait this far away (m). Same as zone_request_margin_m / zone_wait_margin_m in
-  # collector.yaml. TODO measure
-  zone_request_distance_m: 0.45
-  zone_wait_distance_m: 0.30
-  # Cubes of camera.avoid_colors: slide around one closer than foreign_avoid_distance_m (m) that
-  # is within foreign_clearance_m (m) of the straight path (half the 186 mm chassis + a cube +
-  # margin), until it is foreign_exit_margin_m (m) farther out. TODO measure
-  foreign_avoid_distance_m: 0.30
-  foreign_clearance_m: 0.12
-  foreign_exit_margin_m: 0.03
-
-# Link to Perry's zone arbiter and the other collector. Needs ROS 2 sourced and fleet_link
-# running next to this tool (same ROS_DOMAIN_ID on all Pis). Off: Auto delivers without turns.
-fleet:
-  enabled: false
-  namespace: phineas
-  # zone/granted older than this counts as not granted (fleet_link dead or disconnected).
-  granted_timeout_s: 2.0
-  # Re-send state and wish at least this often, so a restarted fleet_link learns them.
-  republish_period_s: 1.0
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:

@@ -35,8 +35,7 @@ def test_heartbeat_timeout():
 
 
 def test_zone_client_request_renew_release():
-    zc = ZoneClient(renew_period_s=20.0)
-    assert zc.robot == "phineas"
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
     assert not zc.holds
     assert not zc.should_request(0.0)
 
@@ -46,7 +45,7 @@ def test_zone_client_request_renew_release():
     zc.note_requested(0.0)
 
     # Once granted, no new request before renew_period_s.
-    zc.update(occupant="phineas")
+    zc.update(occupant="ferb")
     assert zc.holds
     assert not zc.should_request(10.0)
     assert zc.should_request(20.0)
@@ -62,39 +61,3 @@ def test_zone_client_request_renew_release():
     assert color == "blue"
     zc.update(occupant="")
     assert not zc.should_release()
-
-
-def test_perry_gate_closed_blocks_new_zone_requests():
-    zc = ZoneClient(robot="phineas", renew_period_s=20.0)
-    zc.update(want=True, occupant="perry", gate_closed=True)
-    assert not zc.holds
-    assert not zc.should_request(0.0)
-
-    # Once Perry reopens the gate, Phineas may request the lease again.
-    zc.update(occupant="", gate_closed=False)
-    assert zc.should_request(1.0)
-
-
-def test_perry_gate_closed_lets_active_holder_finish_and_release():
-    zc = ZoneClient(robot="phineas", renew_period_s=20.0)
-    zc.update(want=True, occupant="phineas", gate_closed=False)
-    zc.note_requested(0.0)
-    assert zc.holds
-    assert zc.is_granted(heartbeat_ok=True)
-
-    # Perry closes the gate while Phineas is still backing out of the square.
-    zc.update(gate_closed=True)
-    assert zc.holds
-    assert zc.is_granted(heartbeat_ok=True)
-
-    zc.mark_delivered("blue")
-    zc.update(want=False)
-    assert zc.should_release()
-    assert zc.pop_release() == (True, "blue")
-
-
-def test_zone_grant_requires_live_heartbeat():
-    zc = ZoneClient(robot="phineas")
-    zc.update(occupant="phineas")
-    assert zc.is_granted(heartbeat_ok=True)
-    assert not zc.is_granted(heartbeat_ok=False)

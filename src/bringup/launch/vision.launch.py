@@ -21,19 +21,17 @@ PACKAGE_VISION = "vision"
 VISION_CONFIG_FILE = "hsv_ranges.yaml"
 CONFIG_DIR = "config"
 
-DEFAULT_ROBOT = "phineas"
 DEFAULT_DEVICE = "0"
 DEFAULT_PORT = "8080"
 
 
-def _node(executable: str, namespace, parameters: list) -> Node:
+def _node(executable: str, parameters: list) -> Node:
     """
-    A vision node in the robot namespace that logs to the screen.
+    A vision node that logs to the screen.
     """
     return Node(
         package=PACKAGE_VISION,
         executable=executable,
-        namespace=namespace,
         parameters=parameters,
         output="screen",
     )
@@ -45,15 +43,12 @@ def generate_launch_description():
     """
     share = get_package_share_directory(PACKAGE_VISION)
     cfg = os.path.join(share, CONFIG_DIR, VISION_CONFIG_FILE)
-    robot = LaunchConfiguration("robot")
     return LaunchDescription(
         [
-            DeclareLaunchArgument("robot", default_value=DEFAULT_ROBOT),
             DeclareLaunchArgument("device", default_value=DEFAULT_DEVICE),
             DeclareLaunchArgument("port", default_value=DEFAULT_PORT),
             _node(
                 "camera_node",
-                robot,
                 [
                     cfg,
                     {
@@ -64,10 +59,9 @@ def generate_launch_description():
                     },
                 ],
             ),
-            _node("cube_detector", robot, [cfg]),
+            _node("cube_detector", [cfg]),
             _node(
                 "web_viewer",
-                robot,
                 [cfg, {"port": LaunchConfiguration("port")}],
             ),
         ]

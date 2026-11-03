@@ -48,11 +48,6 @@ DEFAULT_ZONE_REQUEST_MARGIN_M = 0.45
 # Without the turn, wait this far before the arrival point (rule: more
 # than 30 cm from the area).
 DEFAULT_ZONE_WAIT_MARGIN_M = 0.30
-# Visual image-row Y thresholds on the floor paper (640x480 camera): request
-# the turn around ~45 cm, and stop >30 cm away when not granted, strictly
-# before zone_arrive_v_px.
-DEFAULT_ZONE_REQUEST_V_PX = 255
-DEFAULT_ZONE_WAIT_V_PX = 300
 # Area paper in view: arrived when its near edge is this close or this low
 # in the image (~18.5 cm, where the scoop starts hiding things).
 DEFAULT_FLOOR_STOP_DISTANCE_M = 0.19
@@ -101,8 +96,6 @@ class CollectorParams:
     confirm_color: bool = False
     zone_request_margin_m: float = DEFAULT_ZONE_REQUEST_MARGIN_M
     zone_wait_margin_m: float = DEFAULT_ZONE_WAIT_MARGIN_M
-    zone_request_v_px: int = DEFAULT_ZONE_REQUEST_V_PX
-    zone_wait_v_px: int = DEFAULT_ZONE_WAIT_V_PX
     floor_stop_distance_m: float = DEFAULT_FLOOR_STOP_DISTANCE_M
     zone_arrive_v_px: int = DEFAULT_ZONE_ARRIVE_V_PX
     gate_stop_distance_m: float = DEFAULT_GATE_STOP_DISTANCE_M
@@ -333,10 +326,10 @@ class CollectorFsm:
         self._search_dir = (
             SEARCH_DIR_LEFT if zone.bearing_rad >= 0 else SEARCH_DIR_RIGHT
         )
-        if self._should_request_zone(zone):
+        to_stop_m = zone.distance_m - self._stop_distance(zone)
+        if to_stop_m <= p.zone_request_margin_m:
             self._want = True
         if self._must_wait(zone, inp.zone_granted):
-            self._want = True
             self._go(State.WAIT_ZONE, now)
             return self._out(Command())
         aligned = abs(zone.bearing_rad) <= p.catch_align_tolerance_rad
@@ -352,32 +345,14 @@ class CollectorFsm:
             )
         )
 
-    def _should_request_zone(self, zone: Zone) -> bool:
-        """
-        True when close enough (by floor distance or visual row Y) to request
-        the delivery turn (~45 cm away).
-        """
-        p = self.params
-        to_stop_m = zone.distance_m - self._stop_distance(zone)
-        by_row = (
-            zone.source == ZONE_SOURCE_FLOOR
-            and zone.v_px >= p.zone_request_v_px
-        )
-        return to_stop_m <= p.zone_request_margin_m or by_row
-
     def _must_wait(self, zone: Zone, granted: bool) -> bool:
         """
-        True when the robot is at the >30 cm waiting threshold (by floor
-        distance or visual row Y) without the turn.
+        True when the robot is at the waiting distance without the turn.
         """
         p = self.params
-        if not p.require_zone_grant or granted:
-            return False
         to_stop_m = zone.distance_m - self._stop_distance(zone)
-        by_row = (
-            zone.source == ZONE_SOURCE_FLOOR and zone.v_px >= p.zone_wait_v_px
-        )
-        return to_stop_m <= p.zone_wait_margin_m or by_row
+        close = to_stop_m <= p.zone_wait_margin_m
+        return p.require_zone_grant and not granted and close
 
     def _at_zone(self, zone: Zone) -> bool:
         """

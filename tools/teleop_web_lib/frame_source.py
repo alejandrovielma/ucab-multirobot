@@ -32,15 +32,15 @@ FAKE_LABEL_BGR = (255, 255, 255)
 FAKE_LABEL_THICKNESS = 2
 
 # --- Pi camera ----------------------------------------------------------------
-# Part of the camera's id that identifies Phineas's IMX219 CSI camera.
-DEFAULT_PICAMERA_ID_HINT = "imx219"
+# Part of the camera's id that identifies the CSI port the OV5647 is on.
+DEFAULT_PICAMERA_ID_HINT = "i2c@80000"
 # In Picamera2/DRM, "RGB888" gives [B, G, R] bytes (the BGR order OpenCV
 # expects).
 PICAMERA_FORMAT = "RGB888"
 # Bit depth of the sensor modes the IMX219 offers at the sizes we use.
 SENSOR_BIT_DEPTH = 10
 DEFAULT_VFLIP = True
-DEFAULT_HFLIP = True
+DEFAULT_HFLIP = False
 
 # cv2.flip codes.
 FLIP_VERTICAL = 0

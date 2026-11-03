@@ -2,15 +2,14 @@
 Launches the collector nodes connected to Webots.
 
 Instead of webots_ros2 we use our own bridge (recolector_sim/webots_bridge),
-which is the <extern> controller of the "Phineas" robot (us) and publishes the
+which is the <extern> controller of the "Ferb" robot (us) and publishes the
 same topics as the real robot.
 
 Arguments:
-  robot       ROS namespace for every node (default phineas)
   webots      headless (default, no window, for Docker), gui or none
               (none = Webots is already open, for example on Windows)
-  webots_url  which Webots to connect to: ipc://1234/Phineas (same machine) or
-              tcp://<ip>:1234/Phineas (Webots on another machine or outside
+  webots_url  which Webots to connect to: ipc://1234/Ferb (same machine) or
+              tcp://<ip>:1234/Ferb (Webots on another machine or outside
               Docker)
   world       world to open
               (default simulation/webots/worlds/pista_ucab_ros.wbt)
@@ -44,10 +43,9 @@ BASE_CONFIG_FILE = "collector.yaml"
 CONFIG_DIR = "config"
 
 # --- Launch argument values ---------------------------------------------------
-DEFAULT_ROBOT = "phineas"
 MODE_HEADLESS = "headless"
 MODE_NONE = "none"
-DEFAULT_WEBOTS_URL = "ipc://1234/Phineas"
+DEFAULT_WEBOTS_URL = "ipc://1234/Ferb"
 DEFAULT_PORT = "8080"
 WORLD_FILE = "pista_ucab_ros.wbt"
 
@@ -141,7 +139,7 @@ def _webots_actions(mode: str, world: str) -> list:
     ]
 
 
-def _collector_nodes(robot: str, port: int, bridge_env: dict) -> list:
+def _collector_nodes(port: int, bridge_env: dict) -> list:
     """
     The bridge plus the same collector nodes that run on the real robot.
     """
@@ -151,28 +149,24 @@ def _collector_nodes(robot: str, port: int, bridge_env: dict) -> list:
         Node(
             package=PACKAGE_SIM,
             executable="webots_bridge",
-            namespace=robot,
             output="screen",
             additional_env=bridge_env,
         ),
         Node(
             package=PACKAGE_VISION,
             executable="cube_detector",
-            namespace=robot,
             parameters=[vision_cfg],
             output="screen",
         ),
         Node(
             package=PACKAGE_VISION,
             executable="web_viewer",
-            namespace=robot,
             parameters=[vision_cfg, {"port": port}],
             output="screen",
         ),
         Node(
             package=PACKAGE_MOBILE_BASE,
             executable="behavior_fsm",
-            namespace=robot,
             # No zone arbiter in the simulation: deliver without a turn.
             parameters=[base_cfg, {"require_zone_grant": False}],
             output="screen",
@@ -180,7 +174,6 @@ def _collector_nodes(robot: str, port: int, bridge_env: dict) -> list:
         Node(
             package=PACKAGE_MOBILE_BASE,
             executable="obstacle_guard",
-            namespace=robot,
             # No fleet_link or zone arbiter in the simulation.
             parameters=[base_cfg, {"require_heartbeat": False}],
             output="screen",
@@ -192,14 +185,13 @@ def _setup(context):
     """
     Resolve the launch arguments and build every action.
     """
-    robot = LaunchConfiguration("robot").perform(context)
     mode = LaunchConfiguration("webots").perform(context)
     world = LaunchConfiguration("world").perform(context)
     url = LaunchConfiguration("webots_url").perform(context)
     port = int(LaunchConfiguration("port").perform(context))
     return [
         *_webots_actions(mode, world),
-        *_collector_nodes(robot, port, _bridge_env(url)),
+        *_collector_nodes(port, _bridge_env(url)),
     ]
 
 
@@ -209,7 +201,6 @@ def generate_launch_description():
     """
     return LaunchDescription(
         [
-            DeclareLaunchArgument("robot", default_value=DEFAULT_ROBOT),
             DeclareLaunchArgument("webots", default_value=MODE_HEADLESS),
             DeclareLaunchArgument(
                 "webots_url",

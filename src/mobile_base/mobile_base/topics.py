@@ -2,7 +2,7 @@
 Topic, service and frame names used by the mobile_base nodes.
 
 Relative names resolve under the robot namespace (for example
-/phineas/cmd_vel). Absolute names belong to the shared fleet (coordinator).
+/ferb/cmd_vel). Absolute names belong to the shared fleet (coordinator).
 Keep this in sync with docs/architecture.md.
 """
 
@@ -28,10 +28,8 @@ TOPIC_ROBOT_STATE = "state"
 
 # --- Shared fleet endpoints (absolute) ---------------------------------------
 TOPIC_ZONE_OCCUPANT = "/zone/occupant"
-# Claw arm state (gate_closed pauses new delivery requests).
-TOPIC_PERRY_STATE = "/perry/state"
-# Overhead pose of the OTHER collector (Ferb); we are Phineas.
-TOPIC_PEER_POSE = "/ferb/pose"
+# Overhead pose of the OTHER collector (Phineas); we are Ferb.
+TOPIC_PEER_POSE = "/phineas/pose"
 SERVICE_ZONE_REQUEST = "/zone/request"
 SERVICE_ZONE_RELEASE = "/zone/release"
 

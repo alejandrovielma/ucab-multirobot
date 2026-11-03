@@ -79,7 +79,7 @@ On top of each robot there is an ArUco marker (DICT_4X4_50: Phineas id 1, Ferb i
 - The claw robot (Perry) is not modelled; the square stays free.
 
 ## Connection with ROS 2
-`worlds/pista_ucab_ros.wbt` is the same world with Phineas (our robot) on `<extern>` and Ferb (the other collector) idle. Instead of `webots_ros2`, a small custom bridge is used, `webots_bridge` (`src/recolector_sim`): it publishes `image_raw`, `range` and `line`, and drives the wheels from `cmd_vel`, just like the real robot's nodes. That way, what works in simulation moves to the Pi 5 by changing only the nodes that talk to the hardware.
+`worlds/pista_ucab_ros.wbt` is the same world with Ferb (our robot) on `<extern>` and Phineas (the other collector) idle. Instead of `webots_ros2`, a small custom bridge is used, `webots_bridge` (`src/recolector_sim`): it publishes `image_raw` and `range`, and drives the wheels from `cmd_vel`, just like the real robot's nodes. That way, what works in simulation moves to the Pi 5 by changing only the nodes that talk to the hardware.
 
 - Everything in Docker: `docker compose up sim` (headless Webots) and open http://localhost:8080.
 - Webots on Windows and nodes in Docker: open `pista_ucab_ros.wbt`, press ▶ and run `docker compose up sim-external`.

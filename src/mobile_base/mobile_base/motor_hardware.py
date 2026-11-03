@@ -41,8 +41,7 @@ BYTE_BITS = 8
 # --- Defaults (real values: config/collector.yaml) ----------------------------
 DEFAULT_DRIVER = DRIVER_FUSION_HAT
 DEFAULT_PWM_FREQUENCY_HZ = 200
-# 6.0 V motor rating / 8.4 V full 2S battery = 0.71.
-DEFAULT_MAX_DUTY_RATIO = 0.71
+DEFAULT_MAX_DUTY_RATIO = 0.9
 
 
 @dataclass
@@ -55,22 +54,21 @@ class MotorHardwareParams:
 
     driver: str = DEFAULT_DRIVER
     # Fusion HAT+: PWM channels (a, b) per wheel; a > 0 forward.
-    # Phineas ports: FL=M3 (4,5), FR=M0 (11,10), RL=M2 (6,7), RR=M1 (9,8).
-    fl_channels: list[int] = field(default_factory=lambda: [4, 5])
-    fr_channels: list[int] = field(default_factory=lambda: [11, 10])
-    rl_channels: list[int] = field(default_factory=lambda: [6, 7])
-    rr_channels: list[int] = field(default_factory=lambda: [9, 8])
+    fl_channels: list[int] = field(default_factory=lambda: [11, 10])
+    fr_channels: list[int] = field(default_factory=lambda: [9, 8])
+    rl_channels: list[int] = field(default_factory=lambda: [4, 5])
+    rr_channels: list[int] = field(default_factory=lambda: [6, 7])
     # Cokoino HAT: GPIO (BCM) IN1 / IN2 per wheel and both nSLEEP pins.
-    fl_pins: list[int] = field(default_factory=lambda: [17, 27])
-    fr_pins: list[int] = field(default_factory=lambda: [24, 25])
-    rl_pins: list[int] = field(default_factory=lambda: [22, 23])
-    rr_pins: list[int] = field(default_factory=lambda: [26, 16])
+    fl_pins: list[int] = field(default_factory=lambda: [24, 25])
+    fr_pins: list[int] = field(default_factory=lambda: [26, 16])
+    rl_pins: list[int] = field(default_factory=lambda: [17, 27])
+    rr_pins: list[int] = field(default_factory=lambda: [22, 23])
     nsleep_pins: list[int] = field(default_factory=lambda: [12, 13])
     # A wheel that spins backwards is inverted here, not in the wiring.
-    fl_inverted: bool = False
-    fr_inverted: bool = True
-    rl_inverted: bool = False
-    rr_inverted: bool = True
+    fl_inverted: bool = True
+    fr_inverted: bool = False
+    rl_inverted: bool = True
+    rr_inverted: bool = False
     pwm_frequency_hz: int = DEFAULT_PWM_FREQUENCY_HZ
     # Duty cycle cap (0-1).
     max_duty_ratio: float = DEFAULT_MAX_DUTY_RATIO

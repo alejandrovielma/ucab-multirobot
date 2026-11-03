@@ -1,5 +1,5 @@
 """
-Pure logic of the zone-arbiter side of the fleet link (Ferb and Perry):
+Pure logic of the zone-arbiter side of the fleet link (Phineas and Perry):
 state vocabulary mapping, heartbeat check and delivery-zone lease client.
 
 Peer robot avoidance lives in peer_avoidance.py. No rclpy: time is passed in
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from mobile_base.states import FleetState, State
 
 # --- Defaults (the real values live in config/collector.yaml) -----------------
-DEFAULT_ROBOT_NAME = "phineas"
+DEFAULT_ROBOT_NAME = "ferb"
 DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
 DEFAULT_STATE_RATE_HZ = 2.0
 DEFAULT_RENEW_PERIOD_S = 20.0
@@ -97,7 +97,6 @@ class ZoneClient:
         self.renew_period_s = renew_period_s
         self.want = False
         self.occupant = ""
-        self.gate_closed = False
         self.delivered = False
         self.color = ""
         self._was_wanting = False
@@ -111,26 +110,16 @@ class ZoneClient:
         """
         return self.occupant == self.robot
 
-    def is_granted(self, heartbeat_ok: bool) -> bool:
-        """
-        True when this robot holds the zone and the arbiter heartbeat is
-        alive.
-        """
-        return self.holds and heartbeat_ok
-
     def update(
         self,
         want: bool | None = None,
         occupant: str | None = None,
-        gate_closed: bool | None = None,
     ) -> None:
         """
         Apply new information from the node; `None` leaves a field as is.
         """
         if occupant is not None:
             self.occupant = occupant
-        if gate_closed is not None:
-            self.gate_closed = gate_closed
         if want is not None:
             if self._was_wanting and not want and self.holds:
                 self._pending_release = True
@@ -147,14 +136,8 @@ class ZoneClient:
     def should_request(self, now: float) -> bool:
         """
         True when the zone must be requested (or its lease renewed).
-
-        While Perry closes the gate (`gate_closed`), new requests are blocked
-        when this robot does not already hold the zone; an active holder keeps
-        its lease so it can finish reversing out and release cleanly.
         """
         if not self.want:
-            return False
-        if self.gate_closed and not self.holds:
             return False
         if not self.holds or self._last_request_s is None:
             return True

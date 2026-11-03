@@ -9,7 +9,7 @@
 
 /**/cube_detector:
   ros__parameters:
-    color_names: [red, orange, yellow, green, blue, purple]
+    color_names: [yellow]
     hsv:
       red:    [0, 110, 80, 8, 255, 255, 165, 110, 80, 179, 255, 255]
       orange: [8, 120, 100, 18, 255, 255]

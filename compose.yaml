@@ -37,7 +37,7 @@ services:
       - "host.docker.internal:host-gateway"
     command: >
       ros2 launch bringup simulation.launch.py webots:=none
-      webots_url:=tcp://${WEBOTS_HOST:-host.docker.internal}:1234/Phineas
+      webots_url:=tcp://${WEBOTS_HOST:-host.docker.internal}:1234/Ferb
 
   dev:
     <<: *ros
