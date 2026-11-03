@@ -137,6 +137,15 @@ DEFAULT_ENTRY_HIDDEN_DISTANCE_M = 0.15
 DEFAULT_DELIVER_EDGE_TIMEOUT_S = 0.3
 DEFAULT_DELIVER_PUSH_MAX_S = 3.0
 DEFAULT_DELIVER_SPEED_MIN_S = 0.3
+# Multi-robot zone coordination (active when fleet bridge is enabled): request
+# the turn around ~45 cm, and stop stationary >30 cm away until granted.
+DEFAULT_ZONE_REQUEST_DISTANCE_M = 0.45
+DEFAULT_ZONE_WAIT_DISTANCE_M = 0.30
+
+# --- Fleet bridge defaults (section `fleet` in tools/teleop_web.yaml) ---------
+DEFAULT_FLEET_NAMESPACE = "phineas"
+DEFAULT_FLEET_GRANT_TIMEOUT_S = 1.0
+DEFAULT_FLEET_REPUBLISH_PERIOD_S = 0.5
 
 # --- Vision filter used by this tool (section `detection` overrides) ----------
 # Looser than the ROS cube_detector because this tool's camera is not
@@ -166,6 +175,7 @@ SECTION_SERVER = "server"
 SECTION_LINE_SENSOR = "line_sensor"
 SECTION_AUTO = "auto"
 SECTION_DETECTION = "detection"
+SECTION_FLEET = "fleet"
 
 
 @dataclass(frozen=True)
@@ -232,6 +242,8 @@ class AutoConfig:
     deliver_edge_timeout_s: float = DEFAULT_DELIVER_EDGE_TIMEOUT_S
     deliver_push_max_s: float = DEFAULT_DELIVER_PUSH_MAX_S
     deliver_speed_min_s: float = DEFAULT_DELIVER_SPEED_MIN_S
+    zone_request_distance_m: float = DEFAULT_ZONE_REQUEST_DISTANCE_M
+    zone_wait_distance_m: float = DEFAULT_ZONE_WAIT_DISTANCE_M
 
     @classmethod
     def from_dict(cls, values: dict | None) -> "AutoConfig":
@@ -240,18 +252,45 @@ class AutoConfig:
 
         Missing keys keep their default; unknown keys raise ValueError.
         """
-        values = values or {}
-        defaults = cls()
-        known = {field.name for field in fields(cls)}
-        unknown = sorted(set(values) - known)
-        if unknown:
-            raise ValueError(f"unknown settings in section auto: {unknown}")
-        return cls(
-            **{
-                name: _coerce_like(getattr(defaults, name), value)
-                for name, value in values.items()
-            }
-        )
+        return _dataclass_from_dict(cls, values, SECTION_AUTO)
+
+
+@dataclass(frozen=True)
+class FleetConfig:
+    """
+    Settings of the optional ROS 2 `FleetBridge`; field names are YAML keys.
+    """
+
+    enabled: bool = False
+    namespace: str = DEFAULT_FLEET_NAMESPACE
+    grant_timeout_s: float = DEFAULT_FLEET_GRANT_TIMEOUT_S
+    republish_period_s: float = DEFAULT_FLEET_REPUBLISH_PERIOD_S
+
+    @classmethod
+    def from_dict(cls, values: dict | None) -> "FleetConfig":
+        """
+        Build the settings from the YAML `fleet` section.
+        """
+        return _dataclass_from_dict(cls, values, SECTION_FLEET)
+
+
+def _dataclass_from_dict(cls, values: dict | None, section: str):
+    """
+    Build a frozen config dataclass from a YAML dictionary, rejecting unknown
+    keys.
+    """
+    values = values or {}
+    defaults = cls()
+    known = {field.name for field in fields(cls)}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        raise ValueError(f"unknown settings in section {section}: {unknown}")
+    return cls(
+        **{
+            name: _coerce_like(getattr(defaults, name), value)
+            for name, value in values.items()
+        }
+    )
 
 
 def _coerce_like(default, value):

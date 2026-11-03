@@ -15,6 +15,7 @@ from teleop_web_lib.autopilot import (
     STOP,
     AutoPilot,
     DriveCommand,
+    Fleet,
     Vision,
 )
 from teleop_web_lib.config import AutoConfig
@@ -51,6 +52,7 @@ class Drive:
         cmd_timeout_s: float,
         auto_cfg: AutoConfig | None = None,
         line_sensor=None,
+        fleet: Fleet | None = None,
     ):
         """
         Start the control thread.
@@ -59,7 +61,7 @@ class Drive:
         self._max_duty = max_duty_ratio
         self._timeout_s = cmd_timeout_s
         self._line = line_sensor  # None = no line sensor
-        self._pilot = AutoPilot(auto_cfg or AutoConfig())
+        self._pilot = AutoPilot(auto_cfg or AutoConfig(), fleet=fleet)
         self.line_black = False
         self.line_raw: int | None = None
         self.line_counts: int | None = None  # AO through the ADC, if wired

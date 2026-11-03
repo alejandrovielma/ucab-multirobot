@@ -26,6 +26,7 @@ The code lives in tools/teleop_web_lib/; this file only wires it together.
 import argparse
 import logging
 import signal
+from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -34,13 +35,16 @@ from teleop_web_lib.config import (
     SECTION_AUTO,
     SECTION_CAMERA,
     SECTION_DETECTION,
+    SECTION_FLEET,
     SECTION_LINE_SENSOR,
     SECTION_MOTORS,
     SECTION_SERVER,
     AutoConfig,
+    FleetConfig,
     load_config,
 )
 from teleop_web_lib.drive import Drive
+from teleop_web_lib.fleet import build_fleet_bridge
 from teleop_web_lib.line_sensor import build_line_sensor
 from teleop_web_lib.motors import build_motors
 from teleop_web_lib.web_server import make_handler, read_page
@@ -63,6 +67,11 @@ def parse_args() -> argparse.Namespace:
         "--fake",
         action="store_true",
         help="fake motors and test camera",
+    )
+    parser.add_argument(
+        "--fleet",
+        action="store_true",
+        help="enable the ROS 2 FleetBridge to fleet_link",
     )
     parser.add_argument(
         "--host",
@@ -92,6 +101,10 @@ def main() -> None:
     line = build_line_sensor(
         cfg.get(SECTION_LINE_SENSOR), args.fake, args.config
     )
+    fleet_cfg = FleetConfig.from_dict(cfg.get(SECTION_FLEET))
+    if args.fleet:
+        fleet_cfg = replace(fleet_cfg, enabled=True)
+    fleet = build_fleet_bridge(fleet_cfg, fake=args.fake)
 
     drive = Drive(
         motors,
@@ -99,6 +112,7 @@ def main() -> None:
         motor_cfg["cmd_timeout_s"],
         AutoConfig.from_dict(cfg.get(SECTION_AUTO)),
         line_sensor=line,
+        fleet=fleet,
     )
     camera = Camera(
         camera_cfg,
@@ -123,6 +137,7 @@ def main() -> None:
         server.server_close()
         camera.close()
         drive.close()
+        fleet.close()
         if line is not None:
             line.close()
 

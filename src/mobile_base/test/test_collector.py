@@ -3,9 +3,17 @@ Tests: the collector state machine (catch, carry, wait for the zone turn,
 deliver, release, count, black-line escape).
 """
 
+from pathlib import Path
+
+import yaml
+
 from mobile_base.approach import ApproachController, ApproachParams, Cube
 from mobile_base.collector import CollectorFsm, CollectorParams, Inputs, Zone
 from mobile_base.states import State
+
+COLLECTOR_YAML = (
+    Path(__file__).resolve().parents[1] / "config" / "collector.yaml"
+)
 
 CUBE_AT_SCOOP = Cube("yellow", 0.0, 0.16)
 FAR_GATE = Zone("gate", 0.0, 1.0, 200)
@@ -150,3 +158,74 @@ def test_paused_keeps_the_cube_and_resumes_carrying():
     f.approach.enabled = True
     f.step(now + 0.05, Inputs(zone=FAR_GATE))
     assert f.state == State.CARRY
+
+
+def test_requests_zone_at_visual_row_threshold_before_waiting():
+    f = fsm()
+    now = caught(f)
+    request_row_zone = Zone(
+        "floor",
+        0.0,
+        1.0,
+        f.params.zone_request_v_px + 5,
+    )
+    out = f.step(now, Inputs(zone=request_row_zone, zone_granted=False))
+    assert f.state == State.CARRY
+    assert out.zone_want is True
+    assert out.cmd.vx > 0.0
+
+
+def test_stops_at_visual_wait_row_when_zone_is_not_granted():
+    f = fsm()
+    now = caught(f)
+    # Even if distance_m reads high, reaching zone_wait_v_px must stop >30 cm
+    # outside the square instead of driving up to zone_arrive_v_px.
+    wait_row_zone = Zone(
+        "floor",
+        0.0,
+        1.0,
+        f.params.zone_wait_v_px + 5,
+    )
+    out = f.step(now, Inputs(zone=wait_row_zone, zone_granted=False))
+    assert f.state == State.WAIT_ZONE
+    assert out.zone_want is True
+    assert out.cmd.vx == 0.0 and out.cmd.wz == 0.0
+
+    # Once granted, Phineas resumes approaching the square.
+    out = f.step(now + 0.05, Inputs(zone=wait_row_zone, zone_granted=True))
+    assert f.state == State.CARRY
+    assert out.cmd.vx > 0.0
+
+
+def test_default_phineas_targets_blue_only_and_ignores_red():
+    default_ctrl = ApproachController()
+    assert default_ctrl.params.target_colors == ["blue"]
+    picked = default_ctrl.pick_target(
+        [
+            Cube("red", 0.0, 0.25),
+            Cube("yellow", 0.0, 0.30),
+            Cube("blue", 0.1, 0.50),
+        ]
+    )
+    assert picked == Cube("blue", 0.1, 0.50)
+
+
+def test_collector_yaml_matches_phineas_multirobot_defaults():
+    cfg = yaml.safe_load(COLLECTOR_YAML.read_text(encoding="utf-8"))
+    fsm_cfg = cfg["/**/behavior_fsm"]["ros__parameters"]
+    guard_cfg = cfg["/**/obstacle_guard"]["ros__parameters"]
+    fleet_cfg = cfg["/**/fleet_link"]["ros__parameters"]
+    us_cfg = cfg["/**/ultrasonic"]["ros__parameters"]
+
+    assert fsm_cfg["target_colors"] == ["blue"]
+    assert fsm_cfg["require_zone_grant"] is True
+    assert (
+        fsm_cfg["zone_request_v_px"]
+        < fsm_cfg["zone_wait_v_px"]
+        < fsm_cfg["zone_arrive_v_px"]
+    )
+    assert guard_cfg["require_heartbeat"] is True
+    assert guard_cfg["require_pose"] is False
+    assert guard_cfg["peer_pose_topic"] == "/ferb/pose"
+    assert fleet_cfg["robot_name"] == "phineas"
+    assert us_cfg["fake"] is True

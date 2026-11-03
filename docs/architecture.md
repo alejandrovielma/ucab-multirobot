@@ -8,7 +8,7 @@ System architecture and ROS 2 graph for the collector robot (**Phineas**). Role 
 Raspberry Pi 5 → SunFounder Fusion HAT+ / Cokoino HAT (2× DRV8833) → Ubuntu 26.04 → ROS 2 Lyrical → Python nodes
 ```
 
-All collector nodes execute inside namespace `/phineas` (e.g. `/phineas/cmd_vel`, `/phineas/fleet/ok`). Only inter-robot fleet topics/services (`/zone/*`, peer pose `/ferb/pose`) operate on absolute global names.
+All collector nodes execute inside namespace `/phineas` (e.g. `/phineas/cmd_vel`, `/phineas/fleet/ok`). Only inter-robot fleet topics/services (`/zone/*`, `/perry/state`, peer pose `/ferb/pose`) operate on absolute global names.
 
 ## Nodes
 
@@ -46,11 +46,12 @@ flowchart TD
 
   subgraph External ["Fleet (Perry / Ferb)"]
     arbiter["Perry zone_arbiter"] -->|"/zone/occupant (2 Hz)"| fleet
+    arbiter -->|"/perry/state (gate_closed)"| fleet
     fleet -->|"/zone/request (srv)"| arbiter
     fleet -->|"/zone/release (srv)"| arbiter
     fleet -->|"state (RobotState, 2 Hz)"| ExternalBus["DDS Fleet Bus"]
-    perry_cam["Perry overhead tracker"] -->|"/phineas/pose"| guard
-    perry_cam -->|"/ferb/pose"| guard
+    perry_cam["Optional overhead tracker"] -.->|"/phineas/pose"| guard
+    perry_cam -.->|"/ferb/pose"| guard
   end
 ```
 
@@ -62,12 +63,12 @@ rest of the nodes are the same as on the real robot.
 |---|---|---|---|
 | `mobile_base` | `motor_driver` | `cmd_vel` → PWM for the 4 motors; brakes when no commands arrive | role 1 |
 | `mobile_base` | `line_sensors` | 1 bottom TCRT5000 → `line` | role 1 |
-| `mobile_base` | `ultrasonic` | HC-SR04 → `range` | role 1 |
+| `mobile_base` | `ultrasonic` | HC-SR04 → `range` (`fake: true` on the track where no HC-SR04 is installed) | role 1 |
 | `mobile_base` | `scoop_driver` | scoop servo + presence IR | role 1 |
 | `mobile_base` | `color_sensor` | TCS34725 → colour of the cube in the scoop | role 2 |
-| `mobile_base` | `obstacle_guard` | limits velocity via ultrasonic range, enforces fleet heartbeat (`fleet/ok`), and applies `PeerAvoidance` using overhead poses | role 3 |
-| `mobile_base` | `behavior_fsm` | state machine (search, approach, catch, carry, wait for the zone, deliver, release, line escape) and cube count | role 3 |
-| `mobile_base` | `fleet_link` | bridges local FSM and guard with fleet: monitors `/zone/occupant` heartbeat, requests/releases zone asynchronously, publishes `/phineas/state`, `fleet/ok`, and `zone/granted` | role 3 |
+| `mobile_base` | `obstacle_guard` | limits velocity via ultrasonic range, enforces fleet heartbeat (`fleet/ok`), and applies `PeerAvoidance` when overhead poses are enabled | role 3 |
+| `mobile_base` | `behavior_fsm` | state machine (search, approach, catch, carry, wait >30 cm outside the zone, deliver, release, line escape) and cube count | role 3 |
+| `mobile_base` | `fleet_link` | bridges local FSM (or `teleop_web` `FleetBridge`) and guard with fleet: monitors `/zone/occupant` heartbeat and `/perry/state` (`gate_closed`), requests/releases zone asynchronously, publishes `/phineas/state`, `fleet/ok`, and `zone/granted` | role 3 |
 | `vision` | `camera_node` | camera → `image_raw` | role 2 |
 | `vision` | `cube_detector` | cubes by colour → `cubes` and `cubes/debug_image`; delivery area → `zone/seen` | role 2 |
 | `vision` | `web_viewer` | web page (port 8080): video, cubes, state; changes `behavior_fsm` parameters; manual control with WASD | role 2 |
@@ -94,15 +95,16 @@ Unless noted with a leading `/`, all names are local to the robot namespace (`/p
 | `behavior/state` | `std_msgs/String` (JSON) | `behavior_fsm` → `web_viewer`, `fleet_link` | Local FSM state (`SEARCH`, `APPROACH`, etc.) |
 | `count` | `std_msgs/UInt32` | `behavior_fsm` → external | Local count of delivered cubes |
 | `fleet/ok` | `std_msgs/Bool` | `fleet_link` → `obstacle_guard` | True if `/zone/occupant` heartbeat is fresh (<2.0 s) |
-| `zone/want` | `std_msgs/Bool` | `behavior_fsm` → `fleet_link` | High when the FSM wants the delivery area (published on change) |
-| `zone/delivered` | `std_msgs/String` | `behavior_fsm` → `fleet_link` | Colour name of the cube delivered inside the area |
-| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm` | True when Phineas currently holds the delivery area lease |
+| `zone/want` | `std_msgs/Bool` | `behavior_fsm` / `FleetBridge` → `fleet_link` | High when the collector wants the delivery area (~45 cm away; kept high through push and reverse exit) |
+| `zone/delivered` | `std_msgs/String` | `behavior_fsm` / `FleetBridge` → `fleet_link` | Colour name of the cube delivered inside the area |
+| `zone/granted` | `std_msgs/Bool` | `fleet_link` → `behavior_fsm`, `FleetBridge` | True only when Phineas holds the delivery area lease **and** the `/zone/occupant` heartbeat is fresh (<2.0 s) |
 | `state` | `multirobot_interfaces/RobotState` | `fleet_link` → fleet | Standardized fleet state published at 2 Hz (`/phineas/state`) |
 | `/zone/occupant` | `std_msgs/String` | Perry `zone_arbiter` → `fleet_link` | Current lease occupant (2 Hz, reliable, transient_local) |
+| `/perry/state` | `multirobot_interfaces/RobotState` | Perry `ros_node` → `fleet_link` | Claw status (`2 Hz`); when `gate_closed` is true and Phineas does not already hold the lease, `fleet_link` suppresses `/zone/request` |
 | `/zone/request` | `multirobot_interfaces/RequestZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to request delivery square lease |
 | `/zone/release` | `multirobot_interfaces/ReleaseZone` (srv) | `fleet_link` → Perry `zone_arbiter` | Asynchronous service call to release delivery square lease |
-| `/phineas/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Own pose in table frame (meters, radians) |
-| `/ferb/pose` | `multirobot_interfaces/RobotPose` | Perry overhead tracker → `obstacle_guard` | Peer pose used for `PeerAvoidance` |
+| `/phineas/pose` | `multirobot_interfaces/RobotPose` | Optional overhead tracker → `obstacle_guard` | Own pose in table frame (`require_pose: false` on the track) |
+| `/ferb/pose` | `multirobot_interfaces/RobotPose` | Optional overhead tracker → `obstacle_guard` | Peer pose used for `PeerAvoidance` when overhead tracking is active |
 
 ## Messages
 
@@ -126,7 +128,7 @@ Each node file only wires ROS to pure logic; the logic lives in modules without 
 | `mobile_base` | `scoop_color.py` | TCS34725 counts → colour name |
 | `mobile_base` | `motor_hardware.py`, `sensor_hardware.py` | HAT motors, digital inputs, HC-SR04, SG90, TCS34725 (each with a fake) |
 | `mobile_base` | `speed_limits.py` | ultrasonic forward limit |
-| `mobile_base` | `fleet.py` | state mapping, heartbeat, zone lease client |
+| `mobile_base` | `fleet.py` | state mapping, heartbeat, zone lease client (with `/perry/state` `gate_closed` flow control) |
 | `mobile_base` | `peer_avoidance.py` | peer collector avoidance and deadlock escape |
 | `mobile_base` | `kinematics.py`, `mathutil.py` | mecanum kinematics, `clamp` and `wrap_angle` |
 | `vision` | `hsv.py`, `camera_model.py` | HSV range parsing, pixel → floor geometry (no OpenCV) |
@@ -134,7 +136,7 @@ Each node file only wires ROS to pure logic; the logic lives in modules without 
 | `vision` | `zone.py` | delivery area locator (landmarks far, paper up close) and cubes-already-delivered filter |
 | `vision` | `colors.py`, `topics.py` | colour names, topic names |
 | `vision` | `web_server.py`, `frame_buffer.py` | HTTP routes of the viewer (no `rclpy`), latest-frame buffer |
-| `tools/teleop_web_lib` | `autopilot.py`, `drive.py`, `motors.py`, ... | Auto mode state machine, control thread, motor drivers (see the package docstring) |
+| `tools/teleop_web_lib` | `autopilot.py`, `fleet.py`, `drive.py`, `motors.py`, ... | Auto mode state machine, ROS 2 `FleetBridge` to `fleet_link`, control thread, motor drivers |
 
 Parameters of every node are declared from dataclasses: `ApproachParams`, `CollectorParams`, `GuardParams`, `PeerAvoidanceParams`, `FleetLinkParams`, `MotorHardwareParams`, `ScoopColorParams`, `CameraParams`, `DetectionFilter`, `ZoneParams` and the node-level ones in each node file. Their defaults are the fallback; the real values are in the YAML.
 
@@ -143,13 +145,18 @@ Parameters of every node are declared from dataclasses: `ApproachParams`, `Colle
 `mobile_base/approach.py` drives `SEARCH` (turns) → `APPROACH` → `ARRIVED` (stops at `stop_distance_m` from the
 nearest cube of `target_colors`); `mobile_base/collector.py` adds the rest (states in `mobile_base/states.py`):
 `CATCH` (blind push into the scoop, optional FC-51 / TCS34725 confirmation), `CARRY` (to the area from `zone/seen`),
-`WAIT_ZONE` (stopped outside the area until `zone/granted`), `DELIVER` (blind push into the area, count +1),
-`RELEASE` (scoop up, back up, turn) and `LINE_ESCAPE`. Plus `PAUSED` when `enabled` is false and `NO_CAMERA` if no
+`WAIT_ZONE` (stopped >30 cm outside the area until `zone/granted`), `DELIVER` (blind push into the area, count +1),
+`RELEASE` (scoop up, back up, turn, then drop `zone/want`) and `LINE_ESCAPE`. Plus `PAUSED` when `enabled` is false and `NO_CAMERA` if no
 detections arrive while the state steers by the camera.
 `MANUAL` while `cmd_vel_teleop` keeps arriving (WASD in the web viewer): it takes priority over everything
 else, even when paused, and still goes through `obstacle_guard`.
 
-Target colours: Phineas enables all six colours in `cube_detector` (`color_names: [red, orange, yellow, green, blue, purple]`) and collects every colour except red by default (`target_colors: [orange, yellow, green, blue, purple]`, changeable at runtime from `web_viewer`).
+Delivery-zone approach and waiting thresholds (enforced both by floor distance and by visual image row Y on the area paper so camera-only navigation never encroaches on the square entrance):
+- **Request threshold (~45 cm):** `CollectorFsm` sets `zone/want = true` when distance to the stop point reaches `zone_request_margin_m` (`0.45 m`) or when the floor paper's near edge reaches row `zone_request_v_px` (`255 px`). In `tools/teleop_web.py`, `AutoPilot` sets `want = true` at `zone_request_distance_m` (`0.45 m`).
+- **Wait threshold (>30 cm):** If `zone/granted` is `false` (another robot holds the square, or Perry set `gate_closed = true` on `/perry/state`), `CollectorFsm` enters `WAIT_ZONE` and commands zero velocity at `zone_wait_margin_m` (`0.30 m`) or visual row `zone_wait_v_px` (`300 px`, well above `zone_arrive_v_px = 445 px`). In `tools/teleop_web.py`, `AutoPilot` enters `CARRY (wait zone)` at `zone_wait_distance_m` (`0.30 m`) and remains completely stationary even if the paper flickers in the camera.
+- **Lease retention and flow control:** Both state machines keep `zone/want = true` throughout the push and the reverse exit before releasing `/zone/release`. While `/perry/state` reports `gate_closed = true`, `ZoneClient` suppresses new `/zone/request` calls if Phineas does not already hold the lease, while allowing an in-progress delivery/reverse exit to finish and release cleanly.
+
+Target colours: Phineas enables all six colours in `cube_detector` (`color_names: [red, orange, yellow, green, blue, purple]`) and targets **blue** cubes only by default (`target_colors: [blue]`, changeable at runtime from `web_viewer` or launch arguments `targets:=[blue] avoid:=[red]`), while Ferb targets `[yellow]` and red/other colours are ignored.
 
 ```mermaid
 stateDiagram-v2
@@ -159,19 +166,19 @@ stateDiagram-v2
   APPROACH --> CATCH: cube close
   CATCH --> CARRY: cube in scoop & colour confirmed
   CATCH --> RELEASE: not our colour
-  CARRY --> WAIT_ZONE: near the area without the turn (zone/want=true)
+  CARRY --> WAIT_ZONE: <=30-35 cm or v>=zone_wait_v_px without grant (zone/want=true)
   WAIT_ZONE --> CARRY: zone/granted=true
-  CARRY --> DELIVER: arrived and aligned
+  CARRY --> DELIVER: arrived and aligned with grant
   DELIVER --> RELEASE: cube inside, count +1, publish zone/delivered
-  RELEASE --> SEARCH: backed up, zone/want=false
+  RELEASE --> SEARCH: backed up & turned, zone/want=false
 ```
 
 In any state:
 1. If a line sensor sees black, the robot backs up and turns inwards. The delivery area is a gap with no tape, so this also holds while delivering.
-2. If the ultrasonic sensor detects an obstacle closer than `stop_distance_m`, `obstacle_guard` zeroes forward speed.
-3. If `require_heartbeat` is active and `fleet/ok` is false (no `/zone/occupant` for >2.0 s), `obstacle_guard` halts forward velocity.
-4. If peer pose is detected within ±60° cone, `PeerAvoidance` slows at 0.60 m, stops at 0.40 m, and escapes after 3.0 s deadlock by yielding.
+2. If an ultrasonic sensor is enabled (`fake: false`) and detects an obstacle closer than `stop_distance_m`, `obstacle_guard` zeroes forward speed; on the physical track without an HC-SR04, `ultrasonic` runs with `fake: true`.
+3. If `require_heartbeat` is active (`true` on the track) and `fleet/ok` is false (no `/zone/occupant` for >2.0 s), `obstacle_guard` halts all velocity and `fleet_link` clears `zone/granted`.
+4. If overhead poses are active (`require_pose: true`) and a peer pose is detected within ±60° cone, `PeerAvoidance` slows at 0.60 m, stops at 0.40 m, and escapes after 3.0 s deadlock.
 
 ## Localization
 
-No wheel encoders or SLAM are used. The robot navigates reactively using the onboard camera (cubes and ArUco markers), bottom line sensors, front ultrasonic sensor, and the global pose published by Perry's overhead localization system (`/phineas/pose`).
+No wheel encoders, overhead ceiling camera or ArUco tags on top of the cars are used on the physical track (`require_pose: false`). Phineas navigates reactively using its onboard front camera (cubes, delivery landmarks and floor paper) and bottom TCRT5000 line sensor, coordinated with Ferb and Perry via colour partitioning (`blue` vs `yellow`), the >30 cm delivery-zone wait buffer, `/zone/*` lease arbitration, and `/perry/state` (`gate_closed`).

@@ -63,12 +63,15 @@ SUFFIX_ALIGN = " (align)"
 STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
 STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
 STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no entry line)"
+# Waiting >30 cm outside the delivery area until `fleet_link` grants the turn.
+STATE_CARRY_WAIT_ZONE = f"{STATE_CARRY} (wait zone)"
 # Squaring up at the paper: committed to delivering from there.
 COMMITTED_CARRY_STATES = (
     STATE_CARRY_SQUARE,
     STATE_CARRY_CENTER,
     STATE_CARRY_NO_ENTRY,
 )
+DEFAULT_CARRY_COLOR = "blue"
 
 # --- Direction helpers --------------------------------------------------------
 # Direction of a turn: +1 toward the left, -1 toward the right.
@@ -117,6 +120,27 @@ class Vision(Protocol):
         """
 
 
+class Fleet(Protocol):
+    """
+    What the autopilot needs from the optional ROS 2 fleet bridge.
+    """
+
+    def granted(self) -> bool:
+        """
+        True when this robot currently holds the delivery-zone lease.
+        """
+
+    def sync(self, state: str, carrying: bool, want: bool) -> None:
+        """
+        Publish the current state, carry flag and zone request.
+        """
+
+    def delivered(self, color: str) -> None:
+        """
+        Report a verified cube delivery of `color`.
+        """
+
+
 def _forward(speed: float) -> DriveCommand:
     """
     Drive straight ahead.
@@ -159,18 +183,28 @@ class AutoPilot:
     Not thread-safe by itself: the caller (Drive) serialises access.
     """
 
-    def __init__(self, cfg: AutoConfig, vision: Vision | None = None):
+    def __init__(
+        self,
+        cfg: AutoConfig,
+        vision: Vision | None = None,
+        fleet: Fleet | None = None,
+    ):
         """
-        Start paused with `cfg`; `vision` supplies the detections.
+        Start paused with `cfg`; `vision` supplies detections and `fleet`
+        bridges delivery-zone leases when enabled.
         """
         self.cfg = cfg
         self.vision = vision
+        self.fleet = fleet
         self.enabled = cfg.enabled
         self.state = STATE_PAUSED
         self.target_info: str | None = None
         self.collected_count = 0  # cubes pushed into the scoop
         self.delivered_count = 0  # cubes left on the delivery paper
         self.carrying = False
+        self.carrying_color = ""
+        self.want_zone = False
+        self._drop_verified = False
         self._phase_until = 0.0
         # Delivery push: the paper's near edge (time, distance) when the push
         # started and when last seen, the far edge when last seen (None if
@@ -231,25 +265,62 @@ class AutoPilot:
                 self.collected_count = 0
                 self.delivered_count = 0
                 self.carrying = False
+                self.carrying_color = ""
+                self.want_zone = False
+                self._drop_verified = False
         if not self.enabled:
             self.state = STATE_PAUSED
+        self._sync_fleet()
 
     def mark_manual(self) -> None:
         """
         The operator is driving by hand.
         """
         self.state = STATE_MANUAL
+        self._sync_fleet()
 
     def mark_paused(self) -> None:
         """
         Auto is off and nobody is driving.
         """
         self.state = STATE_PAUSED
+        self._sync_fleet()
+
+    def _sync_fleet(self) -> None:
+        """
+        Push the latest state, carry flag and zone request to the fleet bridge.
+        """
+        if self.fleet is not None:
+            self.fleet.sync(self.state, self.carrying, self.want_zone)
+
+    def _zone_granted(self) -> bool:
+        """
+        True when running standalone or when the fleet bridge holds the lease.
+        """
+        return self.fleet is None or self.fleet.granted()
+
+    def _notify_delivered(self) -> None:
+        """
+        Report a verified delivery once per drop before releasing the lease.
+        """
+        if self._drop_verified:
+            return
+        self._drop_verified = True
+        if self.fleet is not None:
+            self.fleet.delivered(self.carrying_color or DEFAULT_CARRY_COLOR)
 
     # ---------- main step ----------
     def step(self, now: float, line_black: bool = False) -> DriveCommand:
         """
         The command for time `now`; `line_black` is the line sensor reading.
+        """
+        command = self._step_inner(now, line_black)
+        self._sync_fleet()
+        return command
+
+    def _step_inner(self, now: float, line_black: bool) -> DriveCommand:
+        """
+        Run one autopilot decision step before syncing the fleet bridge.
         """
         if self.state.startswith((PREFIX_DONE, PREFIX_NO_CUBES)):
             return STOP
@@ -330,8 +401,11 @@ class AutoPilot:
         """
         if self.state.startswith(PREFIX_DROP):
             self._finish_drop()
+            self._notify_delivered()
         else:
             self.carrying = False
+            self.carrying_color = ""
+            self.want_zone = False
 
     def _finish_drop(self) -> None:
         """
@@ -401,6 +475,8 @@ class AutoPilot:
         if now < self._line_turn_until:
             self.state = STATE_LINE_TURN
             return _turn(self._search_dir, cfg.turn_speed)
+        if not self.carrying:
+            self.want_zone = False
         self._last_motion = None
         self.state = self._resume_state
         self._search_start_s = now
@@ -456,6 +532,7 @@ class AutoPilot:
             self.delivered_count -= 1
             self._end_drop(now)
             return None
+        self._notify_delivered()
         if now < backup_until + cfg.deliver_turn_s:
             self.state = STATE_DROP_TURN
             return _turn(self._search_dir, cfg.turn_speed)
@@ -521,8 +598,10 @@ class AutoPilot:
 
     def _end_drop(self, now: float) -> None:
         """
-        Back to looking for cubes, with a fresh search.
+        Release the delivery-zone request and resume searching for cubes.
         """
+        self.want_zone = False
+        self.carrying_color = ""
         self.state = STATE_SEARCH
         self._search_start_s = now
         self._idle_start_s = now
@@ -587,6 +666,8 @@ class AutoPilot:
             or det.v >= cfg.scoop_arrive_v_px
         )
         if at_scoop and self._is_aligned(det.bearing_rad):
+            self.carrying_color = det.color
+            self._drop_verified = False
             self.state = STATE_CATCH
             self._phase_until = now + cfg.scoop_push_s
             return _forward(cfg.forward_speed)
@@ -695,17 +776,17 @@ class AutoPilot:
     def _carry_step(self, now: float) -> DriveCommand:
         """
         With a cube in the scoop: head for the area (the landmarks lead from
-        afar) and deliver only once the area paper itself is in view: a push
-        started from the landmarks left the cube ~20 cm short of the paper.
-        If the area is never found, assume the cube was lost.
-
-        Once squaring up at the paper it stays committed: with cubes already
-        on the paper its distance jittered around the commit distance and
-        the blob dropped out now and then, and the robot danced between
-        squaring up and turning to the landmarks. If it stays out and was
-        last seen off to a side, slide that way to bring it back.
+        afar), request the zone turn at `zone_request_distance_m`, wait
+        stationary >30 cm outside (`CARRY (wait zone)`) when not granted, and
+        deliver once the area paper itself is in view and granted.
         """
-        cfg = self.cfg
+        if self.state == STATE_CARRY_WAIT_ZONE:
+            self.want_zone = True
+            if not self._zone_granted():
+                self._search_start_s = now
+                return STOP
+            self.state = STATE_CARRY
+
         zone = self._zone_in_view(now)
         committed = self.state in COMMITTED_CARRY_STATES
         paper = zone is not None and zone.color == ZONE_SOURCE_FLOOR
@@ -713,43 +794,74 @@ class AutoPilot:
             self._last_paper_s = now
             self._last_paper_bearing_rad = zone.bearing_rad
         elif committed:
-            lost_s = now - self._last_paper_s
-            if lost_s < cfg.carry_paper_hold_s:
-                # The paper flickered out: wait for it, do not turn away.
-                return STOP
-            slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
-            off_side = (
-                abs(self._last_paper_bearing_rad) > cfg.drop_align_tolerance_rad
-            )
-            if off_side and lost_s < slide_until_s:
-                # Squaring up pushed it out of view: slide back toward it.
-                self.state = STATE_CARRY_CENTER
-                side = _side_of(self._last_paper_bearing_rad)
-                return _strafe(side, cfg.strafe_speed)
+            recovery = self._lost_committed_paper_step(now)
+            if recovery is not None:
+                return recovery
         if zone is None:
-            if now - self._search_start_s >= cfg.carry_zone_timeout_s:
+            if now - self._search_start_s >= self.cfg.carry_zone_timeout_s:
                 return self._give_up_carrying(now)
             self.target_info = TARGET_LOOKING_FOR_ZONE
             return self._roam(now, STATE_CARRY)
+        return self._approach_zone_step(now, zone, paper, committed)
 
+    def _lost_committed_paper_step(self, now: float) -> DriveCommand | None:
+        """
+        Hold still or slide sideways toward the paper when it flickers out
+        while already squaring up; None once the hold and slide expire.
+        """
+        cfg = self.cfg
+        lost_s = now - self._last_paper_s
+        if lost_s < cfg.carry_paper_hold_s:
+            return STOP
+        slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
+        off_side = (
+            abs(self._last_paper_bearing_rad) > cfg.drop_align_tolerance_rad
+        )
+        if off_side and lost_s < slide_until_s:
+            self.state = STATE_CARRY_CENTER
+            side = _side_of(self._last_paper_bearing_rad)
+            return _strafe(side, cfg.strafe_speed)
+        return None
+
+    def _approach_zone_step(
+        self,
+        now: float,
+        zone,
+        paper: bool,
+        committed: bool,
+    ) -> DriveCommand:
+        """
+        Steer toward the visible delivery zone, requesting the lease at
+        ~45 cm and stopping >30 cm away until `zone/granted` is true.
+        """
+        cfg = self.cfg
         self.target_info = (
             f"zone {zone.color} {zone.distance_m * CM_PER_M:.0f}cm"
         )
         self._search_start_s = now
         self._search_dir = _side_of(zone.bearing_rad)
-        # The landmarks only lead there (slowing down near them): the push
-        # starts once the paper is in view, from in front of the entry line.
         commit_m = cfg.deliver_commit_distance_m
         if committed:
             commit_m += cfg.deliver_commit_hysteresis_m
         at_paper = paper and (
             zone.distance_m <= commit_m or zone.v >= cfg.floor_arrive_v_px
         )
+        if at_paper or zone.distance_m <= cfg.zone_request_distance_m:
+            self.want_zone = True
+        must_wait = not self._zone_granted() and (
+            at_paper or zone.distance_m <= cfg.zone_wait_distance_m
+        )
+        if must_wait:
+            self.want_zone = True
+            self.state = STATE_CARRY_WAIT_ZONE
+            return STOP
         if at_paper:
             return self._square_and_drop(now, zone)
         stop_distance_m = (
             cfg.deliver_commit_distance_m if paper else cfg.zone_stop_distance_m
         )
+        if not self._zone_granted():
+            stop_distance_m = max(stop_distance_m, cfg.zone_wait_distance_m)
         return self._steer_to(
             zone.bearing_rad,
             zone.distance_m,
@@ -803,6 +915,8 @@ class AutoPilot:
             self.state = STATE_CARRY_CENTER
             return _strafe(_side_of(zone.bearing_rad), cfg.strafe_speed)
         # Push straight in, guided by the area's edges (see _guided_push_step).
+        self.want_zone = True
+        self._drop_verified = False
         self.state = STATE_DROP
         self._drop_edge_first = (now, zone.distance_m)
         self._drop_edge_last = (now, zone.distance_m)
@@ -818,6 +932,8 @@ class AutoPilot:
         so go back to looking for cubes.
         """
         self.carrying = False
+        self.carrying_color = ""
+        self.want_zone = False
         self.state = STATE_SEARCH
         self.target_info = None
         self._search_start_s = now
