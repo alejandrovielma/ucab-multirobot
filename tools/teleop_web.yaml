@@ -329,7 +329,9 @@ auto:
   # was last seen for up to carry_paper_slide_s after carry_paper_hold_s. TODO measure
   square_max_bearing_rad: 0.30
   carry_paper_slide_s: 2.0
-  deliver_insert_m: 0.087
+  # Cube centre depth (m) past the near edge when the far edge is not seen. The area is 13.7 cm deep (centre 6.85); 0.05
+  # leaves room for the cubes already inside (was 0.087 for a 15.6 cm deep area, which pushed them out).
+  deliver_insert_m: 0.05
   # The push is guided by the camera. Mainly by the area's far edge: drive until it is
   # deliver_far_stop_m away, so it never pushes past the area. Recorded pushes read the far edge
   # 12-13 cm beyond the near one: the teal alone (13.8 cm), the thin lime strips mostly out of
@@ -339,7 +341,10 @@ auto:
   # scoop hides the floor below ~10 cm), at most deliver_push_max_s; then push blind (edge +
   # insert - cube_ahead_m) at the speed measured from the edge coming closer (over
   # deliver_speed_min_s at least), never past the far edge last seen. TODO check on the robot
-  deliver_far_stop_m: 0.12
+  # Stops the push this far (m) from the area's far edge. 0.15 (was 0.12) puts the cube centre ~4 cm from the
+  # near edge when it stops; the camera latency and the coasting add ~3 cm. At 0.12 the cubes ended against
+  # the far strip and later cubes pushed the earlier ones out of the area (2026-11-03, overhead video).
+  deliver_far_stop_m: 0.15
   # The area is ~13.8 cm deep: a far edge less than this behind the near edge is a truncated read and
   # is ignored (far 12.1 cm with near 7.8 cm made the push 0 cm and the cube stayed outside).
   deliver_far_min_span_m: 0.08
@@ -403,6 +408,9 @@ overhead:
   width_px: 640
   jpeg_quality: 60
   fps: 15
+  # Inner corners of the arena in the 640 px wide frame (top-left, top-right, bottom-right,
+  # bottom-left). Measure them again whenever the phone moves: the robot is the dark blob inside it.
+  arena_px: [[187, 101], [513, 100], [575, 286], [135, 288]]
 
 server:
   host: 0.0.0.0

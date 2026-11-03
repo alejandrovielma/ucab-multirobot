@@ -86,6 +86,7 @@ class OverheadCamera:
         width_px: int = DEFAULT_WIDTH_PX,
         jpeg_quality: int = DEFAULT_QUALITY,
         fps: float = DEFAULT_FPS,
+        arena_px=None,
     ):
         """
         Start the reader thread. Frames are shrunk to `width_px` and sent at
@@ -93,6 +94,7 @@ class OverheadCamera:
         which clogs the Wi-Fi and makes every viewer lag behind.
         """
         self._url = url
+        self._arena_px = arena_px
         self._width_px = width_px
         self._quality = jpeg_quality
         self._period_s = 1.0 / fps
@@ -101,6 +103,8 @@ class OverheadCamera:
         self._jpeg: bytes | None = None
         self._seq = 0
         self.ok = False
+        # Where the robot and the area are in the last frame (pixels of the shrunk frame).
+        self.pose = None
         self._running = True
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -186,6 +190,12 @@ class OverheadCamera:
                 (self._width_px, round(height * self._width_px / width)),
                 interpolation=cv2.INTER_AREA,
             )
+        from teleop_web_lib.overhead_pose import annotate, locate
+
+        self.pose = (
+            locate(frame, self._arena_px) if self._arena_px else locate(frame)
+        )
+        frame = annotate(frame, self.pose)
         ok, buffer = cv2.imencode(
             ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, self._quality]
         )

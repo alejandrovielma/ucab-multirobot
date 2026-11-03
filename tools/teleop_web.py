@@ -118,6 +118,7 @@ def main() -> None:
             overhead_cfg.get("width_px", 640),
             overhead_cfg.get("jpeg_quality", 60),
             overhead_cfg.get("fps", 15.0),
+            overhead_cfg.get("arena_px"),
         )
         if overhead_cfg.get("url")
         else None

@@ -209,3 +209,17 @@ def test_fusion_hat_motors_use_the_library(monkeypatch):
     assert FakeMotor.made["M3"].powers[-1] == 50
     assert FakeMotor.made["M0"].reverse is True
     assert FakeMotor.made["M1"].powers[-1] == -25
+
+
+def test_overhead_pose_finds_the_robot_and_the_area():
+    import numpy as np
+
+    from teleop_web_lib.overhead_pose import locate
+
+    frame = np.full((360, 640, 3), 230, np.uint8)  # white track
+    frame[210:240, 118:158] = (150, 140, 20)  # teal paper (BGR), left of the arena
+    frame[170:215, 280:330] = (25, 25, 25)  # dark chassis inside the arena
+    pose = locate(frame)
+    assert abs(pose.robot_px[0] - 304.5) < 3 and abs(pose.robot_px[1] - 192) < 3
+    assert abs(pose.zone_px[0] - 137.5) < 3 and abs(pose.zone_px[1] - 224.5) < 3
+    assert locate(np.full((360, 640, 3), 230, np.uint8)).robot_px is None

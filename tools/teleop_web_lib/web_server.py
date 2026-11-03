@@ -20,6 +20,7 @@ PAGE_PATH = Path(__file__).with_name("web") / "index.html"
 PATH_INDEX = "/"
 PATH_STREAM = "/stream.mjpg"
 PATH_OVERHEAD = "/overhead.mjpg"
+PATH_POSE = "/pose"
 PATH_CMD = "/cmd"
 
 CONTENT_HTML = "text/html; charset=utf-8"
@@ -77,6 +78,10 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             self._stream(self.camera)
         elif self.path == PATH_OVERHEAD and self.overhead is not None:
             self._stream(self.overhead)
+        elif self.path == PATH_POSE and self.overhead is not None:
+            pose = self.overhead.pose
+            body = {"robot_px": pose and pose.robot_px, "zone_px": pose and pose.zone_px}
+            self._send(HTTPStatus.OK, json.dumps(body).encode(), CONTENT_JSON)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
