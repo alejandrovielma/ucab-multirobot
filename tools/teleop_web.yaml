@@ -60,11 +60,12 @@ camera:
   # Phineas collects blue cubes only (Ferb collects yellow; red is avoided).
   target_colors: [blue]
   # Colours of the OTHER robot's cubes: never a target, never delivered, and Auto slides around
-  # one that is in the way (auto.foreign_*). Empty = they are not seen at all. Their HSV comes
-  # from hsv_ranges.yaml, where blue is still the Webots one: recalibrate it with
-  # tools/hsv_tuner.py on the real cubes before listing it here (a wrong range makes the robot
-  # dodge things that are not cubes).
-  avoid_colors: []
+  # one that is in the way (auto.foreign_*). Empty = they are not seen at all. Phineas avoids
+  # yellow (Ferb's cubes); edit this list to change it (it fails at start-up if a listed colour
+  # has no HSV range or is also a target). Its HSV comes from hsv_ranges.yaml: check the yellow
+  # range on real cubes with tools/hsv_tuner.py (the table renders yellowish, H ~32, so a wrong
+  # range makes the robot dodge the table and not just cubes).
+  avoid_colors: [yellow]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
