@@ -41,8 +41,16 @@ camera:
   device_index: 0
   width_px: 640
   height_px: 480
-  fps: 15
+  # Phineas: 30 = the sensor's rate in the 1640x1232 mode; measured on the Pi:
+  # grab 16 + detect 16 + encode 2 ms per frame.
+  fps: 30
   jpeg_quality: 70
+  # Phineas: the page gets a smaller, lighter copy (detection still runs on the
+  # full frame): less data to the browser means less lag on a shared Wi-Fi.
+  # Optional: leave them out to stream the full frame at fps/jpeg_quality.
+  stream_width_px: 400
+  stream_jpeg_quality: 55
+  stream_fps: 30
   vflip: true
   hflip: true
   # Part of the camera id that identifies the CSI port of the OV5647 (picamera2 only).

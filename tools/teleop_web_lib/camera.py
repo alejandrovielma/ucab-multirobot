@@ -38,6 +38,8 @@ class Camera:
         self._seq = 0
         self._pipeline = None
         self.ok = False
+        # Phineas: ms from the end of the grab until the page's frame is ready.
+        self.latency_ms = 0.0
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -107,6 +109,7 @@ class Camera:
             from teleop_web_lib.frame_source import (
                 encode_jpeg,
                 open_frame_source,
+                shrink_frame,
             )
 
             grab = open_frame_source(self._cfg, self._fake)
@@ -119,15 +122,29 @@ class Camera:
         self._pipeline = build_pipeline(self._cfg, self._detection_overrides)
         self.ok = True
         period_s = 1.0 / self._cfg["fps"]
+        # Phineas: the page gets a smaller, lighter copy at its own rate;
+        # detection still runs on every full frame. Defaults = Ferb's stream.
+        stream_width_px = self._cfg.get("stream_width_px")
+        stream_quality = self._cfg.get(
+            "stream_jpeg_quality", self._cfg["jpeg_quality"]
+        )
+        stream_period_s = 1.0 / self._cfg.get("stream_fps", self._cfg["fps"])
+        next_stream_s = 0.0
         while self._running:
             started_s = time.monotonic()
             frame = grab()
+            grabbed_s = time.monotonic()
             if frame is not None:
                 if self._pipeline is not None:
                     frame = self._pipeline.process(frame)
-                jpeg = encode_jpeg(frame, self._cfg["jpeg_quality"])
-                if jpeg is not None:
-                    self._store(jpeg)
+                if grabbed_s >= next_stream_s:
+                    next_stream_s = grabbed_s + stream_period_s
+                    if stream_width_px and frame.shape[1] > stream_width_px:
+                        frame = shrink_frame(frame, stream_width_px)
+                    jpeg = encode_jpeg(frame, stream_quality)
+                    if jpeg is not None:
+                        self._store(jpeg)
+                        self.latency_ms = (time.monotonic() - grabbed_s) * 1e3
             time.sleep(max(0.0, period_s - (time.monotonic() - started_s)))
 
     def _store(self, jpeg: bytes) -> None:

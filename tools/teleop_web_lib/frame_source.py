@@ -71,6 +71,18 @@ def encode_jpeg(frame: np.ndarray, quality: int) -> bytes | None:
     return buffer.tobytes() if ok else None
 
 
+def shrink_frame(frame: np.ndarray, width_px: int) -> np.ndarray:
+    """
+    Phineas: the frame scaled down to `width_px`, keeping the aspect ratio.
+    """
+    height, width = frame.shape[:2]
+    return cv2.resize(
+        frame,
+        (width_px, round(height * width_px / width)),
+        interpolation=cv2.INTER_AREA,
+    )
+
+
 def _fake_source(width_px: int, height_px: int) -> FrameSource:
     """
     A grey frame with a red square sliding across it.
@@ -128,6 +140,10 @@ def _picamera2_source(cfg: dict, width_px: int, height_px: int) -> FrameSource:
         camera.create_video_configuration(
             main={"size": (width_px, height_px), "format": PICAMERA_FORMAT},
             sensor=_sensor_mode(cfg.get("sensor_size")),
+            # Phineas: two buffers and no queue, so a capture returns the
+            # newest frame instead of an old queued one.
+            buffer_count=2,
+            queue=False,
         )
     )
     camera.start()

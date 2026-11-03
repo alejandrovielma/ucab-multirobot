@@ -6,6 +6,7 @@ the /cmd endpoint the page polls. No hardware or ROS: it only talks to the
 
 import json
 import logging
+import socket
 import time
 from collections.abc import Callable
 from http import HTTPStatus
@@ -28,6 +29,7 @@ MJPEG_CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}"
 ANY_FRAME_SEQ = -1
 # While there is no camera, the stream checks again after this long.
 NO_CAMERA_RETRY_S = 1.0
+STREAM_SEND_BUFFER_BYTES = 65536
 # /cmd bodies are tiny JSON objects; anything bigger is rejected.
 MAX_BODY_BYTES = 4096
 
@@ -71,14 +73,19 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         if self.path == PATH_INDEX:
             self._send(HTTPStatus.OK, self.page, CONTENT_HTML)
         elif self.path == PATH_STREAM:
-            self._stream()
+            self._stream(self.camera)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
-    def _stream(self):
+    def _stream(self, camera):
         """
-        Stream frames as multipart MJPEG until the client leaves.
+        Stream frames of `camera` as multipart MJPEG until the client leaves.
         """
+        # Phineas: a small send buffer, so a slow client skips frames (the
+        # next one sent is the newest) instead of queueing seconds of video.
+        self.connection.setsockopt(
+            socket.SOL_SOCKET, socket.SO_SNDBUF, STREAM_SEND_BUFFER_BYTES
+        )
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", MJPEG_CONTENT_TYPE)
         self.send_header("Cache-Control", "no-cache")
@@ -86,10 +93,10 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         seq = ANY_FRAME_SEQ
         try:
             while self.is_running():
-                seq, jpeg = self.camera.wait_frame(seq)
+                seq, jpeg = camera.wait_frame(seq)
                 if jpeg is not None:
                     self._write_mjpeg_part(jpeg)
-                elif not self.camera.ok:
+                elif not camera.ok:
                     time.sleep(NO_CAMERA_RETRY_S)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -126,6 +133,8 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         status = {
             "motors": self.motors_label,
             "camera": self.camera.ok,
+            # Phineas: video latency shown by the page.
+            "camera_ms": round(getattr(self.camera, "latency_ms", 0.0), 1),
             **self.drive.status(),
         }
         self._send(HTTPStatus.OK, json.dumps(status).encode(), CONTENT_JSON)
