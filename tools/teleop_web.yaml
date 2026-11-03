@@ -420,6 +420,18 @@ detection:
   # Farther blobs were objects in the room beyond the table.
   max_distance_m: 1.2
 
+# Phineas: overhead view in the page: DroidCam's MJPEG stream of the phone above
+# the track. DroidCam serves one client, so close the DroidCam client on the PC.
+# Without `url` there is no overhead view. If the phone is unreachable the
+# camera keeps working (the relay retries quietly).
+overhead:
+  url: http://10.76.16.22:4747/video
+  # The phone sends ~20 Mbit/s at 720p; relayed shrunk, so the Wi-Fi does not
+  # queue frames (lag).
+  width_px: 640
+  jpeg_quality: 60
+  fps: 15
+
 server:
   host: 0.0.0.0
   port: 8081  # 8080 is used by web_viewer

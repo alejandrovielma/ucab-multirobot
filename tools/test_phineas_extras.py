@@ -7,9 +7,11 @@ import cv2
 import numpy as np
 from test_autopilot import make_pilot
 
+from teleop_web_lib import overhead
 from teleop_web_lib.camera import Camera
 from teleop_web_lib.config import AutoConfig
 from teleop_web_lib.frame_source import shrink_frame
+from teleop_web_lib.overhead import OverheadCamera, jpeg_width, split_jpegs
 
 
 def test_no_cubes_stop_zero_never_gives_up():
@@ -58,3 +60,67 @@ def test_the_stream_copy_is_smaller_only_when_configured():
     }
     assert _stream_width_of(base) == 640
     assert _stream_width_of({**base, "stream_width_px": 400}) == 400
+
+
+JPEG_HEAD = b"\xff\xd8"
+JPEG_TAIL = b"\xff\xd9"
+
+
+def test_split_jpegs_returns_complete_frames_and_the_rest():
+    first = JPEG_HEAD + b"aa" + JPEG_TAIL
+    second = JPEG_HEAD + b"b" + JPEG_TAIL
+    frames, rest = split_jpegs(b"junk" + first + second + JPEG_HEAD + b"cc")
+    assert frames == [first, second]
+    assert rest == JPEG_HEAD + b"cc"
+    assert split_jpegs(b"no image here") == ([], b"")
+
+
+def test_jpeg_width_reads_the_start_of_frame_header():
+    ok, buffer = cv2.imencode(".jpg", np.zeros((30, 50, 3), np.uint8))
+    assert ok and jpeg_width(buffer.tobytes()) == 50
+    assert jpeg_width(b"not a jpeg") is None
+
+
+class FakeResponse:
+    """
+    Stands in for the DroidCam HTTP response: sends one frame, then ends.
+    """
+
+    def __init__(self, data):
+        self._chunks = [data, b""]
+
+    def read1(self, _size):
+        return self._chunks.pop(0)
+
+    def __enter__(self):  # noqa: D105
+        return self
+
+    def __exit__(self, *_exc):  # noqa: D105
+        return False
+
+
+def test_the_overhead_relay_shrinks_the_frame_without_any_network(monkeypatch):
+    ok, buffer = cv2.imencode(".jpg", np.zeros((480, 640, 3), np.uint8))
+    data = b"--frame\r\n" + buffer.tobytes()
+    monkeypatch.setattr(
+        overhead.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse(data)
+    )
+    camera = OverheadCamera("http://fake.invalid/video", width_px=320)
+    try:
+        seq, jpeg = camera.wait_frame(0, timeout_s=5.0)
+        assert jpeg is not None and jpeg_width(jpeg) == 320
+    finally:
+        camera.close()
+
+
+def test_the_overhead_relay_survives_an_unreachable_phone(monkeypatch):
+    def refuse(*_args, **_kwargs):
+        raise OSError("unreachable")
+
+    monkeypatch.setattr(overhead.urllib.request, "urlopen", refuse)
+    camera = OverheadCamera("http://fake.invalid/video")
+    try:
+        assert camera.wait_frame(0, timeout_s=0.2)[1] is None
+        assert not camera.ok
+    finally:
+        camera.close()

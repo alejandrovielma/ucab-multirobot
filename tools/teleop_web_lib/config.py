@@ -192,6 +192,7 @@ SECTION_LINE_SENSOR = "line_sensor"
 SECTION_AUTO = "auto"
 SECTION_DETECTION = "detection"
 SECTION_FLEET = "fleet"
+SECTION_OVERHEAD = "overhead"
 
 
 @dataclass(frozen=True)

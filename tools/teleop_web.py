@@ -37,6 +37,7 @@ from teleop_web_lib.config import (
     SECTION_FLEET,
     SECTION_LINE_SENSOR,
     SECTION_MOTORS,
+    SECTION_OVERHEAD,
     SECTION_SERVER,
     AutoConfig,
     FleetConfig,
@@ -46,6 +47,7 @@ from teleop_web_lib.drive import Drive
 from teleop_web_lib.fleet import build_fleet
 from teleop_web_lib.line_sensor import build_line_sensor
 from teleop_web_lib.motors import build_motors
+from teleop_web_lib.overhead import OverheadCamera
 from teleop_web_lib.web_server import make_handler, read_page
 
 log = logging.getLogger("teleop_web")
@@ -117,7 +119,21 @@ def main() -> None:
 
     host = args.host or server_cfg["host"]
     port = args.port or server_cfg["port"]
-    handler = make_handler(drive, camera, motors_label, read_page())
+    # Phineas: optional DroidCam relay; no overhead.url means no overhead view.
+    overhead_cfg = cfg.get(SECTION_OVERHEAD) or {}
+    overhead = (
+        OverheadCamera(
+            overhead_cfg["url"],
+            overhead_cfg.get("width_px", 640),
+            overhead_cfg.get("jpeg_quality", 60),
+            overhead_cfg.get("fps", 15.0),
+        )
+        if overhead_cfg.get("url")
+        else None
+    )
+    handler = make_handler(
+        drive, camera, motors_label, read_page(), overhead=overhead
+    )
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     shown = LOCAL_HOST_NAME if host == LOCAL_HOST else host
@@ -130,6 +146,8 @@ def main() -> None:
         log.info("stopping and closing")
         server.server_close()
         camera.close()
+        if overhead is not None:
+            overhead.close()
         drive.close()
         if fleet is not None:
             fleet.close()
