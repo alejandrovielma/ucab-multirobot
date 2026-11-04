@@ -21,8 +21,9 @@ MIN_ROBOT_AREA_PX = 400
 TEAL_HSV_LOW = (82, 140, 110)
 TEAL_HSV_HIGH = (102, 255, 255)
 MIN_ZONE_AREA_PX = 300
-# The area sits left of this column in the 640 px frame (cubes are darker blue, far from it).
-ZONE_MAX_COLUMN_FRACTION = 0.47
+# The area sits between these columns (fractions of the width) of the frame: where it falls depends
+# on where the phone stands. Cubes are darker blue, far from it.
+DEFAULT_ZONE_COLUMNS = (0.0, 0.47)
 CUBE_DRAW_BGR = {"blue": (255, 120, 0), "yellow": (0, 255, 255), "red": (0, 0, 255), "green": (0, 255, 0)}
 ERODE_PX = 9  # keeps the border tape out of the arena mask
 CLOSE_PX = 7
@@ -96,7 +97,9 @@ def find_cubes(hsv: np.ndarray, arena: np.ndarray, robot_px) -> tuple:
     return tuple(cubes)
 
 
-def locate(bgr: np.ndarray, arena_px=DEFAULT_ARENA_PX) -> OverheadPose:
+def locate(
+    bgr: np.ndarray, arena_px=DEFAULT_ARENA_PX, zone_columns=DEFAULT_ZONE_COLUMNS
+) -> OverheadPose:
     """
     Robot and delivery-area positions in `bgr`.
     """
@@ -110,7 +113,8 @@ def locate(bgr: np.ndarray, arena_px=DEFAULT_ARENA_PX) -> OverheadPose:
         dark, cv2.MORPH_CLOSE, np.ones((CLOSE_PX, CLOSE_PX), np.uint8)
     )
     teal = cv2.inRange(hsv, TEAL_HSV_LOW, TEAL_HSV_HIGH)
-    teal[:, int(width * ZONE_MAX_COLUMN_FRACTION) :] = 0
+    teal[:, : int(width * zone_columns[0])] = 0
+    teal[:, int(width * zone_columns[1]) :] = 0
     robot = _largest_blob(dark, MIN_ROBOT_AREA_PX)
     return OverheadPose(
         robot,

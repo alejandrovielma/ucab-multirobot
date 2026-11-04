@@ -4,6 +4,7 @@ pytest tools). The autopilot is pure logic, so no thread or hardware is
 involved.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -37,10 +38,14 @@ class StubVision:
 
     def __init__(self):
         self.det = None
+        self.foreign = None
         self.zone = None
 
     def latest_detection(self, now, timeout_s):
         return self.det
+
+    def latest_foreign(self, now, timeout_s):
+        return self.foreign
 
     def latest_zone(self, now, timeout_s):
         return self.zone
@@ -796,3 +801,90 @@ def test_a_far_edge_too_close_behind_the_near_one_does_not_stop_the_push():
     assert pilot.state == "DROP"
     assert pilot.step(0.05).vy == 1.0  # keeps pushing on the near edge
     assert pilot._drop_far_last is None
+
+
+def test_a_cube_to_avoid_in_the_way_is_slid_around_while_carrying():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)  # straight ahead: would drive on
+    vision.foreign = Seen("yellow", 0.25, bearing_rad=0.1)  # a bit to the left
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and command.speed > 0  # right
+    assert pilot.carrying and pilot.state.startswith("CARRY")
+    assert "avoiding yellow" in pilot.target_info
+
+
+def test_a_cube_to_avoid_off_the_path_or_far_is_ignored():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("yellow", 0.25, bearing_rad=0.8)  # far to the side
+    assert pilot.step(0.0).vy == 1.0
+    vision.foreign = Seen("yellow", 0.60, bearing_rad=0.0)  # still far ahead
+    assert pilot.step(0.1).vy == 1.0
+
+
+def test_the_slide_around_a_cube_to_avoid_keeps_its_side_until_clear():
+    pilot, vision = make_pilot()
+    cfg = pilot.cfg
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    vision.foreign = Seen("yellow", 0.25, bearing_rad=-0.1)  # to the right
+    assert pilot.step(0.0).vx < 0  # slides left
+    # Just past the clearance but inside the exit margin: same side.
+    lateral_m = cfg.foreign_clearance_m + cfg.foreign_exit_margin_m / 2
+    vision.foreign = Seen("yellow", 0.25, -math.asin(lateral_m / 0.25))
+    assert pilot.step(0.1).vx < 0
+    vision.foreign = Seen("yellow", 0.25, bearing_rad=-0.8)  # clear: drive on
+    assert pilot.step(0.2).vy == 1.0
+
+
+def test_a_cube_to_avoid_is_also_avoided_when_searching():
+    pilot, vision = make_pilot()
+    vision.det = Seen("blue", 0.40)  # ahead: approach drives straight
+    vision.foreign = Seen("yellow", 0.22, bearing_rad=-0.05)
+    command = pilot.step(0.0)
+    assert command.vx < 0 and command.vy == 0
+
+
+def test_the_blind_catch_push_is_not_interrupted_by_a_cube_to_avoid():
+    pilot, vision = make_pilot()
+    vision.det = Seen("blue", pilot.cfg.stop_distance_m - 0.01)
+    assert pilot.step(0.0).vy == 1.0 and pilot.state == "CATCH"
+    vision.foreign = Seen("yellow", 0.15, bearing_rad=0.05)
+    assert pilot.step(0.1).vy == 1.0 and pilot.state == "CATCH"
+
+
+def test_catch_does_not_start_with_a_cube_to_avoid_in_the_way():
+    pilot, vision = make_pilot()
+    vision.det = Seen("blue", pilot.cfg.stop_distance_m - 0.01)
+    vision.foreign = Seen("yellow", 0.11, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0 and pilot.state == "APPROACH"
+
+
+def test_drop_does_not_start_with_a_cube_to_avoid_in_front_of_the_zone():
+    pilot, vision = make_pilot()
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("floor", 0.18, bearing_rad=0.0, entry_angle_rad=0.0)
+    vision.foreign = Seen("yellow", 0.15, bearing_rad=0.05)
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0
+    assert pilot.state.startswith("CARRY")
+
+
+def test_the_area_flickering_out_while_carrying_only_stops_the_robot():
+    vision = StubVision()
+    pilot = AutoPilot(AutoConfig(**FAST_PHASES, carry_zone_hold_s=0.3), vision)
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)
+    assert pilot.step(0.0).vy == 1.0
+    vision.zone = None
+    assert pilot.step(0.1) == DriveCommand()  # just lost: wait for it
+    assert pilot.step(0.4).wz != 0  # gone for good: look for it
+

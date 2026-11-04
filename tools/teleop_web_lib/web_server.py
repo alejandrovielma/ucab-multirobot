@@ -21,6 +21,8 @@ PATH_INDEX = "/"
 PATH_STREAM = "/stream.mjpg"
 PATH_OVERHEAD = "/overhead.mjpg"
 PATH_POSE = "/pose"
+PATH_OVERHEAD_2 = "/overhead2.mjpg"
+PATH_POSE_2 = "/pose2"
 PATH_CMD = "/cmd"
 
 CONTENT_HTML = "text/html; charset=utf-8"
@@ -57,6 +59,7 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
     drive: object
     camera: object
     overhead: object | None
+    overhead_2: object | None
     motors_label: str
     page: bytes
     is_running: Callable[[], bool]
@@ -79,15 +82,25 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         elif self.path == PATH_OVERHEAD and self.overhead is not None:
             self._stream(self.overhead)
         elif self.path == PATH_POSE and self.overhead is not None:
-            pose = self.overhead.pose
-            body = {
-                "robot_px": pose and pose.robot_px,
-                "zone_px": pose and pose.zone_px,
-                "cubes": [list(c) for c in pose.cubes] if pose else [],
-            }
-            self._send(HTTPStatus.OK, json.dumps(body).encode(), CONTENT_JSON)
+            self._send_pose(self.overhead)
+        elif self.path == PATH_OVERHEAD_2 and self.overhead_2 is not None:
+            self._stream(self.overhead_2)
+        elif self.path == PATH_POSE_2 and self.overhead_2 is not None:
+            self._send_pose(self.overhead_2)
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
+
+    def _send_pose(self, overhead):
+        """
+        Answer with what an overhead camera sees in its last frame.
+        """
+        pose = overhead.pose
+        body = {
+            "robot_px": pose and pose.robot_px,
+            "zone_px": pose and pose.zone_px,
+            "cubes": [list(c) for c in pose.cubes] if pose else [],
+        }
+        self._send(HTTPStatus.OK, json.dumps(body).encode(), CONTENT_JSON)
 
     def _stream(self, camera):
         """
@@ -142,6 +155,7 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
             "camera": self.camera.ok,
             "colors": self.camera.cube_colors,
             "target_colors": self.camera.target_colors,
+            "avoid_colors": self.camera.avoid_colors,
             **self.drive.status(),
         }
         self._send(HTTPStatus.OK, json.dumps(status).encode(), CONTENT_JSON)
@@ -173,10 +187,13 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
 
     def _apply(self, data: dict):
         """
-        Forward the Auto switch and the manual command to the drive.
+        Set the mission and forward the Auto switch and the manual command
+        to the drive.
         """
-        if "target_color" in data:
-            self.camera.set_target_colors([str(data["target_color"])])
+        if "targets" in data:
+            self.camera.set_mission(
+                list(data["targets"]), list(data.get("avoid", []))
+            )
         if "auto" in data or "reset_auto" in data:
             self.drive.set_auto(
                 data.get("auto"),
@@ -207,6 +224,7 @@ def make_handler(
     page: bytes,
     is_running: Callable[[], bool] = lambda: True,
     overhead=None,
+    overhead_2=None,
 ) -> type[ControlRequestHandler]:
     """
     Handler class bound to the drive, the camera, the label of the motor
@@ -220,6 +238,7 @@ def make_handler(
             "drive": drive,
             "camera": camera,
             "overhead": overhead,
+            "overhead_2": overhead_2,
             "motors_label": motors_label,
             "page": page,
             "is_running": staticmethod(is_running),

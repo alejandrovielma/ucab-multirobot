@@ -12,6 +12,7 @@
   .k.on { background: #2f7d32; }
   .btn { padding: 10px 16px; border-radius: 8px; border: none; font: inherit; font-weight: 700;
          cursor: pointer; background: #2a2a2a; color: #eee; }
+  #mission { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; margin: 8px 0; }
   .btn.on { background: #2f7d32; color: #fff; }
   .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
   #st { font-family: ui-monospace, monospace; color: #aaa; }
@@ -35,6 +36,7 @@
 <h2 style="margin:0">Collector</h2>
 <img id="cam" src="/stream.mjpg" alt="camera">
 <img id="overhead" src="/overhead.mjpg" alt="overhead camera" style="width:min(100%,640px);border-radius:8px" onerror="this.style.display='none'">
+<img id="overhead2" src="/overhead2.mjpg" alt="second overhead camera" style="width:min(100%,640px);border-radius:8px" onerror="this.style.display='none'">
 <div id="lineBox" class="line-box">Sensor de línea (GPIO 17): conectando…</div>
 <div class="tune">
   <canvas id="strip" width="600" height="28"></canvas>
@@ -54,10 +56,10 @@
   </div>
   <label>Speed <input id="spd" type="range" min="10" max="100" value="50">
     <span id="spdv">50</span>%</label>
-  <label>Color <select id="colorSel"></select></label>
   <button id="autoBtn" class="btn">Auto (P): OFF</button>
   <button id="nextBtn" class="btn">Reset (R)</button>
 </div>
+<div id="mission"></div>
 <div id="st">connecting…</div>
 <div class="hint">
   W/S adelante·atrás · A/D izquierda·derecha · Q/E girar · P auto · R reset · space frenar · Shift rápido
@@ -180,17 +182,35 @@ function tune(raw) {
   tuneInfo.textContent = `DO=${raw} · ${changing ? "CHANGING" : "stable"} · flips ${flips}` +
     ` · last flip ${ago === null ? "never" : ago.toFixed(1) + " s ago"} · dark ${dark}% of last samples`;
 }
-// Target colour picked in the page; sent once with the next command.
-let colorCmd = null;
-const colorSel = document.getElementById("colorSel");
-colorSel.addEventListener("change", () => { colorCmd = colorSel.value; });
-function syncColors(colors, targets) {
-  if (colors && colors.join() !== Array.from(colorSel.options, o => o.value).join()) {
-    colorSel.replaceChildren(...colors.map(c => new Option(c, c)));
+// Mission picked in the page; sent once with the next command.
+let missionCmd = null;
+const missionBox = document.getElementById("mission");
+const ROLES = { target: "buscar", avoid: "evitar", ignore: "ignorar" };
+missionBox.addEventListener("change", (e) => {
+  e.target.blur();  // WASD must not change the selector
+  const selects = Array.from(missionBox.querySelectorAll("select"));
+  const withRole = role => selects.filter(x => x.value === role).map(x => x.dataset.color);
+  // A mission needs a target: without one nothing is sent and the next status restores it.
+  if (withRole("target").length) missionCmd = { targets: withRole("target"), avoid: withRole("avoid") };
+});
+function syncMission(colors, targets, avoid) {
+  if (!colors) return;
+  const shown = Array.from(missionBox.querySelectorAll("select"), x => x.dataset.color);
+  if (colors.join() !== shown.join()) {
+    missionBox.replaceChildren(...colors.map((c) => {
+      const select = document.createElement("select");
+      select.dataset.color = c;
+      select.append(...Object.entries(ROLES).map(([value, text]) => new Option(text, value)));
+      const label = document.createElement("label");
+      label.append(`${c} `, select);
+      return label;
+    }));
   }
-  // Follow the robot's target unless the user is choosing or a pick is on its way.
-  if (document.activeElement !== colorSel && colorCmd === null && targets && targets.length) {
-    colorSel.value = targets[0];
+  // Follow the robot's mission unless the user is choosing or a pick is on its way.
+  if (missionBox.contains(document.activeElement) || missionCmd !== null) return;
+  for (const select of missionBox.querySelectorAll("select")) {
+    const c = select.dataset.color;
+    select.value = targets.includes(c) ? "target" : avoid.includes(c) ? "avoid" : "ignore";
   }
 }
 async function tick() {
@@ -204,11 +224,11 @@ async function tick() {
   const payload = { vx, vy, wz, speed };
   if (autoCmd !== null) { payload.auto = autoCmd; autoCmd = null; }
   if (resetCmd) { payload.reset_auto = true; resetCmd = false; }
-  if (colorCmd !== null) { payload.target_color = colorCmd; colorCmd = null; }
+  if (missionCmd !== null) { Object.assign(payload, missionCmd); missionCmd = null; }
   try {
     const r = await fetch("/cmd", { method: "POST", body: JSON.stringify(payload) });
     const s = await r.json();
-    syncColors(s.colors, s.target_colors);
+    syncMission(s.colors, s.target_colors, s.avoid_colors);
     autoBtn.classList.toggle("on", !!s.auto);
     autoBtn.textContent = `Auto (P): ${s.auto ? "ON" : "OFF"}`;
     tune(s.line_raw);
@@ -235,5 +255,11 @@ async function tick() {
     lineBox.className = "line-box"; lineBox.textContent = "Sin conexión con el robot";
   }
 }
-setInterval(tick, CONFIG.pollIntervalMs);
+// One command at a time: on a slow link they would pile up and arrive late, old keys included.
+let tickBusy = false;
+setInterval(() => {
+  if (tickBusy) return;
+  tickBusy = true;
+  tick().finally(() => { tickBusy = false; });
+}, CONFIG.pollIntervalMs);
 </script></body></html>

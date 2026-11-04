@@ -251,18 +251,92 @@ def test_with_start_power(power, start, expected):
     assert with_start_power(power, start) == expected
 
 
-def test_pipeline_switches_target_colour():
+def test_pipeline_mission_picks_targets_and_colours_to_avoid():
     from types import SimpleNamespace
 
-    from teleop_web_lib.detection import DetectionPipeline
+    from teleop_web_lib.detection import DetectionPipeline, split_cubes
 
     detector = SimpleNamespace(ranges={"blue": 1})
     pipeline = DetectionPipeline(
-        detector, None, cube_ranges={"blue": 1, "yellow": 2, "red": 3}
+        detector, None, cube_ranges={"blue": 1, "yellow": 2, "red": 3, "green": 4}
     )
-    assert pipeline.cube_colors == ["blue", "yellow", "red"]
-    pipeline.set_target_colors(["yellow"])
-    assert pipeline.target_colors == ["yellow"]
-    with pytest.raises(ValueError):
-        pipeline.set_target_colors(["pink"])
-    assert pipeline.target_colors == ["yellow"]
+    assert pipeline.cube_colors == ["blue", "yellow", "red", "green"]
+    pipeline.set_mission(["blue", "red"], ["yellow"])
+    assert pipeline.target_colors == ["blue", "red"]
+    assert pipeline.avoid_colors == ["yellow"]
+    # A colour outside the mission is not even looked for.
+    assert set(pipeline._mission[0]) == {"blue", "red", "yellow"}
+    # The detector's colours only change in the capture thread, not meanwhile.
+    assert detector.ranges == {"blue": 1}
+    for targets, avoid in (([], ["red"]), (["pink"], []), (["blue"], ["blue"])):
+        with pytest.raises(ValueError):
+            pipeline.set_mission(targets, avoid)
+    assert pipeline.target_colors == ["blue", "red"]
+
+    near = SimpleNamespace(color="yellow", distance_m=0.2, bearing_rad=0.0)
+    far = SimpleNamespace(color="blue", distance_m=0.4, bearing_rad=0.0)
+    assert split_cubes([near, far], frozenset({"yellow"})) == (far, near)
+    assert split_cubes([near], frozenset({"yellow"})) == (None, near)
+    # A cube ahead beats a slightly nearer one that takes a long turn to face.
+    side = SimpleNamespace(color="blue", distance_m=0.30, bearing_rad=0.9)
+    ahead = SimpleNamespace(color="blue", distance_m=0.35, bearing_rad=0.0)
+    assert split_cubes([side, ahead], frozenset())[0] is ahead
+
+
+def test_overhead_pose_finds_the_area_where_the_phone_sees_it():
+    import cv2
+    import numpy as np
+
+    from teleop_web_lib.overhead_pose import locate
+
+    frame = np.full((360, 640, 3), 255, np.uint8)
+    cv2.rectangle(frame, (540, 180), (610, 240), (180, 150, 0), -1)  # teal, right side
+    arena = ((100, 100), (500, 100), (500, 300), (100, 300))
+    assert locate(frame, arena).zone_px is None
+    x, y = locate(frame, arena, (0.75, 1.0)).zone_px
+    assert 560 < x < 590 and 200 < y < 220
+
+
+def test_a_cube_sized_blob_does_not_pass_for_a_landmark():
+    import sys
+
+    import cv2
+    import numpy as np
+
+    from teleop_web_lib.config import VISION_PACKAGE_DIR
+
+    sys.path.insert(0, str(VISION_PACKAGE_DIR))
+    from vision.camera_model import CameraModel
+    from vision.color_detection import LANDMARK_HEIGHT_M
+    from vision.hsv import parse_hsv_ranges
+    from vision.zone import ZoneLocator, ZoneParams
+
+    ranges = {
+        "green": parse_hsv_ranges([45, 80, 50, 92, 255, 255]),
+        "red": parse_hsv_ranges([0, 110, 80, 8, 255, 255]),
+    }
+    camera = CameraModel(
+        width_px=640, height_px=480, hfov_rad=1.916, height_m=0.058, tilt_rad=0.125
+    )
+    locator = ZoneLocator(
+        ranges,
+        camera,
+        ZoneParams(
+            landmark_colors=["green", "red"],
+            floor_colors=[],
+            landmark_min_height_fraction=0.75,
+        ),
+    )
+    base_v = 300
+    depth_m = camera.ground_point(420, base_v)[2]
+    tall_px = round(camera.focal_px * LANDMARK_HEIGHT_M / depth_m)
+
+    def frame_with_blob(height_px):
+        frame = np.full((480, 640, 3), 255, np.uint8)
+        top_left = (400, base_v - height_px + 1)
+        bottom_right = (400 + height_px // 2, base_v)
+        cv2.rectangle(frame, top_left, bottom_right, (0, 0, 220), -1)
+        return frame
+
+    assert locator.locate(frame_with_blob(tall_px)) is not None
+    assert locator.locate(frame_with_blob(tall_px // 2)) is None

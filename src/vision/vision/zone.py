@@ -22,6 +22,7 @@ import numpy as np
 
 from vision.camera_model import CameraModel
 from vision.color_detection import (
+    LANDMARK_HEIGHT_M,
     LEFT_LANDMARK_AIM_HEIGHTS,
     REGION_FLOOR,
     RIGHT_LANDMARK_AIM_HEIGHTS,
@@ -115,6 +116,9 @@ class ZoneParams:
     # to the area (left one: to its right; right one: to its left).
     left_aim_heights: float = LEFT_LANDMARK_AIM_HEIGHTS
     right_aim_heights: float = RIGHT_LANDMARK_AIM_HEIGHTS
+    # Shortest a landmark may look, as a fraction of its height at the distance
+    # its base is seen: a cube of its colour is about half as tall. 0 = off.
+    landmark_min_height_fraction: float = 0.0
     floor_ignore_touching_bottom: bool = DEFAULT_FLOOR_IGNORE_TOUCHING_BOTTOM
     # Aim (bearing) at the paper's centre on the floor (its outline projected
     # on the floor) instead of the middle of its near edge; the distance stays
@@ -311,9 +315,12 @@ class ZoneLocator:
         """
         if marker is None:
             return None
-        if self._camera.ground_point(marker.u, marker.v) is None:
+        point = self._camera.ground_point(marker.u, marker.v)
+        if point is None:
             return None
-        return marker
+        expected_px = self._camera.focal_px * LANDMARK_HEIGHT_M / point[2]
+        minimum_px = self.params.landmark_min_height_fraction * expected_px
+        return marker if marker.bbox[3] >= minimum_px else None
 
     def _find_floor(self, bgr: np.ndarray) -> Region | None:
         """

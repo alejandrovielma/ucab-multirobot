@@ -37,6 +37,7 @@ from teleop_web_lib.config import (
     SECTION_LINE_SENSOR,
     SECTION_MOTORS,
     SECTION_OVERHEAD,
+    SECTION_OVERHEAD_2,
     SECTION_SERVER,
     AutoConfig,
     load_config,
@@ -72,6 +73,23 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--port", type=int)
     return parser.parse_args()
+
+
+def build_overhead(section: dict | None) -> OverheadCamera | None:
+    """
+    The overhead camera of a config section, or None when it has no URL.
+    """
+    section = section or {}
+    if not section.get("url"):
+        return None
+    return OverheadCamera(
+        section["url"],
+        section.get("width_px", 640),
+        section.get("jpeg_quality", 60),
+        section.get("fps", 15.0),
+        section.get("arena_px"),
+        section.get("zone_columns"),
+    )
 
 
 def main() -> None:
@@ -111,20 +129,15 @@ def main() -> None:
 
     host = args.host or server_cfg["host"]
     port = args.port or server_cfg["port"]
-    overhead_cfg = cfg.get(SECTION_OVERHEAD) or {}
-    overhead = (
-        OverheadCamera(
-            overhead_cfg["url"],
-            overhead_cfg.get("width_px", 640),
-            overhead_cfg.get("jpeg_quality", 60),
-            overhead_cfg.get("fps", 15.0),
-            overhead_cfg.get("arena_px"),
-        )
-        if overhead_cfg.get("url")
-        else None
-    )
+    overhead = build_overhead(cfg.get(SECTION_OVERHEAD))
+    overhead_2 = build_overhead(cfg.get(SECTION_OVERHEAD_2))
     handler = make_handler(
-        drive, camera, motors_label, read_page(), overhead=overhead
+        drive,
+        camera,
+        motors_label,
+        read_page(),
+        overhead=overhead,
+        overhead_2=overhead_2,
     )
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
@@ -138,8 +151,9 @@ def main() -> None:
         log.info("stopping and closing")
         server.server_close()
         camera.close()
-        if overhead is not None:
-            overhead.close()
+        for view in (overhead, overhead_2):
+            if view is not None:
+                view.close()
         drive.close()
         if line is not None:
             line.close()

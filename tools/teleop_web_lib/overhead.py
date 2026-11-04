@@ -87,6 +87,7 @@ class OverheadCamera:
         jpeg_quality: int = DEFAULT_QUALITY,
         fps: float = DEFAULT_FPS,
         arena_px=None,
+        zone_columns=None,
     ):
         """
         Start the reader thread. Frames are shrunk to `width_px` and sent at
@@ -95,6 +96,7 @@ class OverheadCamera:
         """
         self._url = url
         self._arena_px = arena_px
+        self._zone_columns = zone_columns
         self._width_px = width_px
         self._quality = jpeg_quality
         self._period_s = 1.0 / fps
@@ -190,10 +192,17 @@ class OverheadCamera:
                 (self._width_px, round(height * self._width_px / width)),
                 interpolation=cv2.INTER_AREA,
             )
-        from teleop_web_lib.overhead_pose import annotate, locate
+        from teleop_web_lib.overhead_pose import (
+            DEFAULT_ARENA_PX,
+            DEFAULT_ZONE_COLUMNS,
+            annotate,
+            locate,
+        )
 
-        self.pose = (
-            locate(frame, self._arena_px) if self._arena_px else locate(frame)
+        self.pose = locate(
+            frame,
+            self._arena_px or DEFAULT_ARENA_PX,
+            self._zone_columns or DEFAULT_ZONE_COLUMNS,
         )
         frame = annotate(frame, self.pose)
         ok, buffer = cv2.imencode(

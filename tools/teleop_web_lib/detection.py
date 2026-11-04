@@ -36,6 +36,11 @@ BORDER_SECTION = "border"
 SUPPORT_SECTION = "support"
 # Key of the camera section with extra HSV ranges for the area paper.
 AREA_HSV_KEY = "area_hsv"
+# Key of the camera section with the colours of the cubes to avoid.
+AVOID_COLORS_KEY = "avoid_colors"
+# Metres a cube counts as farther per radian it is off to a side: a cube ahead
+# beats a slightly nearer one that takes a turn to face.
+TURN_COST_M_PER_RAD = 0.15
 
 
 class DetectionPipeline:
@@ -55,43 +60,65 @@ class DetectionPipeline:
         """
         Keep the cube detector, the area locator (vision/zone.py) and the
         border filter settings (off when not given). `cube_ranges` are the
-        colours the target can be switched to.
+        colours the mission can choose from.
         """
         self._detector = detector
         self._cube_ranges = cube_ranges or dict(detector.ranges)
+        self._targets = list(detector.ranges)
+        self._avoid = []
+        # What the capture thread detects: swapped whole and only applied
+        # there, because the detector looks colours up while it runs.
+        self._mission = (dict(detector.ranges), frozenset())
         self._zone_locator = zone_locator
         self._border = border or BorderParams()
         self._support = support or SupportParams()
         self._lock = threading.Lock()
         self._det = None
         self._det_stamp_s = 0.0
+        self._foreign = None
+        self._foreign_stamp_s = 0.0
         self._zone = None
         self._zone_stamp_s = 0.0
 
     @property
     def cube_colors(self) -> list[str]:
         """
-        Colours the target can be switched to.
+        Colours the mission can choose from.
         """
         return list(self._cube_ranges)
 
     @property
     def target_colors(self) -> list[str]:
         """
-        Colours of the cubes the detector reports.
+        Colours of the cubes to catch and deliver.
         """
-        return list(self._detector.ranges)
+        return list(self._targets)
 
-    def set_target_colors(self, colors: list[str]) -> None:
+    @property
+    def avoid_colors(self) -> list[str]:
         """
-        Report only the cubes of these colours from the next frame on.
+        Colours of the cubes to drive around.
         """
-        unknown = [c for c in colors if c not in self._cube_ranges]
-        if unknown or not colors:
-            raise ValueError(f"unknown target colours: {unknown or colors}")
-        self._detector.ranges = {c: self._cube_ranges[c] for c in colors}
+        return list(self._avoid)
+
+    def set_mission(self, targets: list[str], avoid: list[str]) -> None:
+        """
+        From the next frame on, go for `targets`, drive around `avoid` and do
+        not look for any other colour. ValueError (nothing changes) without a
+        target, with an unknown colour or with one in both lists.
+        """
+        wanted = [*targets, *avoid]
+        unknown = [c for c in wanted if c not in self._cube_ranges]
+        if unknown or not targets or set(targets) & set(avoid):
+            raise ValueError(f"bad mission: {targets} / avoid {avoid}")
+        self._targets, self._avoid = list(targets), list(avoid)
+        self._mission = (
+            {c: self._cube_ranges[c] for c in wanted},
+            frozenset(avoid),
+        )
         with self._lock:
             self._det = None
+            self._foreign = None
 
     def latest_detection(self, now: float, timeout_s: float):
         """
@@ -101,6 +128,14 @@ class DetectionPipeline:
             if self._det is not None and (now - self._det_stamp_s) <= timeout_s:
                 return self._det
             return None
+
+    def latest_foreign(self, now: float, timeout_s: float):
+        """
+        The nearest cube to avoid seen less than `timeout_s` ago, or None.
+        """
+        with self._lock:
+            fresh = (now - self._foreign_stamp_s) <= timeout_s
+            return self._foreign if fresh else None
 
     def latest_zone(self, now: float, timeout_s: float):
         """
@@ -122,6 +157,8 @@ class DetectionPipeline:
         from vision.drawing import draw_detections, draw_region
         from vision.zone import without_cubes_in_zone
 
+        ranges, avoid = self._mission
+        self._detector.ranges = ranges
         zone = self._zone_locator.locate(frame)
         zone_params = self._zone_locator.params
         detections = without_cubes_in_zone(
@@ -133,15 +170,15 @@ class DetectionPipeline:
         )
         detections = without_cubes_near_border(frame, detections, self._border)
         detections = without_cubes_off_table(frame, detections, self._support)
-        best = detections[0] if detections else None
-        self._remember(best, zone)
+        best, foreign = split_cubes(detections, avoid)
+        self._remember(best, foreign, zone)
 
         annotated = draw_detections(frame, detections, best)
         if zone is not None:
             draw_region(annotated, zone)
         return annotated
 
-    def _remember(self, best, zone) -> None:
+    def _remember(self, best, foreign, zone) -> None:
         """
         Store the latest detections with the time they were seen.
         """
@@ -150,9 +187,27 @@ class DetectionPipeline:
             self._det = best
             if best is not None:
                 self._det_stamp_s = now
+            self._foreign = foreign
+            if foreign is not None:
+                self._foreign_stamp_s = now
             self._zone = zone
             if zone is not None:
                 self._zone_stamp_s = now
+
+
+def split_cubes(detections: list, avoid_colors: frozenset[str]):
+    """
+    The easiest cube to go for and the nearest cube to avoid, from detections
+    sorted nearest first; None where there is none.
+    """
+    ours = [d for d in detections if d.color not in avoid_colors]
+    foreign = [d for d in detections if d.color in avoid_colors]
+    best = min(
+        ours,
+        key=lambda d: d.distance_m + TURN_COST_M_PER_RAD * abs(d.bearing_rad),
+        default=None,
+    )
+    return best, (foreign[0] if foreign else None)
 
 
 def build_pipeline(
@@ -221,10 +276,15 @@ def _build_pipeline(
     zone_params = ZoneParams(
         **{**hsv_cfg.get(ZONE_SECTION, {}), **camera_cfg.get(ZONE_SECTION, {})}
     )
-    return DetectionPipeline(
+    pipeline = DetectionPipeline(
         detector,
         ZoneLocator(ranges, camera_model, zone_params),
         BorderParams(**camera_cfg.get(BORDER_SECTION, {})),
         SupportParams(**camera_cfg.get(SUPPORT_SECTION, {})),
         cube_ranges,
     )
+    pipeline.set_mission(
+        [c for c in colors if c in cube_ranges],
+        camera_cfg.get(AVOID_COLORS_KEY) or [],
+    )
+    return pipeline

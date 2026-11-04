@@ -68,6 +68,9 @@ camera:
     height_m: 0.058
     tilt_rad: 0.125
   target_colors: [blue]
+  # Mission: targets are caught and delivered, these are driven around (auto.foreign_*), any
+  # other colour is not looked for at all. The page can change all of it while running.
+  avoid_colors: [yellow]
   # The delivery area (blue + green paper between the green and red landmarks)
   # is located with the `zone` section of src/vision/config/hsv_ranges.yaml,
   # shared with the ROS cube_detector. Overrides for this tool go here.
@@ -105,6 +108,10 @@ camera:
     # The area is the sheet plus the strip where it starts (the robot enters across it). The claw
     # robot's blue/green parts were taken for the old blue/green paper (distances of 187 cm and
     # more), so those colours stay out; these ranges exclude it (it is dark).
+    # Any upright red or green blob passed for a landmark: 63 % of the "gates" were closer than
+    # 30 cm, 17 % at the very edge of the image, and the robot turned from one to the next (trace of
+    # 2026-11-04). A landmark must look at least this tall for where its base is. PROVISIONAL.
+    landmark_min_height_fraction: 0.75
     floor_colors: [area_teal, area_lime]
     # Aim at the paper's centre on the floor (its outline projected), not the middle of its near
     # edge: the robot slides sideways until that centre is straight ahead before pushing.
@@ -234,7 +241,9 @@ auto:
   roam_forward_speed: 0.35
   # Lowered from 0.38 / 0.32, then 0.34 / 0.28 (operator: the spin was too fast). TODO check
   # the wheels still turn the robot at 0.25.
-  turn_speed: 0.32
+  # 0.32 turned at ~3 rad/s and, with ~0.15 s from frame to motors, overshot by 0.4-0.5 rad: the
+  # robot swung from side to side in front of each cube (trace of 2026-11-04).
+  turn_speed: 0.26
   search_turn_speed: 0.25
   align_tolerance_rad: 0.22
   lost_timeout_s: 0.6
@@ -301,7 +310,8 @@ auto:
   line_cube_ban_s: 8.0
   # Once turning to align, keep turning until the bearing error is below this
   # fraction of the tolerance (no flipping between turning and driving).
-  align_exit_fraction: 0.5
+  # 1.0 (was 0.5): stop turning on entering the tolerance; what it overshoots ends up inside it.
+  align_exit_fraction: 1.0
   # Delivery needs the robot to face the area squarely: legos stand at both
   # sides of it and a crooked push knocks them down. TODO measure
   drop_align_tolerance_rad: 0.12
@@ -363,7 +373,7 @@ auto:
   # it: 0.31 on 0.67 s pushes, 0.21 and 0.12 on the short delivery pushes (11.2026).
   forward_speed_mps: 0.15
   cube_ahead_m: 0.055
-  entry_square_tolerance_rad: 0.10
+  entry_square_tolerance_rad: 0.20
   # With the paper's near edge this close (m) the scoop hides the pink line: deliver without
   # squaring. Re-catching a cube left at the paper's edge put the robot at 8-14 cm, where it
   # waited "CARRY (no entry line)" for good (11.2026); backing up would leave the cube behind.
@@ -392,6 +402,13 @@ auto:
   # Stop roaming toward the area / legos this close (m). 0.84 turned the robot away from almost
   # anywhere in the 1.17 m arena; 0.35 leaves a robot length before the pink line.
   gate_avoid_distance_m: 0.35
+  carry_zone_hold_s: 0.3
+  # Cubes of camera.avoid_colors: slide around one closer than foreign_avoid_distance_m (m) that
+  # is within foreign_clearance_m (m) of the straight path (half the 186 mm chassis + a cube +
+  # margin), until it is foreign_exit_margin_m (m) farther out. TODO measure
+  foreign_avoid_distance_m: 0.30
+  foreign_clearance_m: 0.12
+  foreign_exit_margin_m: 0.03
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:
@@ -413,7 +430,17 @@ overhead:
   fps: 15
   # Inner corners of the arena in the 640 px wide frame (top-left, top-right, bottom-right,
   # bottom-left). Measure them again whenever the phone moves: the robot is the dark blob inside it.
-  arena_px: [[170, 54], [526, 56], [604, 258], [114, 260]]  # 2026-11-04: measured on the full track view
+  arena_px: [[122, 54], [531, 56], [636, 264], [636, 279], [8, 279]]  # 2026-11-04: right corner out of view
+
+# Second phone, opposite side of the track: same settings. Its view cuts the track's bottom-left
+# corner, and the area falls on the right of the frame.
+overhead_2:
+  url: http://10.76.16.26:4747/video
+  width_px: 640
+  jpeg_quality: 60
+  fps: 15
+  arena_px: [[108, 106], [514, 108], [590, 350], [0, 350], [0, 303]]  # 2026-11-04
+  zone_columns: [0.75, 1.0]
 
 server:
   host: 0.0.0.0
