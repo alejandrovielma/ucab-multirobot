@@ -5,6 +5,8 @@ tool (run with: pytest tools).
 
 import time
 
+import pytest
+
 from teleop_web_lib.autopilot import STATE_MANUAL, STATE_PAUSED
 from teleop_web_lib.drive import Drive
 from teleop_web_lib.kinematics import mecanum_wheel_ratios
@@ -237,3 +239,13 @@ def test_overhead_pose_lists_cubes_with_their_colours():
     frame[190:198, 430:438] = (200, 60, 20)  # blue part on the robot: ignored
     cubes = sorted((c, round(x), round(y)) for c, x, y in locate(frame).cubes)
     assert cubes == [("blue", 304, 204), ("yellow", 404, 254)]
+
+
+@pytest.mark.parametrize(
+    "power,start,expected",
+    [(10.0, 20.0, 20.0), (-10.0, 20.0, -20.0), (50.0, 20.0, 50.0), (1.0, 20.0, 0.0), (10.0, 0.0, 10.0)],
+)
+def test_with_start_power(power, start, expected):
+    from teleop_web_lib.motors import with_start_power
+
+    assert with_start_power(power, start) == expected

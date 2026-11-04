@@ -28,6 +28,9 @@ motors:
   rl_inverted: false
   rr_inverted: true
   pwm_frequency_hz: 200
+  # Fusion HAT+ only: the TT motors do not turn below ~20 % power (lab 2026-10-27: moved at 21-28 %,
+  # did not at 10-17 %). Smaller commands are raised to this; 0 = off. PROVISIONAL: measure.
+  start_power_pct: 20
   # Duty cycle cap (0–1). Start low and raise it with the wheels off the ground.
   max_duty_ratio: 0.9
   # If no command arrives within this time, the motors brake.
@@ -404,13 +407,13 @@ detection:
 # Overhead view in the page: the phone's DroidCam MJPEG stream (its IP changes: check the DroidCam app).
 # DroidCam serves ONE client: close the DroidCam client on the PC. null = no overhead view.
 overhead:
-  url: http://10.76.16.16:4747/video
+  url: http://10.76.16.29:4747/video
   width_px: 640
   jpeg_quality: 60
   fps: 15
   # Inner corners of the arena in the 640 px wide frame (top-left, top-right, bottom-right,
   # bottom-left). Measure them again whenever the phone moves: the robot is the dark blob inside it.
-  arena_px: [[160, 58], [548, 72], [636, 282], [72, 258]]
+  arena_px: [[170, 54], [526, 56], [604, 258], [114, 260]]  # 2026-11-04: measured on the full track view
 
 server:
   host: 0.0.0.0

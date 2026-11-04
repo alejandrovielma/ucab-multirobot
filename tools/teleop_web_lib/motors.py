@@ -8,6 +8,7 @@ they only exist on the Pi.
 """
 
 import logging
+import math
 from pathlib import Path
 
 from teleop_web_lib.kinematics import WHEELS, clamp
@@ -35,6 +36,8 @@ FAKE_LOG_DECIMALS = 2
 # PWM channel pair (a, b) of each motor port.
 FUSION_PORTS = {(11, 10): "M0", (9, 8): "M1", (6, 7): "M2", (4, 5): "M3"}
 FUSION_MAX_POWER = 100
+# Below this many percent the command is noise, not a move.
+FUSION_DEADZONE_PCT = 2.0
 
 
 class FakeMotors:
@@ -118,6 +121,22 @@ class HatMotors:
             pin.close()
 
 
+def with_start_power(
+    power: float, start_power: float, deadzone: float = FUSION_DEADZONE_PCT
+) -> float:
+    """
+    The power (percent) raised to start_power when it is too weak to turn the
+    wheel (TT motors do not turn below ~20 %), keeping its sign.
+
+    start_power 0 = off; a power under the dead zone is noise and becomes 0.
+    """
+    if not start_power:
+        return power
+    if abs(power) < deadzone:
+        return 0.0
+    return math.copysign(max(abs(power), start_power), power)
+
+
 class FusionHatMotors:
     """
     4 motors on the SunFounder Fusion HAT+, driven through the `fusion_hat`
@@ -139,6 +158,7 @@ class FusionHatMotors:
             motor = Motor(FUSION_PORTS[tuple(cfg["fusion_channels"][wheel])])
             motor.set_is_reverse(bool(cfg[f"{wheel}_inverted"]))
             self._motors[wheel] = motor
+        self._start_power = float(cfg.get("start_power_pct", 0.0))
         self._last = dict.fromkeys(WHEELS)
         self.set(dict.fromkeys(WHEELS, 0.0))
 
@@ -151,7 +171,7 @@ class FusionHatMotors:
             if value == self._last[wheel]:
                 continue
             self._last[wheel] = value
-            motor.power(value * FUSION_MAX_POWER)
+            motor.power(with_start_power(value * FUSION_MAX_POWER, self._start_power))
 
     def close(self) -> None:
         """
