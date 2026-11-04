@@ -63,6 +63,33 @@ class Camera:
             None if pipeline is None else pipeline.latest_zone(now, timeout_s)
         )
 
+    # ---------- target colour (the page's selector) ----------
+    @property
+    def cube_colors(self) -> list[str]:
+        """
+        Colours the page can pick as the target; empty without detection.
+        """
+        pipeline = self._pipeline
+        return [] if pipeline is None else pipeline.cube_colors
+
+    @property
+    def target_colors(self) -> list[str]:
+        """
+        Colours of the cubes being searched for.
+        """
+        pipeline = self._pipeline
+        return [] if pipeline is None else pipeline.target_colors
+
+    def set_target_colors(self, colors: list[str]) -> None:
+        """
+        Search for cubes of these colours (ValueError if one is unknown or
+        there is no detection).
+        """
+        pipeline = self._pipeline
+        if pipeline is None:
+            raise ValueError("no colour detector")
+        pipeline.set_target_colors(colors)
+
     # ---------- what the web server asks ----------
     def wait_frame(
         self,

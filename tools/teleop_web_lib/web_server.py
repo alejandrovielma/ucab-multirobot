@@ -140,6 +140,8 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         status = {
             "motors": self.motors_label,
             "camera": self.camera.ok,
+            "colors": self.camera.cube_colors,
+            "target_colors": self.camera.target_colors,
             **self.drive.status(),
         }
         self._send(HTTPStatus.OK, json.dumps(status).encode(), CONTENT_JSON)
@@ -173,6 +175,8 @@ class ControlRequestHandler(BaseHTTPRequestHandler):
         """
         Forward the Auto switch and the manual command to the drive.
         """
+        if "target_color" in data:
+            self.camera.set_target_colors([str(data["target_color"])])
         if "auto" in data or "reset_auto" in data:
             self.drive.set_auto(
                 data.get("auto"),

@@ -54,6 +54,7 @@
   </div>
   <label>Speed <input id="spd" type="range" min="10" max="100" value="50">
     <span id="spdv">50</span>%</label>
+  <label>Color <select id="colorSel"></select></label>
   <button id="autoBtn" class="btn">Auto (P): OFF</button>
   <button id="nextBtn" class="btn">Reset (R)</button>
 </div>
@@ -179,6 +180,19 @@ function tune(raw) {
   tuneInfo.textContent = `DO=${raw} · ${changing ? "CHANGING" : "stable"} · flips ${flips}` +
     ` · last flip ${ago === null ? "never" : ago.toFixed(1) + " s ago"} · dark ${dark}% of last samples`;
 }
+// Target colour picked in the page; sent once with the next command.
+let colorCmd = null;
+const colorSel = document.getElementById("colorSel");
+colorSel.addEventListener("change", () => { colorCmd = colorSel.value; });
+function syncColors(colors, targets) {
+  if (colors && colors.join() !== Array.from(colorSel.options, o => o.value).join()) {
+    colorSel.replaceChildren(...colors.map(c => new Option(c, c)));
+  }
+  // Follow the robot's target unless the user is choosing or a pick is on its way.
+  if (document.activeElement !== colorSel && colorCmd === null && targets && targets.length) {
+    colorSel.value = targets[0];
+  }
+}
 async function tick() {
   // What the keys ask for on the robot:
   // W/S forward/back (vy), A/D strafe left/right (vx), Q/E spin CCW/CW (wz).
@@ -190,9 +204,11 @@ async function tick() {
   const payload = { vx, vy, wz, speed };
   if (autoCmd !== null) { payload.auto = autoCmd; autoCmd = null; }
   if (resetCmd) { payload.reset_auto = true; resetCmd = false; }
+  if (colorCmd !== null) { payload.target_color = colorCmd; colorCmd = null; }
   try {
     const r = await fetch("/cmd", { method: "POST", body: JSON.stringify(payload) });
     const s = await r.json();
+    syncColors(s.colors, s.target_colors);
     autoBtn.classList.toggle("on", !!s.auto);
     autoBtn.textContent = `Auto (P): ${s.auto ? "ON" : "OFF"}`;
     tune(s.line_raw);

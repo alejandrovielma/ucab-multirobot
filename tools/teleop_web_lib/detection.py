@@ -50,12 +50,15 @@ class DetectionPipeline:
         zone_locator,
         border: BorderParams | None = None,
         support: SupportParams | None = None,
+        cube_ranges: dict | None = None,
     ):
         """
         Keep the cube detector, the area locator (vision/zone.py) and the
-        border filter settings (off when not given).
+        border filter settings (off when not given). `cube_ranges` are the
+        colours the target can be switched to.
         """
         self._detector = detector
+        self._cube_ranges = cube_ranges or dict(detector.ranges)
         self._zone_locator = zone_locator
         self._border = border or BorderParams()
         self._support = support or SupportParams()
@@ -64,6 +67,31 @@ class DetectionPipeline:
         self._det_stamp_s = 0.0
         self._zone = None
         self._zone_stamp_s = 0.0
+
+    @property
+    def cube_colors(self) -> list[str]:
+        """
+        Colours the target can be switched to.
+        """
+        return list(self._cube_ranges)
+
+    @property
+    def target_colors(self) -> list[str]:
+        """
+        Colours of the cubes the detector reports.
+        """
+        return list(self._detector.ranges)
+
+    def set_target_colors(self, colors: list[str]) -> None:
+        """
+        Report only the cubes of these colours from the next frame on.
+        """
+        unknown = [c for c in colors if c not in self._cube_ranges]
+        if unknown or not colors:
+            raise ValueError(f"unknown target colours: {unknown or colors}")
+        self._detector.ranges = {c: self._cube_ranges[c] for c in colors}
+        with self._lock:
+            self._det = None
 
     def latest_detection(self, now: float, timeout_s: float):
         """
@@ -182,6 +210,7 @@ def _build_pipeline(
         cube_size_m=hsv_cfg["filter"]["cube_size_m"],
         **{**DEFAULT_DETECTION_FILTER, **detection_overrides},
     )
+    cube_ranges = {c: ranges[c] for c in hsv_cfg["hsv"]}
     detector = ColorDetector(
         {c: ranges[c] for c in colors if c in ranges},
         camera_model,
@@ -197,4 +226,5 @@ def _build_pipeline(
         ZoneLocator(ranges, camera_model, zone_params),
         BorderParams(**camera_cfg.get(BORDER_SECTION, {})),
         SupportParams(**camera_cfg.get(SUPPORT_SECTION, {})),
+        cube_ranges,
     )

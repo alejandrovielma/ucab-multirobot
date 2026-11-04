@@ -249,3 +249,20 @@ def test_with_start_power(power, start, expected):
     from teleop_web_lib.motors import with_start_power
 
     assert with_start_power(power, start) == expected
+
+
+def test_pipeline_switches_target_colour():
+    from types import SimpleNamespace
+
+    from teleop_web_lib.detection import DetectionPipeline
+
+    detector = SimpleNamespace(ranges={"blue": 1})
+    pipeline = DetectionPipeline(
+        detector, None, cube_ranges={"blue": 1, "yellow": 2, "red": 3}
+    )
+    assert pipeline.cube_colors == ["blue", "yellow", "red"]
+    pipeline.set_target_colors(["yellow"])
+    assert pipeline.target_colors == ["yellow"]
+    with pytest.raises(ValueError):
+        pipeline.set_target_colors(["pink"])
+    assert pipeline.target_colors == ["yellow"]
