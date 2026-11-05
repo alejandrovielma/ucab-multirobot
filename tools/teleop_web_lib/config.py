@@ -157,6 +157,17 @@ DEFAULT_ENTRY_HIDDEN_DISTANCE_M = 0.15
 DEFAULT_DELIVER_EDGE_TIMEOUT_S = 0.3
 DEFAULT_DELIVER_PUSH_MAX_S = 3.0
 DEFAULT_DELIVER_SPEED_MIN_S = 0.3
+# Fleet: ask for the delivery turn this far from the area (m), and without it
+# wait this far away (m), clear of the entry and of the arm. Same values as
+# zone_request_margin_m / zone_wait_margin_m of collector.yaml. TODO measure
+DEFAULT_ZONE_REQUEST_DISTANCE_M = 0.45
+DEFAULT_ZONE_WAIT_DISTANCE_M = 0.30
+
+# --- Fleet link defaults (real values: tools/teleop_web.yaml, section fleet) --
+DEFAULT_FLEET_NAMESPACE = "ferb"
+# A zone/granted older than this counts as not granted.
+DEFAULT_GRANTED_TIMEOUT_S = 2.0
+DEFAULT_REPUBLISH_PERIOD_S = 1.0
 
 # --- Vision filter used by this tool (section `detection` overrides) ----------
 # Looser than the ROS cube_detector because this tool's camera is not
@@ -175,6 +186,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VISION_PACKAGE_DIR = REPO_ROOT / "src" / "vision"
 HSV_CONFIG_PATH = VISION_PACKAGE_DIR / "config" / "hsv_ranges.yaml"
 HSV_NODE_NAME = "cube_detector"
+# Topic names of the fleet bridge come from the mobile_base package, the same
+# way.
+MOBILE_BASE_PACKAGE_DIR = REPO_ROOT / "src" / "mobile_base"
 
 # Key of the parameters of a node inside a ROS parameter file.
 ROS_PARAMS_KEY = "ros__parameters"
@@ -188,6 +202,7 @@ SECTION_AUTO = "auto"
 SECTION_DETECTION = "detection"
 SECTION_OVERHEAD = "overhead"
 SECTION_OVERHEAD_2 = "overhead_2"
+SECTION_FLEET = "fleet"
 
 
 @dataclass(frozen=True)
@@ -264,6 +279,8 @@ class AutoConfig:
     deliver_edge_timeout_s: float = DEFAULT_DELIVER_EDGE_TIMEOUT_S
     deliver_push_max_s: float = DEFAULT_DELIVER_PUSH_MAX_S
     deliver_speed_min_s: float = DEFAULT_DELIVER_SPEED_MIN_S
+    zone_request_distance_m: float = DEFAULT_ZONE_REQUEST_DISTANCE_M
+    zone_wait_distance_m: float = DEFAULT_ZONE_WAIT_DISTANCE_M
 
     @classmethod
     def from_dict(cls, values: dict | None) -> "AutoConfig":
@@ -272,18 +289,46 @@ class AutoConfig:
 
         Missing keys keep their default; unknown keys raise ValueError.
         """
-        values = values or {}
-        defaults = cls()
-        known = {field.name for field in fields(cls)}
-        unknown = sorted(set(values) - known)
-        if unknown:
-            raise ValueError(f"unknown settings in section auto: {unknown}")
-        return cls(
-            **{
-                name: _coerce_like(getattr(defaults, name), value)
-                for name, value in values.items()
-            }
-        )
+        return _from_dict(cls, values, SECTION_AUTO)
+
+
+@dataclass(frozen=True)
+class FleetConfig:
+    """
+    Settings of the link to the fleet; field names are the YAML keys.
+    """
+
+    enabled: bool = False
+    namespace: str = DEFAULT_FLEET_NAMESPACE
+    granted_timeout_s: float = DEFAULT_GRANTED_TIMEOUT_S
+    republish_period_s: float = DEFAULT_REPUBLISH_PERIOD_S
+
+    @classmethod
+    def from_dict(cls, values: dict | None) -> "FleetConfig":
+        """
+        Build the settings from the YAML `fleet` section.
+
+        Missing keys keep their default; unknown keys raise ValueError.
+        """
+        return _from_dict(cls, values, SECTION_FLEET)
+
+
+def _from_dict(cls, values: dict | None, section: str):
+    """
+    Build the settings dataclass `cls` from a YAML section.
+    """
+    values = values or {}
+    defaults = cls()
+    known = {field.name for field in fields(cls)}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        raise ValueError(f"unknown settings in section {section}: {unknown}")
+    return cls(
+        **{
+            name: _coerce_like(getattr(defaults, name), value)
+            for name, value in values.items()
+        }
+    )
 
 
 def _coerce_like(default, value):

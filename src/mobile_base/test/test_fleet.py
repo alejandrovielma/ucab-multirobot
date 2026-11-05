@@ -3,7 +3,13 @@ Tests for the pure-logic fleet module: state mapping, heartbeat and zone
 client.
 """
 
-from mobile_base.fleet import Heartbeat, ZoneClient, to_fleet_state
+from mobile_base.fleet import (
+    Heartbeat,
+    ZoneClient,
+    call_expired,
+    to_fleet_state,
+    want_expired,
+)
 from mobile_base.states import FleetState, State
 
 
@@ -61,3 +67,53 @@ def test_zone_client_request_renew_release():
     assert color == "blue"
     zc.update(occupant="")
     assert not zc.should_release()
+
+
+def test_zone_client_does_not_request_while_perry_gate_is_closed():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, gate_closed=True)
+    assert not zc.should_request(0.0)
+    zc.update(gate_closed=False)
+    assert zc.should_request(0.1)
+
+
+def test_zone_client_keeps_renewing_a_held_turn_when_gate_closes():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, occupant="ferb")
+    zc.note_requested(0.0)
+    zc.update(gate_closed=True)
+    assert zc.holds and zc.should_request(20.0)
+
+
+def test_a_zone_call_without_answer_expires():
+    assert not call_expired(None, 100.0, 3.0)  # nothing in flight
+    assert not call_expired(10.0, 12.9, 3.0)
+    assert call_expired(10.0, 13.0, 3.0)
+
+
+def test_a_wish_nobody_repeats_expires_only_when_enabled():
+    assert not want_expired(True, 10.0, 100.0, 0.0)  # off (behavior_fsm)
+    assert not want_expired(False, 10.0, 100.0, 3.0)  # nothing to drop
+    assert not want_expired(True, None, 100.0, 3.0)  # never heard
+    assert not want_expired(True, 10.0, 12.9, 3.0)
+    assert want_expired(True, 10.0, 13.0, 3.0)
+
+
+def test_a_held_turn_is_released_once_the_wish_expires():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, occupant="ferb")
+    zc.update(want=False)  # what fleet_link does when the wish expires
+    assert zc.should_release()
+    assert not zc.should_request(100.0)
+
+
+def test_a_release_without_answer_is_sent_again_with_the_delivery():
+    zc = ZoneClient(robot="ferb", renew_period_s=20.0)
+    zc.update(want=True, occupant="ferb")
+    zc.mark_delivered("yellow")
+    zc.update(want=False)
+    sent = zc.pop_release()
+    assert sent == (True, "yellow")
+    zc.restore_release(*sent)  # the arbiter never answered
+    assert zc.should_release()
+    assert zc.pop_release() == (True, "yellow")

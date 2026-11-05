@@ -340,3 +340,46 @@ def test_a_cube_sized_blob_does_not_pass_for_a_landmark():
 
     assert locator.locate(frame_with_blob(tall_px)) is not None
     assert locator.locate(frame_with_blob(tall_px // 2)) is None
+
+
+def test_a_failing_iteration_brakes_and_the_thread_survives(monkeypatch):
+    import teleop_web_lib.drive as drive_module
+
+    monkeypatch.setattr(drive_module, "FAILURE_PAUSE_S", 0.01)
+    motors = RecordingMotors()
+    drive = Drive(motors, max_duty_ratio=0.5, cmd_timeout_s=10.0)
+    drive.command(1, 0, 0, 1)
+    time.sleep(0.05)
+    assert motors.last["fl"] == 0.5
+
+    def boom(now):
+        raise RuntimeError("boom")
+
+    drive._next_command = boom
+    time.sleep(0.1)
+    assert motors.last == STOPPED
+    assert drive._thread.is_alive()
+    drive.close()
+
+
+def test_fleet_bridge_close_never_raises():
+    import types
+
+    from teleop_web_lib import fleet as fleet_module
+
+    class Broken:
+        def destroy_node(self):
+            raise RuntimeError("x")
+
+        def shutdown(self):
+            raise RuntimeError("y")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("z")
+
+    bridge = fleet_module.FleetBridge.__new__(fleet_module.FleetBridge)
+    bridge.update = fail
+    bridge._node = Broken()
+    bridge._rclpy = Broken()
+    bridge._thread = types.SimpleNamespace(join=lambda timeout: None)
+    bridge.close()

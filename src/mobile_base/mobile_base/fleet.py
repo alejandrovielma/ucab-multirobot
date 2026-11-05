@@ -15,6 +15,13 @@ DEFAULT_ROBOT_NAME = "ferb"
 DEFAULT_HEARTBEAT_TIMEOUT_S = 2.0
 DEFAULT_STATE_RATE_HZ = 2.0
 DEFAULT_RENEW_PERIOD_S = 20.0
+# A zone request/release with no answer after this long (s) is dropped and
+# sent again: one lost answer left Ferb waiting at the area for good.
+DEFAULT_CALL_TIMEOUT_S = 3.0
+# A zone/want true not heard again for this long (s) counts as false, so a
+# dead sender does not keep the turn. 0 = off: behavior_fsm publishes zone/want
+# only when it changes; the browser tool repeats it every second.
+DEFAULT_WANT_TIMEOUT_S = 0.0
 
 # Local behaviour state -> shared multi-robot state. Anything not listed
 # (PAUSED, MANUAL, NO_CAMERA, unknown) maps to FleetState.STOP.
@@ -50,6 +57,31 @@ class FleetLinkParams:
     heartbeat_timeout_s: float = DEFAULT_HEARTBEAT_TIMEOUT_S
     state_rate_hz: float = DEFAULT_STATE_RATE_HZ
     renew_period_s: float = DEFAULT_RENEW_PERIOD_S
+    call_timeout_s: float = DEFAULT_CALL_TIMEOUT_S
+    want_timeout_s: float = DEFAULT_WANT_TIMEOUT_S
+
+
+def call_expired(sent_s: float | None, now: float, timeout_s: float) -> bool:
+    """
+    True when a call sent at `sent_s` (None: none in flight) has waited
+    `timeout_s` or more for its answer.
+    """
+    return sent_s is not None and now - sent_s >= timeout_s
+
+
+def want_expired(
+    want: bool,
+    heard_s: float | None,
+    now: float,
+    timeout_s: float,
+) -> bool:
+    """
+    True when a wish for the zone, last heard at `heard_s`, has not been
+    repeated for `timeout_s` (0 = never expires).
+    """
+    if timeout_s <= 0 or not want or heard_s is None:
+        return False
+    return now - heard_s >= timeout_s
 
 
 class Heartbeat:
@@ -97,6 +129,8 @@ class ZoneClient:
         self.renew_period_s = renew_period_s
         self.want = False
         self.occupant = ""
+        # Perry does not want more cubes for now: do not ask for the zone.
+        self.gate_closed = False
         self.delivered = False
         self.color = ""
         self._was_wanting = False
@@ -114,12 +148,15 @@ class ZoneClient:
         self,
         want: bool | None = None,
         occupant: str | None = None,
+        gate_closed: bool | None = None,
     ) -> None:
         """
         Apply new information from the node; `None` leaves a field as is.
         """
         if occupant is not None:
             self.occupant = occupant
+        if gate_closed is not None:
+            self.gate_closed = gate_closed
         if want is not None:
             if self._was_wanting and not want and self.holds:
                 self._pending_release = True
@@ -138,6 +175,8 @@ class ZoneClient:
         True when the zone must be requested (or its lease renewed).
         """
         if not self.want:
+            return False
+        if self.gate_closed and not self.holds:
             return False
         if not self.holds or self._last_request_s is None:
             return True
@@ -167,3 +206,11 @@ class ZoneClient:
         self.delivered = False
         self.color = ""
         return delivered, color
+
+    def restore_release(self, delivered: bool, color: str) -> None:
+        """
+        A release got no answer: send it again, with the same delivery.
+        """
+        self._pending_release = True
+        if delivered:
+            self.mark_delivered(color)

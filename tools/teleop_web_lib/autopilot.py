@@ -28,6 +28,9 @@ from teleop_web_lib.kinematics import clamp
 
 log = logging.getLogger("teleop_web")
 
+# Seconds between two logs of a failing fleet link.
+FLEET_LOG_PERIOD_S = 5.0
+
 # --- Machine states -----------------------------------------------------------
 STATE_PAUSED = "PAUSED"
 STATE_MANUAL = "MANUAL"
@@ -68,11 +71,14 @@ STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
 STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
 STATE_CARRY_SWEEP = f"{STATE_CARRY} (sweep)"
 STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no entry line)"
+# Stopped short of the area until the fleet grants the delivery turn.
+STATE_CARRY_WAIT_ZONE = f"{STATE_CARRY} (wait zone)"
 # Squaring up at the paper: committed to delivering from there.
 COMMITTED_CARRY_STATES = (
     STATE_CARRY_SQUARE,
     STATE_CARRY_CENTER,
     STATE_CARRY_NO_ENTRY,
+    STATE_CARRY_WAIT_ZONE,
 )
 
 # --- Direction helpers --------------------------------------------------------
@@ -128,6 +134,27 @@ class Vision(Protocol):
         """
 
 
+class Fleet(Protocol):
+    """
+    What the autopilot needs from the fleet link (teleop_web_lib/fleet.py).
+    """
+
+    def update(self, state: str, want: bool, carrying: bool) -> None:
+        """
+        Tell the fleet our state and whether we want the delivery turn.
+        """
+
+    def granted(self) -> bool:
+        """
+        True while we hold the delivery turn.
+        """
+
+    def delivered(self, color: str) -> None:
+        """
+        A cube of `color` was left in the area.
+        """
+
+
 def _forward(speed: float) -> DriveCommand:
     """
     Drive straight ahead.
@@ -176,6 +203,20 @@ class AutoPilot:
         """
         self.cfg = cfg
         self.vision = vision
+        # Link to the other robots; None = alone on the track (no turns).
+        self.fleet: Fleet | None = None
+        # The fleet last heard that we want the turn: released when Auto
+        # stops, since `step` no longer runs to say otherwise.
+        self._fleet_wants = False
+        # Last fleet call failed / when its failure was last logged.
+        self._fleet_failing = False
+        self._fleet_log_s = -math.inf
+        # Colour of the last cube chased, reported when it is delivered.
+        self._cube_color = ""
+        # Colour of a counted delivery not yet reported to the fleet.
+        self._unreported_color: str | None = None
+        # The area is close enough to ask for the turn (set while carrying).
+        self._near_zone = False
         self.enabled = cfg.enabled
         self.state = STATE_PAUSED
         self.target_info: str | None = None
@@ -253,23 +294,83 @@ class AutoPilot:
                 self.carrying = False
         if not self.enabled:
             self.state = STATE_PAUSED
+        if reset or not self.enabled:
+            self._release_fleet()
 
     def mark_manual(self) -> None:
         """
         The operator is driving by hand.
         """
         self.state = STATE_MANUAL
+        self._release_fleet()
 
     def mark_paused(self) -> None:
         """
         Auto is off and nobody is driving.
         """
         self.state = STATE_PAUSED
+        self._release_fleet()
+
+    def _release_fleet(self) -> None:
+        """
+        Auto is not deciding any more: give the turn up, once. A delivery
+        counted but not yet reported is dropped with it.
+        """
+        self._unreported_color = None
+        if self.fleet is not None and self._fleet_wants:
+            self._fleet_wants = False
+            self._fleet_call(
+                self.fleet.update, self.state, False, self.carrying
+            )
+
+    def _fleet_call(self, method, *args, default=None):
+        """
+        Call the fleet link; a ROS failure is logged (not every tick) and
+        counts as no turn, instead of killing the control thread.
+        """
+        try:
+            result = method(*args)
+        except Exception:
+            self._fleet_failing = True
+            now = time.monotonic()
+            if now - self._fleet_log_s >= FLEET_LOG_PERIOD_S:
+                self._fleet_log_s = now
+                log.exception("fleet link failed")
+            return default
+        self._fleet_failing = False
+        return result
 
     # ---------- main step ----------
     def step(self, now: float, line_black: bool = False) -> DriveCommand:
         """
         The command for time `now`; `line_black` is the line sensor reading.
+        """
+        self._near_zone = False
+        command = self._decide(now, line_black)
+        self._sync_fleet()
+        return command
+
+    def _sync_fleet(self) -> None:
+        """
+        Tell the fleet what we want. The turn is asked for while carrying
+        close to the area and kept through the push and the back up, so the
+        other robot and the arm stay out until we are clear. A sweep that
+        starts while we hold the turn does not give it up.
+        """
+        if self.fleet is None:
+            return
+        sweeping_with_turn = self.state == STATE_CARRY_SWEEP and (
+            self._fleet_call(self.fleet.granted, default=False)
+        )
+        want = self.state.startswith(PREFIX_DROP) or (
+            self.carrying and (self._near_zone or sweeping_with_turn)
+        )
+        self._fleet_wants = want
+        self._fleet_call(self.fleet.update, self.state, want, self.carrying)
+
+    def _decide(self, now: float, line_black: bool) -> DriveCommand:
+        """
+        The command for time `now`, without telling the fleet.
         """
         if self.state.startswith((PREFIX_DONE, PREFIX_NO_CUBES)):
             return STOP
@@ -455,16 +556,27 @@ class AutoPilot:
         """
         if self.state.startswith(PREFIX_DROP):
             self._finish_drop()
+            self._report_delivery()  # no back up check will run now
         else:
             self.carrying = False
 
     def _finish_drop(self) -> None:
         """
-        The cube is on the delivery area: stop carrying it and count it.
+        The cube is on the delivery area: stop carrying it and count it. The
+        fleet hears about it once the back up confirms it stayed there.
         """
         if self.carrying:
             self.carrying = False
             self.delivered_count += 1
+            self._unreported_color = self._cube_color
+
+    def _report_delivery(self) -> None:
+        """
+        Tell the fleet about the delivery counted by `_finish_drop`, once.
+        """
+        if self.fleet is not None and self._unreported_color is not None:
+            self._fleet_call(self.fleet.delivered, self._unreported_color)
+        self._unreported_color = None
 
     def note_motion(self, now: float, command: DriveCommand) -> None:
         """
@@ -582,9 +694,11 @@ class AutoPilot:
             # the table near the area undid deliveries that were fine.
             self.delivered_count -= 1
             log.info("delivery: cube left outside, not counted")
+            self._unreported_color = None  # Perry must not count it
             self._end_drop(now)
             return None
         if now < backup_until + cfg.deliver_turn_s:
+            self._report_delivery()
             self.state = STATE_DROP_TURN
             return _turn(self._search_dir, cfg.turn_speed)
         self._end_drop(now)
@@ -726,6 +840,7 @@ class AutoPilot:
 
         self.target_info = f"{det.color} {det.distance_m * CM_PER_M:.0f}cm"
         self._last_seen_s = now
+        self._cube_color = det.color
         self._last_bearing_rad = det.bearing_rad
         self._reveal_pending = det.distance_m <= cfg.reveal_max_distance_m
         self._search_start_s = now
@@ -865,8 +980,7 @@ class AutoPilot:
             self._last_paper_bearing_rad = zone.bearing_rad
         elif committed:
             lost_s = now - self._last_paper_s
-            if lost_s < cfg.carry_paper_hold_s:
-                # The paper flickered out: wait for it, do not turn away.
+            if self._wait_for_paper(lost_s):
                 return STOP
             slide_until_s = cfg.carry_paper_hold_s + cfg.carry_paper_slide_s
             off_side = (
@@ -892,11 +1006,17 @@ class AutoPilot:
         self._search_start_s = now
         self._last_zone_s = now
         self._search_dir = _side_of(zone.bearing_rad)
+        if self._must_wait_for_turn(zone):
+            self.state = STATE_CARRY_WAIT_ZONE
+            self.target_info = (
+                "waiting for the turn: no link with Perry"
+                if self._fleet_failing
+                else "waiting for the turn"
+            )
+            return STOP
         # The landmarks only lead there (slowing down near them): the push
         # starts once the paper is in view, from in front of the entry line.
-        commit_m = cfg.deliver_commit_distance_m
-        if committed:
-            commit_m += cfg.deliver_commit_hysteresis_m
+        commit_m = self._commit_distance_m(committed)
         at_paper = paper and (
             zone.distance_m <= commit_m or zone.v >= cfg.floor_arrive_v_px
         )
@@ -910,6 +1030,45 @@ class AutoPilot:
             zone.distance_m,
             stop_distance_m,
             STATE_CARRY,
+        )
+
+    def _commit_distance_m(self, committed: bool) -> float:
+        """
+        Distance to the paper under which the delivery starts; farther once
+        committed, so the blob jittering around it does not undo it.
+        """
+        cfg = self.cfg
+        hysteresis_m = cfg.deliver_commit_hysteresis_m if committed else 0.0
+        return cfg.deliver_commit_distance_m + hysteresis_m
+
+    def _wait_for_paper(self, lost_s: float) -> bool:
+        """
+        True while the committed paper is out of view and the robot should
+        just stand: it flickered out, or we wait for the turn (then never
+        slide or roam toward the area; past carry_zone_timeout_s the cube is
+        taken as lost, as anywhere else).
+        """
+        self._near_zone = True  # keep the turn through a flicker
+        if lost_s < self.cfg.carry_paper_hold_s:
+            return True
+        return (
+            self.state == STATE_CARRY_WAIT_ZONE
+            and lost_s < self.cfg.carry_zone_timeout_s
+        )
+
+    def _must_wait_for_turn(self, zone) -> bool:
+        """
+        True when the area is in the waiting range and the fleet has not
+        granted us the turn. Within the asking range it also marks that the
+        turn is wanted. Alone on the track there is nothing to wait for.
+        """
+        cfg = self.cfg
+        if self.fleet is None or zone.distance_m > cfg.zone_request_distance_m:
+            return False
+        self._near_zone = True
+        in_wait_range = zone.distance_m <= cfg.zone_wait_distance_m
+        return in_wait_range and not self._fleet_call(
+            self.fleet.granted, default=False
         )
 
     def _square_and_drop(self, now: float, zone) -> DriveCommand:

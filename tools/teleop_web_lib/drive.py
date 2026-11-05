@@ -15,6 +15,7 @@ from teleop_web_lib.autopilot import (
     STOP,
     AutoPilot,
     DriveCommand,
+    Fleet,
     Vision,
 )
 from teleop_web_lib.config import AutoConfig
@@ -25,6 +26,8 @@ log = logging.getLogger("teleop_web")
 
 # Pause between two control iterations.
 LOOP_PERIOD_S = 0.02
+# Pause after a failed iteration, so a persistent error does not flood the log.
+FAILURE_PAUSE_S = 1.0
 # How long close() waits for the control thread to finish.
 JOIN_TIMEOUT_S = 1.0
 
@@ -79,6 +82,13 @@ class Drive:
         """
         with self._lock:
             self._pilot.vision = vision
+
+    def set_fleet(self, fleet: Fleet) -> None:
+        """
+        Give the autopilot its link to the other robots.
+        """
+        with self._lock:
+            self._pilot.fleet = fleet
 
     def set_auto(
         self,
@@ -138,37 +148,52 @@ class Drive:
     # ---------- control thread ----------
     def _loop(self) -> None:
         """
-        Read the line sensor, decide the command and drive the motors.
+        Run control iterations; one that fails brakes the motors and is
+        logged, so the thread never dies leaving the wheels turning.
         """
         while self._running:
-            now = time.monotonic()
-            if self._line is not None:
-                self.line_raw = self._line.raw_value()
-                self.line_black = self._line.is_black()
-                self.line_counts = self._line.analog_counts()
-                self._log_line_edge()
-            else:
-                self.line_raw = None
-                self.line_black = False
-                self.line_counts = None
-            command = self._next_command(now)
-            with self._lock:
-                self._pilot.note_motion(now, command)
-                state = self._pilot.state
-            if state != self._logged_state:
-                log.info("state %s -> %s", self._logged_state, state)
-                self._logged_state = state
-            scale = command.speed * self._max_duty
-            # DriveCommand: vy forward, vx strafe right; the kinematics take
-            # (forward, left, ccw), so the wheel names in the config are the
-            # real wheels.
-            ratios = mecanum_wheel_ratios(
-                command.vy,
-                -command.vx,
-                command.wz,
-            )
-            self._motors.set({w: r * scale for w, r in ratios.items()})
+            try:
+                self._iterate()
+            except Exception:
+                log.exception("control iteration failed, braking")
+                try:
+                    self._motors.set(dict.fromkeys(WHEELS, 0.0))
+                except Exception:
+                    log.exception("could not brake the motors")
+                time.sleep(FAILURE_PAUSE_S)
             time.sleep(LOOP_PERIOD_S)
+
+    def _iterate(self) -> None:
+        """
+        Read the line sensor, decide the command and drive the motors.
+        """
+        now = time.monotonic()
+        if self._line is not None:
+            self.line_raw = self._line.raw_value()
+            self.line_black = self._line.is_black()
+            self.line_counts = self._line.analog_counts()
+            self._log_line_edge()
+        else:
+            self.line_raw = None
+            self.line_black = False
+            self.line_counts = None
+        command = self._next_command(now)
+        with self._lock:
+            self._pilot.note_motion(now, command)
+            state = self._pilot.state
+        if state != self._logged_state:
+            log.info("state %s -> %s", self._logged_state, state)
+            self._logged_state = state
+        scale = command.speed * self._max_duty
+        # DriveCommand: vy forward, vx strafe right; the kinematics take
+        # (forward, left, ccw), so the wheel names in the config are the
+        # real wheels.
+        ratios = mecanum_wheel_ratios(
+            command.vy,
+            -command.vx,
+            command.wz,
+        )
+        self._motors.set({w: r * scale for w, r in ratios.items()})
 
     def _log_line_edge(self) -> None:
         """

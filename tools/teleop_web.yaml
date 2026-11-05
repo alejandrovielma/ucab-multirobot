@@ -415,6 +415,21 @@ auto:
   sweep_lateral_m: 0.07
   sweep_turn_s: 0.35
   sweep_retry_s: 6.0
+  # Fleet turns (only with fleet.enabled): ask for the delivery turn this far from the area (m)
+  # and, without it, wait this far away (m). Same as zone_request_margin_m / zone_wait_margin_m in
+  # collector.yaml. TODO measure
+  zone_request_distance_m: 0.45
+  zone_wait_distance_m: 0.30
+
+# Link to Perry's zone arbiter and the other collector. Needs ROS 2 sourced and fleet_link
+# running next to this tool (same ROS_DOMAIN_ID on all Pis). Off: Auto delivers without turns.
+fleet:
+  enabled: false
+  namespace: phineas
+  # zone/granted older than this counts as not granted (fleet_link dead or disconnected).
+  granted_timeout_s: 2.0
+  # Re-send state and wish at least this often, so a restarted fleet_link learns them.
+  republish_period_s: 1.0
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:

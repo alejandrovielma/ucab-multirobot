@@ -75,6 +75,12 @@
     heartbeat_timeout_s: 2.0
     state_rate_hz: 2.0
     renew_period_s: 20.0
+    # A zone request/release with no answer after this long (s) is sent again.
+    call_timeout_s: 3.0
+    # zone/want true not repeated for this long (s) counts as false. 0 = off: behavior_fsm
+    # publishes it only on change; scripts/start_teleop_fleet.sh sets 3.0 (the browser tool
+    # repeats it every second).
+    want_timeout_s: 0.0
 
 /**/motor_driver:
   ros__parameters:

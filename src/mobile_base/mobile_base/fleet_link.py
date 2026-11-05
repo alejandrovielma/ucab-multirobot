@@ -13,7 +13,9 @@ from mobile_base.fleet import (
     FleetLinkParams,
     Heartbeat,
     ZoneClient,
+    call_expired,
     to_fleet_state,
+    want_expired,
 )
 from mobile_base.states import State
 from mobile_base.topics import (
@@ -23,6 +25,7 @@ from mobile_base.topics import (
     SERVICE_ZONE_REQUEST,
     TOPIC_BEHAVIOR_STATE,
     TOPIC_FLEET_OK,
+    TOPIC_PERRY_STATE,
     TOPIC_ROBOT_STATE,
     TOPIC_SCOOP_HAS_CUBE,
     TOPIC_ZONE_DELIVERED,
@@ -69,6 +72,13 @@ class FleetLinkNode(Node):
         self._delivered_total = 0
         self._req_future = None
         self._rel_future = None
+        # When the call in flight was sent (None: none), and the delivery the
+        # release in flight carries, to send it again if it gets no answer.
+        self._req_sent_s: float | None = None
+        self._rel_sent_s: float | None = None
+        self._rel_sent = (False, "")
+        # When zone/want was last heard (None: never).
+        self._want_s: float | None = None
 
         self._create_interfaces()
         self.create_timer(1.0 / params.state_rate_hz, self._publish_state)
@@ -125,6 +135,13 @@ class FleetLinkNode(Node):
             OCCUPANT_QOS,
         )
 
+        self.create_subscription(
+            RobotState,
+            TOPIC_PERRY_STATE,
+            self._on_perry_state,
+            DEFAULT_QOS_DEPTH,
+        )
+
         self._req_client = self.create_client(
             RequestZone,
             SERVICE_ZONE_REQUEST,
@@ -165,6 +182,7 @@ class FleetLinkNode(Node):
         """
         The behaviour wants (or no longer wants) the delivery zone.
         """
+        self._want_s = now_s(self)
         self._zone.update(want=bool(msg.data))
         self._check_zone_services()
 
@@ -183,6 +201,13 @@ class FleetLinkNode(Node):
         self._zone.update(occupant=msg.data)
         self._publish_granted()
 
+    def _on_perry_state(self, msg: RobotState):
+        """
+        Perry closed or reopened its gate: while closed, do not ask for the
+        zone (a turn already held is kept and finished).
+        """
+        self._zone.update(gate_closed=bool(msg.gate_closed))
+
     # ---------- periodic publishing ----------
     def _publish_state(self):
         """
@@ -199,9 +224,11 @@ class FleetLinkNode(Node):
 
     def _publish_granted(self):
         """
-        Publish whether we currently hold the delivery zone.
+        Publish whether we currently hold the delivery zone. Without a fresh
+        arbiter heartbeat the lease cannot be trusted, so it reads as lost.
         """
-        self._pub_granted.publish(Bool(data=self._zone.holds))
+        alive = self._hb.ok(now_s(self))
+        self._pub_granted.publish(Bool(data=self._zone.holds and alive))
 
     def _tick_fleet(self):
         """
@@ -221,12 +248,54 @@ class FleetLinkNode(Node):
         Send a release or a request to the arbiter when one is due and no
         call of that kind is already in flight.
         """
+        self._drop_unanswered_calls()
+        self._drop_stale_want()
         if self._zone.should_release() and self._rel_future is None:
             self._send_release()
         elif (
             self._zone.should_request(now_s(self)) and self._req_future is None
         ):
             self._send_request()
+
+    def _drop_unanswered_calls(self):
+        """
+        Forget a request or release with no answer after call_timeout_s, so
+        it is sent again: one lost answer left Ferb waiting at the area for
+        good. A late answer to a dropped call is ignored.
+        """
+        now = now_s(self)
+        timeout_s = float(self._param("call_timeout_s"))
+        if call_expired(self._req_sent_s, now, timeout_s):
+            self._warn_no_answer(SERVICE_ZONE_REQUEST)
+            self._req_client.remove_pending_request(self._req_future)
+            self._req_future, self._req_sent_s = None, None
+        if call_expired(self._rel_sent_s, now, timeout_s):
+            self._warn_no_answer(SERVICE_ZONE_RELEASE)
+            self._rel_client.remove_pending_request(self._rel_future)
+            self._rel_future, self._rel_sent_s = None, None
+            self._zone.restore_release(*self._rel_sent)
+
+    def _drop_stale_want(self):
+        """
+        A zone/want true not repeated for want_timeout_s means its sender
+        died (the browser tool was killed holding the turn): stop wanting,
+        so a held turn is released instead of renewed for good.
+        """
+        timeout_s = float(self._param("want_timeout_s"))
+        if want_expired(self._zone.want, self._want_s, now_s(self), timeout_s):
+            self.get_logger().warning(
+                f"zone/want not heard for {timeout_s:.1f} s, giving up the turn"
+            )
+            self._zone.update(want=False)
+
+    def _warn_no_answer(self, service: str):
+        """
+        Log (throttled) that a zone call got no answer in time.
+        """
+        self.get_logger().warning(
+            f"{service}: no answer, sending it again",
+            throttle_duration_sec=SERVICE_WARN_THROTTLE_S,
+        )
 
     def _send_release(self):
         """
@@ -240,6 +309,8 @@ class FleetLinkNode(Node):
         req.robot = self._zone.robot
         req.delivered = delivered
         req.color = color
+        self._rel_sent = (delivered, color)
+        self._rel_sent_s = now_s(self)
         self._rel_future = self._rel_client.call_async(req)
         self._rel_future.add_done_callback(self._on_release_done)
 
@@ -253,6 +324,7 @@ class FleetLinkNode(Node):
         self._zone.note_requested(now_s(self))
         req = RequestZone.Request()
         req.robot = self._zone.robot
+        self._req_sent_s = now_s(self)
         self._req_future = self._req_client.call_async(req)
         self._req_future.add_done_callback(self._on_request_done)
 
@@ -269,7 +341,9 @@ class FleetLinkNode(Node):
         """
         Handle the arbiter's answer to a zone request.
         """
-        self._req_future = None
+        if future is not self._req_future:
+            return  # dropped for taking too long
+        self._req_future, self._req_sent_s = None, None
         try:
             res = future.result()
         except Exception as exc:
@@ -285,7 +359,9 @@ class FleetLinkNode(Node):
         """
         Handle the arbiter's answer to a zone release.
         """
-        self._rel_future = None
+        if future is not self._rel_future:
+            return  # dropped for taking too long
+        self._rel_future, self._rel_sent_s = None, None
         try:
             res = future.result()
         except Exception as exc:
