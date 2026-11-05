@@ -888,3 +888,57 @@ def test_the_area_flickering_out_while_carrying_only_stops_the_robot():
     assert pilot.step(0.1) == DriveCommand()  # just lost: wait for it
     assert pilot.step(0.4).wz != 0  # gone for good: look for it
 
+
+def sweeping_pilot():
+    vision = StubVision()
+    pilot = AutoPilot(
+        AutoConfig(**FAST_PHASES, sweep_distance_m=0.14, sweep_retry_s=6.0), vision
+    )
+    pilot.carrying = True
+    pilot.state = "CARRY"
+    vision.zone = Seen("green", 0.60)  # straight ahead: would drive on
+    return pilot, vision
+
+
+def test_a_cube_to_avoid_is_lined_up_outside_the_scoop_before_sweeping():
+    pilot, vision = sweeping_pilot()
+    vision.foreign = Seen("red", 0.25, bearing_rad=0.05)  # would enter the scoop
+    command = pilot.step(0.0)
+    assert command.vx > 0 and command.vy == 0  # slides right, cube on its left
+    assert "lining up" in pilot.target_info
+
+
+def test_a_cube_to_avoid_beside_the_scoop_is_driven_up_to_then_swept():
+    pilot, vision = sweeping_pilot()
+    vision.foreign = Seen("red", 0.25, bearing_rad=0.4)  # 10 cm to the left
+    assert pilot.step(0.0).vy == 1.0
+    vision.foreign = Seen("red", 0.13, bearing_rad=0.8)  # 9 cm to the left
+    assert pilot.step(0.1).wz > 0 and pilot.state == "CARRY (sweep)"  # left
+    vision.foreign = None
+    assert pilot.step(0.2).wz > 0
+    assert pilot.step(0.1 + pilot.cfg.sweep_turn_s + 0.05).wz < 0  # and back
+    pilot.step(0.1 + 2 * pilot.cfg.sweep_turn_s + 0.05)
+    assert pilot.state.startswith("CARRY") and pilot.state != "CARRY (sweep)"
+    assert pilot.carrying
+
+
+def test_a_cube_still_in_the_way_after_a_sweep_is_slid_around():
+    pilot, vision = sweeping_pilot()
+    vision.foreign = Seen("red", 0.13, bearing_rad=0.8)
+    pilot.step(0.0)
+    now = 2 * pilot.cfg.sweep_turn_s + 0.05
+    pilot.step(now)
+    vision.foreign = Seen("red", 0.13, bearing_rad=0.8)
+    command = pilot.step(now + 0.1)
+    assert command.vx > 0 and command.vy == 0 and command.wz == 0  # slides right
+
+
+def test_without_a_cube_in_the_scoop_a_cube_to_avoid_is_not_swept():
+    pilot, vision = sweeping_pilot()
+    pilot.carrying = False
+    pilot.state = "SEARCH"
+    vision.det = Seen("blue", 0.40)
+    vision.foreign = Seen("red", 0.13, bearing_rad=0.2)
+    command = pilot.step(0.0)
+    assert command.vx != 0 and command.wz == 0 and pilot.state != "CARRY (sweep)"
+

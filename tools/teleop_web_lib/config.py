@@ -98,6 +98,14 @@ DEFAULT_CARRY_ZONE_HOLD_S = 0.0
 DEFAULT_FOREIGN_AVOID_DISTANCE_M = 0.30
 DEFAULT_FOREIGN_CLEARANCE_M = 0.12
 DEFAULT_FOREIGN_EXIT_MARGIN_M = 0.03
+# Carrying a cube, first try to knock a cube to avoid off the path: drive up to
+# sweep_distance_m (m; 0 = never try) with it at least sweep_lateral_m (m) to a
+# side, so it stays outside the scoop, then turn toward it for sweep_turn_s (s)
+# and back. For the next sweep_retry_s (s) the robot slides around it instead.
+DEFAULT_SWEEP_DISTANCE_M = 0.0
+DEFAULT_SWEEP_LATERAL_M = 0.07
+DEFAULT_SWEEP_TURN_S = 0.35
+DEFAULT_SWEEP_RETRY_S = 6.0
 # Delivery: with the paper's near edge this close (m), face the pink entry
 # line squarely (within entry_square_tolerance_rad), slide sideways at
 # strafe_speed until the paper's centre is within drop_align_tolerance_rad,
@@ -230,6 +238,10 @@ class AutoConfig:
     foreign_avoid_distance_m: float = DEFAULT_FOREIGN_AVOID_DISTANCE_M
     foreign_clearance_m: float = DEFAULT_FOREIGN_CLEARANCE_M
     foreign_exit_margin_m: float = DEFAULT_FOREIGN_EXIT_MARGIN_M
+    sweep_distance_m: float = DEFAULT_SWEEP_DISTANCE_M
+    sweep_lateral_m: float = DEFAULT_SWEEP_LATERAL_M
+    sweep_turn_s: float = DEFAULT_SWEEP_TURN_S
+    sweep_retry_s: float = DEFAULT_SWEEP_RETRY_S
     deliver_commit_distance_m: float = DEFAULT_DELIVER_COMMIT_DISTANCE_M
     deliver_insert_m: float = DEFAULT_DELIVER_INSERT_M
     forward_speed_mps: float = DEFAULT_FORWARD_SPEED_MPS

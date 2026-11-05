@@ -409,6 +409,12 @@ auto:
   foreign_avoid_distance_m: 0.30
   foreign_clearance_m: 0.12
   foreign_exit_margin_m: 0.03
+  # Carrying a cube, try to knock a cube to avoid off the path before going around it (config.py).
+  # PROVISIONAL: the scoop's width and reach were never measured.
+  sweep_distance_m: 0.14
+  sweep_lateral_m: 0.07
+  sweep_turn_s: 0.35
+  sweep_retry_s: 6.0
 
 # Strict 3x3 cm cube filter: rejects large/flat/irregular objects.
 detection:
@@ -432,15 +438,6 @@ overhead:
   # bottom-left). Measure them again whenever the phone moves: the robot is the dark blob inside it.
   arena_px: [[122, 54], [531, 56], [636, 264], [636, 279], [8, 279]]  # 2026-11-04: right corner out of view
 
-# Second phone, opposite side of the track: same settings. Its view cuts the track's bottom-left
-# corner, and the area falls on the right of the frame.
-overhead_2:
-  url: http://10.76.16.26:4747/video
-  width_px: 640
-  jpeg_quality: 60
-  fps: 15
-  arena_px: [[108, 106], [514, 108], [590, 350], [0, 350], [0, 303]]  # 2026-11-04
-  zone_columns: [0.75, 1.0]
 
 server:
   host: 0.0.0.0

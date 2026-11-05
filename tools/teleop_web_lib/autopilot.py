@@ -66,6 +66,7 @@ SUFFIX_ALIGN = " (align)"
 # slide in front of the area's centre, or wait when the line is not in view.
 STATE_CARRY_SQUARE = f"{STATE_CARRY} (square)"
 STATE_CARRY_CENTER = f"{STATE_CARRY} (center)"
+STATE_CARRY_SWEEP = f"{STATE_CARRY} (sweep)"
 STATE_CARRY_NO_ENTRY = f"{STATE_CARRY} (no entry line)"
 # Squaring up at the paper: committed to delivering from there.
 COMMITTED_CARRY_STATES = (
@@ -215,6 +216,12 @@ class AutoPilot:
         self._last_zone_s = -math.inf
         # Slide direction around a cube to avoid, fixed until it is clear.
         self._dodge_dir: float | None = None
+        # The sweep turns toward the cube until the first time and back until
+        # the second; no new sweep until the third (it slides around instead).
+        self._sweep_dir = DIR_RIGHT
+        self._sweep_out_until = 0.0
+        self._sweep_back_until = 0.0
+        self._sweep_again_at = 0.0
         # When the robot last had something to do (start, a cube seen, a
         # delivery): the search gives up no_cubes_stop_s after it.
         self._idle_start_s = self._search_start_s
@@ -272,7 +279,13 @@ class AutoPilot:
         self._line_black = line_black
         if line_black and not self.state.startswith(PREFIX_LINE):
             self._start_line_recovery(now)
-        for phase in (self._line_phase, self._catch_phase, self._drop_phase):
+        phases = (
+            self._line_phase,
+            self._catch_phase,
+            self._drop_phase,
+            self._sweep_phase,
+        )
+        for phase in phases:
             command = phase(now)
             if command is not None:
                 return command
@@ -299,6 +312,9 @@ class AutoPilot:
             return command
         if self._dodge_dir is None:
             self._dodge_dir = -_side_of(cube.bearing_rad)
+        sweep = self._sweep_step(now, cube, command)
+        if sweep is not None:
+            return sweep
         if self.state == STATE_CATCH:
             self.state = STATE_APPROACH
         elif self.state.startswith(PREFIX_DROP):
@@ -307,6 +323,58 @@ class AutoPilot:
             f"avoiding {cube.color} {cube.distance_m * CM_PER_M:.0f}cm"
         )
         return _strafe(self._dodge_dir, self.cfg.strafe_speed)
+
+    def _sweep_step(
+        self,
+        now: float,
+        cube,
+        command: DriveCommand,
+    ) -> DriveCommand | None:
+        """
+        With a cube in the scoop, try to knock the cube to avoid off the path
+        with the side of the scoop before going around it: keep it outside the
+        scoop (straight into it, it would be pushed along to the area), drive
+        up to it and turn toward it. None = slide around it instead.
+        """
+        cfg = self.cfg
+        if not cfg.sweep_distance_m or not self.carrying:
+            return None
+        if now < self._sweep_again_at:
+            return None
+        lateral_m = cube.distance_m * math.sin(abs(cube.bearing_rad))
+        if lateral_m < cfg.sweep_lateral_m:
+            self.target_info = f"clearing {cube.color}: lining up"
+            return _strafe(self._dodge_dir, cfg.strafe_speed)
+        if cube.distance_m > cfg.sweep_distance_m:
+            self.target_info = f"clearing {cube.color}: driving up"
+            return command
+        log.info(
+            "sweep: %s at %.3f m, %.3f m to a side",
+            cube.color,
+            cube.distance_m,
+            lateral_m,
+        )
+        self._sweep_dir = _side_of(cube.bearing_rad)
+        self._sweep_out_until = now + cfg.sweep_turn_s
+        self._sweep_back_until = now + 2 * cfg.sweep_turn_s
+        self._sweep_again_at = self._sweep_back_until + cfg.sweep_retry_s
+        self.state = STATE_CARRY_SWEEP
+        self.target_info = f"clearing {cube.color}"
+        return _turn(self._sweep_dir, cfg.turn_speed)
+
+    def _sweep_phase(self, now: float) -> DriveCommand | None:
+        """
+        The sweep's two turns: toward the cube and back to the same heading.
+        """
+        if self.state != STATE_CARRY_SWEEP:
+            return None
+        if now < self._sweep_out_until:
+            return _turn(self._sweep_dir, self.cfg.turn_speed)
+        if now < self._sweep_back_until:
+            return _turn(-self._sweep_dir, self.cfg.turn_speed)
+        self.state = STATE_CARRY
+        self._search_start_s = now
+        return None
 
     def _foreign_in_way(self, now: float, command: DriveCommand):
         """
